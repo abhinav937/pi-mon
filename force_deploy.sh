@@ -14,22 +14,25 @@ CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 # Configuration
-PROJECT_NAME="pi-monitor"
+PROJECT_NAME="pi-mon"
+COMPOSE_CMD="docker-compose"
 COMPOSE_FILE="$COMPOSE_CMD.yml"
 CONFLICTING_SERVICES=("redis" "redis-server" "mosquitto")
 CONFLICTING_PORTS=(6379 1883 5000 80 9001)
 
 # Docker Compose command setup
 setup_compose_command() {
-    COMPOSE_CMD="$COMPOSE_CMD"
+    # COMPOSE_CMD is already initialized to docker-compose at the top
+    # This function will modify it based on dev/prod mode
+    BASE_COMPOSE_CMD="docker-compose"
     
     if [[ "$DEV_MODE" == true ]]; then
         # Development mode - add dev overrides if they exist
-        if [[ -f "$COMPOSE_CMD.dev.yml" ]]; then
-            COMPOSE_CMD="$COMPOSE_CMD -f $COMPOSE_CMD.yml -f $COMPOSE_CMD.dev.yml"
+        if [[ -f "${BASE_COMPOSE_CMD}.dev.yml" ]]; then
+            COMPOSE_CMD="$BASE_COMPOSE_CMD -f ${BASE_COMPOSE_CMD}.yml -f ${BASE_COMPOSE_CMD}.dev.yml"
             log_verbose "Using development compose configuration"
         else
-            log_verbose "Development mode requested but no $COMPOSE_CMD.dev.yml found"
+            log_verbose "Development mode requested but no ${BASE_COMPOSE_CMD}.dev.yml found"
         fi
         
         # Set development environment variables
@@ -40,11 +43,11 @@ setup_compose_command() {
         
     elif [[ "$PROD_MODE" == true ]]; then
         # Production mode - add prod overrides if they exist
-        if [[ -f "$COMPOSE_CMD.prod.yml" ]]; then
-            COMPOSE_CMD="$COMPOSE_CMD -f $COMPOSE_CMD.yml -f $COMPOSE_CMD.prod.yml"
+        if [[ -f "${BASE_COMPOSE_CMD}.prod.yml" ]]; then
+            COMPOSE_CMD="$BASE_COMPOSE_CMD -f ${BASE_COMPOSE_CMD}.yml -f ${BASE_COMPOSE_CMD}.prod.yml"
             log_verbose "Using production compose configuration"
         else
-            log_verbose "Production mode requested but no $COMPOSE_CMD.prod.yml found"
+            log_verbose "Production mode requested but no ${BASE_COMPOSE_CMD}.prod.yml found"
         fi
         
         # Set production environment variables
@@ -260,7 +263,7 @@ else
 fi
 
 if [[ "$SKIP_CLEANUP" == false ]]; then
-    echo -e "${YELLOW}⚠️  This will completely remove all existing pi-monitor containers, images, and volumes!${NC}"
+    echo -e "${YELLOW}⚠️  This will completely remove all existing pi-mon containers, images, and volumes!${NC}"
 fi
 echo ""
 
@@ -339,7 +342,7 @@ echo -e "${GREEN}✅ Docker and Docker Compose are ready${NC}"
 # Step 2: Check for $COMPOSE_CMD.yml
 if [[ ! -f "$COMPOSE_FILE" ]]; then
     echo -e "${RED}❌ $COMPOSE_FILE not found!${NC}"
-    echo "Please run this script from the pi-monitor directory."
+    echo "Please run this script from the pi-mon directory."
     exit 1
 fi
 
@@ -402,32 +405,32 @@ if [[ "$SKIP_CLEANUP" == false ]]; then
     echo ""
     echo -e "${BLUE}🧹 Performing complete Docker cleanup...${NC}"
 
-    # Stop all pi-monitor containers
+    # Stop all pi-mon containers
     log_verbose "Stopping containers..."
-    echo -e "${YELLOW}  🛑 Stopping all pi-monitor containers...${NC}"
+    echo -e "${YELLOW}  🛑 Stopping all pi-mon containers...${NC}"
     $COMPOSE_CMD down --remove-orphans || echo "No containers to stop"
 
-    # Remove all pi-monitor containers (including stopped ones)
+    # Remove all pi-mon containers (including stopped ones)
     containers=$(docker ps -aq --filter "name=$PROJECT_NAME" 2>/dev/null || true)
     if [[ -n "$containers" ]]; then
         log_verbose "Found containers to remove: $containers"
-        echo -e "${YELLOW}  🗑️  Removing all pi-monitor containers...${NC}"
+        echo -e "${YELLOW}  🗑️  Removing all pi-mon containers...${NC}"
         docker rm -f $containers || echo "Some containers couldn't be removed"
     fi
 
-    # Remove all pi-monitor images
+    # Remove all pi-mon images
     images=$(docker images --filter "reference=*$PROJECT_NAME*" -q 2>/dev/null || true)
     if [[ -n "$images" ]]; then
         log_verbose "Found images to remove: $images"
-        echo -e "${YELLOW}  🗑️  Removing all pi-monitor images...${NC}"
+        echo -e "${YELLOW}  🗑️  Removing all pi-mon images...${NC}"
         docker rmi -f $images || echo "Some images couldn't be removed"
     fi
 
-    # Remove all pi-monitor volumes
+    # Remove all pi-mon volumes
     volumes=$(docker volume ls --filter "name=$PROJECT_NAME" -q 2>/dev/null || true)
     if [[ -n "$volumes" ]]; then
         log_verbose "Found volumes to remove: $volumes"
-        echo -e "${YELLOW}  🗑️  Removing all pi-monitor volumes...${NC}"
+        echo -e "${YELLOW}  🗑️  Removing all pi-mon volumes...${NC}"
         docker volume rm $volumes || echo "Some volumes couldn't be removed"
     fi
 
@@ -622,7 +625,7 @@ echo ""
 echo -e "${CYAN}🔌 Port Status:${NC}"
 for port in "${CONFLICTING_PORTS[@]}"; do
     if check_port "$port"; then
-        echo -e "${GREEN}  ✅ Port $port: In use (by pi-monitor)${NC}"
+        echo -e "${GREEN}  ✅ Port $port: In use (by pi-mon)${NC}"
     else
         echo -e "${RED}  ❌ Port $port: Not in use${NC}"
     fi

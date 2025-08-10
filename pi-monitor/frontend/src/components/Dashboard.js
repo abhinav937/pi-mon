@@ -1,0 +1,311 @@
+import React, { useState, useEffect } from 'react';
+import { useQuery } from 'react-query';
+import { Cpu, HardDrive, Thermometer, Activity, Clock, Wifi } from 'lucide-react';
+import toast from 'react-hot-toast';
+
+const Dashboard = ({ unifiedClient }) => {
+  const [realTimeData, setRealTimeData] = useState(null);
+
+  // Query for system stats
+  const { data: systemStats, isLoading, error, refetch } = useQuery(
+    'systemStats',
+    async () => {
+      if (!unifiedClient) return null;
+      return await unifiedClient.getSystemStats();
+    },
+    {
+      enabled: !!unifiedClient,
+      refetchInterval: 5000, // Refetch every 5 seconds as fallback
+      onError: (err) => {
+        toast.error('Failed to fetch system statistics');
+        console.error('System stats error:', err);
+      },
+    }
+  );
+
+  // Listen for real-time updates
+  useEffect(() => {
+    if (!unifiedClient) return;
+
+    const originalOnDataUpdate = unifiedClient.onDataUpdate;
+    unifiedClient.onDataUpdate = (data) => {
+      if (data.type === 'initial_stats' || data.type === 'periodic_update' || data.type === 'mqtt_update') {
+        setRealTimeData(data.data || data);
+      }
+      originalOnDataUpdate(data);
+    };
+
+    return () => {
+      unifiedClient.onDataUpdate = originalOnDataUpdate;
+    };
+  }, [unifiedClient]);
+
+  // Use real-time data if available, otherwise fall back to query data
+  const currentData = realTimeData || systemStats;
+
+  const getStatusColor = (percentage) => {
+    if (percentage >= 90) return 'text-red-600';
+    if (percentage >= 70) return 'text-yellow-600';
+    return 'text-green-600';
+  };
+
+  const getProgressBarColor = (percentage) => {
+    if (percentage >= 90) return 'bg-red-500';
+    if (percentage >= 70) return 'bg-yellow-500';
+    return 'bg-green-500';
+  };
+
+  const formatBytes = (bytes) => {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  };
+
+  const formatNetworkRate = (bytesPerSecond) => {
+    return formatBytes(bytesPerSecond) + '/s';
+  };
+
+  if (isLoading) {
+    return (
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {[...Array(6)].map((_, i) => (
+          <div key={i} className="metric-card animate-pulse">
+            <div className="skeleton h-8 w-24 mb-2"></div>
+            <div className="skeleton h-12 w-32 mb-4"></div>
+            <div className="skeleton h-2 w-full"></div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (error && !currentData) {
+    return (
+      <div className="metric-card bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800">
+        <div className="text-center">
+          <div className="text-red-600 dark:text-red-400 text-4xl mb-4">⚠️</div>
+          <h3 className="text-lg font-semibold text-red-800 dark:text-red-200 mb-2">
+            Unable to load system data
+          </h3>
+          <p className="text-red-600 dark:text-red-400 mb-4">
+            {error.message || 'Failed to connect to the Pi Monitor server'}
+          </p>
+          <button
+            onClick={() => refetch()}
+            className="button-primary bg-red-600 hover:bg-red-700"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!currentData) {
+    return (
+      <div className="metric-card">
+        <div className="text-center text-gray-500 dark:text-gray-400">
+          No system data available
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
+          System Overview
+        </h2>
+        <div className="flex items-center space-x-2 text-sm text-gray-500 dark:text-gray-400">
+          <Activity className="h-4 w-4" />
+          <span>Live Data</span>
+        </div>
+      </div>
+
+      {/* Main Metrics Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {/* CPU Usage */}
+        <div className="metric-card">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center space-x-3">
+              <div className="p-2 bg-blue-100 dark:bg-blue-900 rounded-lg">
+                <Cpu className="h-6 w-6 text-blue-600 dark:text-blue-400" />
+              </div>
+              <div>
+                <p className="metric-label">CPU Usage</p>
+                <p className={`metric-value ${getStatusColor(currentData.cpu_percent)}`}>
+                  {currentData.cpu_percent?.toFixed(1)}%
+                </p>
+              </div>
+            </div>
+          </div>
+          <div className="progress-bar">
+            <div
+              className={`progress-bar-fill ${getProgressBarColor(currentData.cpu_percent)}`}
+              style={{ width: `${Math.min(currentData.cpu_percent, 100)}%` }}
+            />
+          </div>
+        </div>
+
+        {/* Memory Usage */}
+        <div className="metric-card">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center space-x-3">
+              <div className="p-2 bg-purple-100 dark:bg-purple-900 rounded-lg">
+                <Activity className="h-6 w-6 text-purple-600 dark:text-purple-400" />
+              </div>
+              <div>
+                <p className="metric-label">Memory</p>
+                <p className={`metric-value ${getStatusColor(currentData.memory_percent)}`}>
+                  {currentData.memory_percent?.toFixed(1)}%
+                </p>
+              </div>
+            </div>
+          </div>
+          <div className="progress-bar">
+            <div
+              className={`progress-bar-fill ${getProgressBarColor(currentData.memory_percent)}`}
+              style={{ width: `${Math.min(currentData.memory_percent, 100)}%` }}
+            />
+          </div>
+        </div>
+
+        {/* Disk Usage */}
+        <div className="metric-card">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center space-x-3">
+              <div className="p-2 bg-green-100 dark:bg-green-900 rounded-lg">
+                <HardDrive className="h-6 w-6 text-green-600 dark:text-green-400" />
+              </div>
+              <div>
+                <p className="metric-label">Disk Space</p>
+                <p className={`metric-value ${getStatusColor(currentData.disk_percent)}`}>
+                  {currentData.disk_percent?.toFixed(1)}%
+                </p>
+              </div>
+            </div>
+          </div>
+          <div className="progress-bar">
+            <div
+              className={`progress-bar-fill ${getProgressBarColor(currentData.disk_percent)}`}
+              style={{ width: `${Math.min(currentData.disk_percent, 100)}%` }}
+            />
+          </div>
+        </div>
+
+        {/* Temperature */}
+        <div className="metric-card">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center space-x-3">
+              <div className="p-2 bg-red-100 dark:bg-red-900 rounded-lg">
+                <Thermometer className="h-6 w-6 text-red-600 dark:text-red-400" />
+              </div>
+              <div>
+                <p className="metric-label">Temperature</p>
+                <p className={`metric-value ${currentData.temperature > 70 ? 'text-red-600' : currentData.temperature > 60 ? 'text-yellow-600' : 'text-green-600'}`}>
+                  {currentData.temperature?.toFixed(1)}°C
+                </p>
+              </div>
+            </div>
+          </div>
+          <div className="text-sm text-gray-500 dark:text-gray-400">
+            {currentData.temperature > 80 && (
+              <span className="status-badge-error">🔥 High Temperature</span>
+            )}
+            {currentData.temperature <= 80 && currentData.temperature > 70 && (
+              <span className="status-badge-warning">⚠️ Warm</span>
+            )}
+            {currentData.temperature <= 70 && (
+              <span className="status-badge-success">✅ Normal</span>
+            )}
+          </div>
+        </div>
+
+        {/* Uptime */}
+        <div className="metric-card">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center space-x-3">
+              <div className="p-2 bg-indigo-100 dark:bg-indigo-900 rounded-lg">
+                <Clock className="h-6 w-6 text-indigo-600 dark:text-indigo-400" />
+              </div>
+              <div>
+                <p className="metric-label">Uptime</p>
+                <p className="metric-value text-indigo-600 dark:text-indigo-400">
+                  {currentData.uptime}
+                </p>
+              </div>
+            </div>
+          </div>
+          <div className="text-sm text-gray-500 dark:text-gray-400">
+            System running stable
+          </div>
+        </div>
+
+        {/* Network Activity */}
+        <div className="metric-card">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center space-x-3">
+              <div className="p-2 bg-cyan-100 dark:bg-cyan-900 rounded-lg">
+                <Wifi className="h-6 w-6 text-cyan-600 dark:text-cyan-400" />
+              </div>
+              <div>
+                <p className="metric-label">Network</p>
+                <p className="text-lg font-semibold text-gray-900 dark:text-white">
+                  Active
+                </p>
+              </div>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2 text-sm">
+            <div>
+              <span className="text-gray-500 dark:text-gray-400">↑ TX:</span>
+              <span className="ml-1 font-medium text-green-600 dark:text-green-400">
+                {currentData.network?.bytes_sent_rate ? formatNetworkRate(currentData.network.bytes_sent_rate) : formatBytes(currentData.network?.bytes_sent || 0)}
+              </span>
+            </div>
+            <div>
+              <span className="text-gray-500 dark:text-gray-400">↓ RX:</span>
+              <span className="ml-1 font-medium text-blue-600 dark:text-blue-400">
+                {currentData.network?.bytes_recv_rate ? formatNetworkRate(currentData.network.bytes_recv_rate) : formatBytes(currentData.network?.bytes_recv || 0)}
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* System Status Summary */}
+      <div className="metric-card">
+        <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+          System Status
+        </h3>
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="flex items-center space-x-3">
+            <div className={`w-3 h-3 rounded-full ${currentData.cpu_percent > 80 ? 'bg-red-500' : currentData.cpu_percent > 60 ? 'bg-yellow-500' : 'bg-green-500'}`}></div>
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">CPU</span>
+          </div>
+          <div className="flex items-center space-x-3">
+            <div className={`w-3 h-3 rounded-full ${currentData.memory_percent > 80 ? 'bg-red-500' : currentData.memory_percent > 60 ? 'bg-yellow-500' : 'bg-green-500'}`}></div>
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Memory</span>
+          </div>
+          <div className="flex items-center space-x-3">
+            <div className={`w-3 h-3 rounded-full ${currentData.disk_percent > 90 ? 'bg-red-500' : currentData.disk_percent > 70 ? 'bg-yellow-500' : 'bg-green-500'}`}></div>
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Storage</span>
+          </div>
+          <div className="flex items-center space-x-3">
+            <div className={`w-3 h-3 rounded-full ${currentData.temperature > 70 ? 'bg-red-500' : currentData.temperature > 60 ? 'bg-yellow-500' : 'bg-green-500'}`}></div>
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Temperature</span>
+          </div>
+        </div>
+        <div className="mt-4 text-sm text-gray-500 dark:text-gray-400">
+          Last updated: {currentData.timestamp ? new Date(currentData.timestamp).toLocaleString() : 'Unknown'}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default Dashboard;

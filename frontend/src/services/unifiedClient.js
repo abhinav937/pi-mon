@@ -36,7 +36,7 @@ const CONNECTION_STATES = {
 
 class UnifiedClient {
   constructor(options = {}) {
-    this.serverUrl = options.serverUrl || 'http://localhost:5000';
+    this.serverUrl = options.serverUrl || `http://${window.location.hostname}:5000`;
     this.onConnectionChange = options.onConnectionChange || (() => {});
     this.onDataUpdate = options.onDataUpdate || (() => {});
     

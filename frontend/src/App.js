@@ -49,7 +49,9 @@ function App() {
   // Initialize unified client
   useEffect(() => {
     const client = new UnifiedClient({
-      serverUrl: process.env.REACT_APP_SERVER_URL || 'http://localhost:5000',
+      serverUrl: process.env.REACT_APP_SERVER_URL === 'dynamic' 
+        ? `http://${window.location.hostname}:5000` 
+        : (process.env.REACT_APP_SERVER_URL || `http://${window.location.hostname}:5000`),
       onConnectionChange: (status) => {
         setConnectionStatus(status);
       },

@@ -1,0 +1,8 @@
+{
+  "short_name": "Pi Monitor",
+  "name": "Pi Monitor Dashboard",
+  "start_url": ".",
+  "display": "standalone",
+  "theme_color": "#000000",
+  "background_color": "#ffffff"
+}

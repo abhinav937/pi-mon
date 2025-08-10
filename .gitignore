@@ -121,7 +121,7 @@ jspm_packages/
 
 # Gatsby
 .cache/
-public/
+# public/ - Commented out for React (public/ contains source files that should be tracked)
 
 # Storybook
 .out/

@@ -18,8 +18,12 @@ RUN if [ -f package-lock.json ]; then \
     fi && \
     npm cache clean --force
 
+# Copy public directory first (required for React build)
+COPY public/ ./public/
+
 # Copy source code
-COPY . .
+COPY src/ ./src/
+COPY tailwind.config.js ./
 
 # Build the React app
 RUN npm run build

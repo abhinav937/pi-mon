@@ -197,12 +197,31 @@ docker-compose pull || echo "Pull completed with warnings"
 echo -e "${YELLOW}  🔨 Building application images...${NC}"
 docker-compose build --no-cache --pull
 
-# Step 7: Start services
+# Step 7: Create Python virtual environment for host tools (optional)
+echo ""
+echo -e "${BLUE}🐍 Setting up Python virtual environment for host tools...${NC}"
+if command -v python3 &>/dev/null; then
+    if [[ ! -d "venv" ]]; then
+        echo -e "${YELLOW}  📦 Creating virtual environment...${NC}"
+        python3 -m venv venv
+    fi
+    
+    if [[ -f "backend/requirements.txt" ]]; then
+        echo -e "${YELLOW}  📥 Installing Python packages in venv...${NC}"
+        venv/bin/pip install --upgrade pip --quiet
+        venv/bin/pip install -r backend/requirements.txt --quiet
+        echo -e "${GREEN}    ✅ Python packages installed in venv${NC}"
+    fi
+else
+    echo -e "${YELLOW}    ⚠️  Python3 not found - skipping host venv setup${NC}"
+fi
+
+# Step 8: Start services
 echo ""
 echo -e "${BLUE}🚀 Starting services...${NC}"
 docker-compose up -d
 
-# Step 8: Wait and perform health checks
+# Step 9: Wait and perform health checks
 echo ""
 echo -e "${BLUE}🏥 Performing health checks...${NC}"
 sleep 10
@@ -248,7 +267,7 @@ else
     docker-compose logs frontend --tail=10
 fi
 
-# Step 9: Final verification
+# Step 10: Final verification
 echo ""
 echo -e "${BLUE}📋 Final verification...${NC}"
 
@@ -302,6 +321,16 @@ echo "  Test backend:    curl http://localhost:5000/health"
 echo "  Test frontend:   curl http://localhost:80"
 echo "  Test Redis:      docker-compose exec redis redis-cli ping"
 echo "  Test MQTT:       docker-compose exec mosquitto mosquitto_pub -h localhost -t test -m hello"
+echo ""
+echo -e "${CYAN}🐍 Python Virtual Environment (for host commands):${NC}"
+if [[ -d "venv" ]]; then
+    echo "  Virtual env:     source venv/bin/activate"
+    echo "  Run agent:       venv/bin/python backend/agent.py"
+    echo "  Install package: venv/bin/pip install <package>"
+    echo "  Deactivate:      deactivate"
+else
+    echo "  Not created - run deployment again to set up venv"
+fi
 echo ""
 
 # Final status check

@@ -18,7 +18,7 @@ PROJECT_NAME="pi-mon"
 COMPOSE_CMD="docker-compose"
 COMPOSE_FILE="$COMPOSE_CMD.yml"
 CONFLICTING_SERVICES=("redis" "redis-server" "mosquitto")
-CONFLICTING_PORTS=(6379 1883 5000 80 9001)
+CONFLICTING_PORTS=(6379 1883 5001 80 9001)
 
 # Docker Compose command setup
 setup_compose_command() {
@@ -134,13 +134,14 @@ show_help() {
     echo -e "${CYAN}SERVICES DEPLOYED:${NC}"
     echo "  • Redis (Cache & Session Storage) - Port 6379"
     echo "  • Mosquitto MQTT Broker - Ports 1883, 9001"
-    echo "  • Backend API (FastAPI) - Port 5000"
+    echo "  • Backend API (FastAPI) - Port 5001"
     echo "  • Frontend (React + Nginx) - Port 80"
     echo ""
     echo -e "${CYAN}POST-DEPLOYMENT:${NC}"
-    echo "  Frontend:     http://localhost"
-    echo "  Backend API:  http://localhost:5000"
-    echo "  Health Check: http://localhost:5000/health"
+    NETWORK_IP=$(get_network_ip)
+    echo "  Frontend:     http://localhost   or   http://$NETWORK_IP"
+    echo "  Backend API:  http://localhost:5001   or   http://$NETWORK_IP:5001"
+    echo "  Health Check: http://localhost:5001/health   or   http://$NETWORK_IP:5001/health"
     echo ""
     echo -e "${CYAN}QUICK REFERENCE (Shortcuts):${NC}"
     echo "  -y = --yes           -q = --quick         -v = --verbose"
@@ -302,6 +303,32 @@ find_port_user() {
     netstat -tulpn 2>/dev/null | grep ":$port " || ss -tulpn 2>/dev/null | grep ":$port " || echo "  No specific process found"
 }
 
+# Function to get the Pi's network IP address
+get_network_ip() {
+    # Try multiple methods to get the network IP
+    local ip=""
+    
+    # Method 1: ip route (most reliable)
+    ip=$(ip route get 8.8.8.8 2>/dev/null | grep -oP 'src \K[^\s]+' | head -1)
+    
+    # Method 2: hostname -I (fallback)
+    if [[ -z "$ip" ]]; then
+        ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+    fi
+    
+    # Method 3: ifconfig (legacy fallback)
+    if [[ -z "$ip" ]]; then
+        ip=$(ifconfig 2>/dev/null | grep 'inet ' | grep -v '127.0.0.1' | awk '{print $2}' | head -1)
+    fi
+    
+    # Default fallback
+    if [[ -z "$ip" ]]; then
+        ip="<Pi-IP>"
+    fi
+    
+    echo "$ip"
+}
+
 # Function to stop system services safely
 stop_system_service() {
     local service=$1
@@ -388,7 +415,7 @@ if [[ "$conflicts_found" == true ]]; then
             pids=$(netstat -tlnp 2>/dev/null | grep ":$port " | awk '{print $7}' | cut -d'/' -f1 | grep -E '^[0-9]+$' || true)
             if [[ -n "$pids" ]]; then
                 for pid in $pids; do
-                    if ps -p "$pid" -o comm= 2>/dev/null | grep -E "(redis|mosquitto)" &>/dev/null; then
+                    if ps -p "$pid" -o comm= 2>/dev/null | grep -E "(redis|mosquitto|python)" &>/dev/null; then
                         echo -e "${YELLOW}    🔪 Killing process $pid using port $port${NC}"
                         sudo kill -TERM "$pid" 2>/dev/null || true
                         sleep 2
@@ -398,6 +425,44 @@ if [[ "$conflicts_found" == true ]]; then
             fi
         fi
     done
+    
+    # Wait a moment for processes to fully terminate
+    echo -e "${BLUE}  ⏳ Waiting for processes to terminate...${NC}"
+    sleep 3
+    
+    # Verify ports are now free
+    echo ""
+    echo -e "${BLUE}🔍 Verifying ports are now free...${NC}"
+    remaining_conflicts=false
+    for port in "${CONFLICTING_PORTS[@]}"; do
+        if check_port "$port"; then
+            echo -e "${RED}  ❌ Port $port is still in use after cleanup attempt${NC}"
+            find_port_user "$port"
+            remaining_conflicts=true
+        else
+            echo -e "${GREEN}  ✅ Port $port is now free${NC}"
+        fi
+    done
+    
+    # If ports are still in use, warn user but continue (they might be using different ports)
+    if [[ "$remaining_conflicts" == true ]]; then
+        echo ""
+        echo -e "${RED}⚠️  WARNING: Some ports are still in use!${NC}"
+        echo -e "${YELLOW}This deployment will continue, but may fail if these ports conflict with your services.${NC}"
+        echo -e "${YELLOW}Consider checking your docker-compose.yml port mappings or stopping the conflicting processes manually.${NC}"
+        
+        if [[ "$SKIP_CONFIRMATION" == false ]]; then
+            echo ""
+            read -p "Do you want to continue anyway? (y/N): " -n 1 -r
+            echo
+            if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+                echo "Deployment cancelled due to port conflicts."
+                exit 1
+            fi
+        fi
+    else
+        echo -e "${GREEN}✅ All port conflicts resolved successfully${NC}"
+    fi
 fi
 
 # Step 5: Complete Docker cleanup (unless --no-cleanup)
@@ -586,8 +651,8 @@ if [[ "$SKIP_HEALTH_CHECK" == false ]]; then
     if [[ "$FRONTEND_ONLY" == false ]] && $COMPOSE_CMD ps backend | grep -q "Up"; then
         echo -e "${YELLOW}    🔍 Testing backend...${NC}"
         sleep 5
-        log_verbose "Testing backend API at http://localhost:5000/health"
-        if curl -f -s http://localhost:5000/health &>/dev/null; then
+        log_verbose "Testing backend API at http://localhost:5001/health"
+        if curl -f -s http://localhost:5001/health &>/dev/null; then
             echo -e "${GREEN}    ✅ Backend is healthy and responding${NC}"
         else
             echo -e "${YELLOW}    ⚠️  Backend health check failed - checking logs...${NC}"
@@ -673,13 +738,16 @@ fi
 echo ""
 echo -e "${CYAN}📊 Deployment Information:${NC}"
 
+# Get network IP for URLs
+NETWORK_IP=$(get_network_ip)
+
 # Show URLs based on what was deployed
 if [[ "$BACKEND_ONLY" == false ]]; then
-    echo "  Frontend URL:    http://localhost:80"
+    echo "  Frontend URL:    http://localhost:80   or   http://$NETWORK_IP:80"
 fi
 if [[ "$FRONTEND_ONLY" == false ]]; then
-    echo "  Backend API:     http://localhost:5000"
-    echo "  Backend Health:  http://localhost:5000/health"
+    echo "  Backend API:     http://localhost:5001   or   http://$NETWORK_IP:5001"
+    echo "  Backend Health:  http://localhost:5001/health   or   http://$NETWORK_IP:5001/health"
     echo "  Redis Port:      6379"
     echo "  MQTT Port:       1883"
     echo "  MQTT WebSocket:  9001"
@@ -725,15 +793,18 @@ fi
 echo ""
 echo -e "${CYAN}📱 Testing:${NC}"
 
+# Get network IP for testing commands
+NETWORK_IP=$(get_network_ip)
+
 # Test commands based on what was deployed
 if [[ "$FRONTEND_ONLY" == false ]]; then
-    echo "  Test backend:    curl http://localhost:5000/health"
+    echo "  Test backend:    curl http://localhost:5001/health   or   curl http://$NETWORK_IP:5001/health"
     echo "  Test Redis:      $COMPOSE_CMD exec redis redis-cli ping"
     echo "  Test MQTT:       $COMPOSE_CMD exec mosquitto mosquitto_pub -h localhost -t test -m hello"
 fi
 
 if [[ "$BACKEND_ONLY" == false ]]; then
-    echo "  Test frontend:   curl http://localhost:80"
+    echo "  Test frontend:   curl http://localhost:80   or   curl http://$NETWORK_IP:80"
 fi
 
 # Python Virtual Environment section (if created)

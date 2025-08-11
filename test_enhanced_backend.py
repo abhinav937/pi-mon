@@ -10,7 +10,7 @@ import time
 from datetime import datetime
 
 # Configuration
-BASE_URL = "http://localhost:5001"
+BASE_URL = "http://192.168.0.201:5001"
 USERNAME = "abhinav"
 PASSWORD = "kavachi"
 

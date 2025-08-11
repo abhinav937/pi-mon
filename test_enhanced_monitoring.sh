@@ -101,14 +101,20 @@ get_auth_token() {
         "http://$PI_IP:$BACKEND_PORT/api/auth/token")
     
     if [ $? -eq 0 ] && [ -n "$response" ]; then
-        # Extract token using grep and sed (simple approach)
-        token=$(echo "$response" | grep -o '"access_token":"[^"]*"' | sed 's/.*"access_token":"\([^"]*\)".*/\1/')
-        if [ -n "$token" ]; then
-            AUTH_TOKEN="$token"
-            echo -e "${GREEN}✅ Authentication successful${NC}"
-            echo "  Token: ${token:0:20}..."
-            return 0
-        fi
+            # Extract token using grep and sed (simple approach)
+    token=$(echo "$response" | grep -o '"access_token":"[^"]*"' | sed 's/.*"access_token":"\([^"]*\)".*/\1/')
+    
+    # Alternative extraction method if sed fails
+    if [ -z "$token" ]; then
+        token=$(echo "$response" | grep -o '"access_token":"[^"]*"' | cut -d'"' -f4)
+    fi
+    
+    if [ -n "$token" ]; then
+        AUTH_TOKEN="$token"
+        echo -e "${GREEN}✅ Authentication successful${NC}"
+        echo "  Token: ${token:0:20}..."
+        return 0
+    fi
     fi
     
     echo -e "${RED}❌ Authentication failed${NC}"

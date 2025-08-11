@@ -25,8 +25,35 @@ import tempfile
 import re
 
 # Add parent directory to path to import config
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config import config
+try:
+    # Try to import from parent directory first
+    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from config import config
+except ImportError:
+    # Fallback: try to import from current directory
+    try:
+        from config import config
+    except ImportError:
+        # Create a minimal config if import fails
+        class MinimalConfig:
+            def get(self, key, default=None):
+                if key == 'ports.backend':
+                    return 5001
+                elif key == 'project.version':
+                    return '2.0.0'
+                elif key == 'backend.endpoints':
+                    return {}
+                elif key == 'backend.features':
+                    return {}
+                return default
+            
+            def get_port(self, service):
+                return 5001 if service == 'backend' else 80
+            
+            def get_backend_endpoints(self):
+                return {}
+        
+        config = MinimalConfig()
 
 # Simple JWT-like token (for demo purposes)
 JWT_SECRET = "pi-monitor-secret-key-2024"

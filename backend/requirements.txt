@@ -1,2 +1,4 @@
-# Only essential dependency for system monitoring
+# Essential dependencies for Pi Monitor Backend
 psutil==5.9.6
+requests==2.31.0
+urllib3==2.0.7

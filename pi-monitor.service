@@ -1,0 +1,16 @@
+[Unit]
+Description=Pi Monitor Backend Service
+After=network.target docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/bash -c 'cd /path/to/pi-mon && ./deploy_pi.sh'
+ExecStop=/bin/bash -c 'docker stop pi-monitor-backend || true'
+ExecReload=/bin/bash -c 'docker restart pi-monitor-backend || true'
+TimeoutStartSec=60
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

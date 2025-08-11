@@ -32,7 +32,12 @@ services:
       retries: 5
       start_period: 30s
     # Production logging
-    logging: *default-logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "5"
+        compress: "true"
 
   # Frontend with production optimizations
   frontend:
@@ -64,7 +69,12 @@ services:
       timeout: 3s
       retries: 5
     # Production logging
-    logging: *default-logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "5"
+        compress: "true"
 
   # Redis with production settings
   redis:
@@ -82,7 +92,12 @@ services:
       - redis_data:/data:rw
       - ./backups/redis:/backup:rw
     # Production logging
-    logging: *default-logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "5"
+        compress: "true"
 
   # Mosquitto with production security
   mosquitto:
@@ -98,15 +113,14 @@ services:
           cpus: '0.25'
     restart: always
     # Production logging
-    logging: *default-logging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "5"
+        compress: "true"
 
-# Production logging configuration
-x-logging: &default-logging
-  driver: "json-file"
-  options:
-    max-size: "5m"
-    max-file: "5"
-    compress: "true"
+# Production logging configuration handled inline for each service
 
 # Production volumes with backup strategy
 volumes:

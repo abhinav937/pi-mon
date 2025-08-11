@@ -11,9 +11,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # Set working directory
 WORKDIR /app
 
-# Install only curl for health checks
+# Install only essential system dependencies
 RUN apt-get update && apt-get install -y \
     curl \
+    gcc \
+    python3-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements and install Python dependencies

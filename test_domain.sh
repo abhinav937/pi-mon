@@ -170,3 +170,4 @@ echo "   1. DNS records are set correctly"
 echo "   2. Docker containers are running"
 echo "   3. Ports 80 and 443 are open"
 echo "   4. SSL certificates are configured (for HTTPS)"
+

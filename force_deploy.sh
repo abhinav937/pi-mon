@@ -473,18 +473,43 @@ if [[ "$SKIP_CLEANUP" == false ]]; then
         sleep 5
         echo -e "${GREEN}✅ Nuclear cleanup done${NC}"
     else
-        # Stop all pi-mon containers
+        # Stop all pi-mon containers AGGRESSIVELY
         log_verbose "Stopping containers..."
         echo -e "${YELLOW}  🛑 Stopping all pi-mon containers...${NC}"
         $COMPOSE_CMD down --remove-orphans || echo "No containers to stop"
+        
+        # Also try to stop with explicit container names
+        echo "    Stopping containers by exact name..."
+        for container in pi-monitor-redis pi-monitor-mosquitto pi-monitor-backend pi-monitor-frontend; do
+            if docker ps -q --filter "name=^${container}$" | grep -q .; then
+                echo "      Stopping $container..."
+                docker stop "$container" 2>/dev/null || true
+            fi
+        done
 
-        # Remove all pi-mon containers (including stopped ones)
+        # Remove all pi-mon containers (including stopped ones) - multiple methods
+        echo -e "${YELLOW}  🗑️  Removing all pi-mon containers...${NC}"
+        
+        # Method 1: By project name filter
         containers=$(docker ps -aq --filter "name=$PROJECT_NAME" 2>/dev/null || true)
         if [[ -n "$containers" ]]; then
             log_verbose "Found containers to remove: $containers"
-            echo -e "${YELLOW}  🗑️  Removing all pi-mon containers...${NC}"
-            docker rm -f $containers || echo "Some containers couldn't be removed"
+            echo "    Removing containers by project name filter..."
+            docker rm -f $containers || echo "    Some containers couldn't be removed"
         fi
+        
+        # Method 2: By exact container names
+        echo "    Removing containers by exact names..."
+        for container in pi-monitor-redis pi-monitor-mosquitto pi-monitor-backend pi-monitor-frontend; do
+            if docker ps -aq --filter "name=^${container}$" | grep -q .; then
+                echo "      Force removing $container..."
+                docker rm -f "$container" 2>/dev/null || true
+            fi
+        done
+        
+        # Method 3: Nuclear - remove all containers with pi-monitor in the name
+        echo "    Nuclear container cleanup..."
+        docker ps -aq | xargs -I {} sh -c 'docker inspect --format="{{.Name}}" {} 2>/dev/null | grep -q pi-monitor && docker rm -f {} || true' 2>/dev/null || true
 
         # Remove all pi-mon images
         images=$(docker images --filter "reference=*$PROJECT_NAME*" -q 2>/dev/null || true)

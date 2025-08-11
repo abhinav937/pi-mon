@@ -17,9 +17,10 @@ import structlog
 from dotenv import load_dotenv
 
 from system_monitor import SystemMonitor
+from config import get_config
 
-# Load environment variables
-load_dotenv()
+# Load configuration
+config = get_config()
 
 # Configure structured logging
 structlog.configure(
@@ -45,15 +46,15 @@ class PiMqttAgent:
     """Lightweight MQTT agent for publishing Pi system metrics"""
     
     def __init__(self):
-        # Configuration
-        self.mqtt_broker = os.getenv("MQTT_BROKER", "localhost")
-        self.mqtt_port = int(os.getenv("MQTT_PORT", "1883"))
-        self.mqtt_username = os.getenv("MQTT_USERNAME")
-        self.mqtt_password = os.getenv("MQTT_PASSWORD")
+        # Configuration (using centralized config)
+        self.mqtt_broker = config.mqtt_broker
+        self.mqtt_port = config.mqtt_port
+        self.mqtt_username = config.mqtt_username
+        self.mqtt_password = config.mqtt_password
         self.client_id = os.getenv("MQTT_CLIENT_ID", f"pi-monitor-agent-{int(time.time())}")
         self.topic_prefix = os.getenv("MQTT_TOPIC_PREFIX", "/pi")
-        self.publish_interval = float(os.getenv("PUBLISH_INTERVAL", "5.0"))
-        self.device_name = os.getenv("DEVICE_NAME", os.uname().nodename)
+        self.publish_interval = config.publish_interval
+        self.device_name = config.device_name
         
         # MQTT client setup
         self.mqtt_client = None

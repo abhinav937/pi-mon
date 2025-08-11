@@ -16,7 +16,7 @@ services:
       - ./backend:/app:rw
       # Keep node_modules in container
       - /app/node_modules
-    command: uvicorn main_server:combined_app --host 0.0.0.0 --port 5000 --reload --log-level debug
+    command: uvicorn main_server:combined_app --host 0.0.0.0 --port 5001 --reload --log-level debug
     # Disable health check in dev mode for faster startup
     healthcheck:
       disable: true

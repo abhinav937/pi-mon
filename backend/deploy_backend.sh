@@ -89,7 +89,7 @@ JWT_EXPIRATION_HOURS=24
 MQTT_BROKER=localhost
 MQTT_PORT=1883
 REDIS_URL=redis://localhost:6379
-BACKEND_PORT=5000
+BACKEND_PORT=5001
 PUBLISH_INTERVAL=5.0
 DEVICE_NAME=$(hostname)
 PYTHONPATH=$BACKEND_DIR
@@ -114,7 +114,7 @@ Group=$SERVICE_USER
 WorkingDirectory=$BACKEND_DIR
 Environment=PYTHONPATH=$BACKEND_DIR
 EnvironmentFile=$INSTALL_DIR/.env
-ExecStart=$VENV_DIR/bin/uvicorn main_server:combined_app --host 0.0.0.0 --port 5000 --workers 1 --access-log --log-level info
+ExecStart=$VENV_DIR/bin/uvicorn main_server:combined_app --host 0.0.0.0 --port \${BACKEND_PORT} --workers 1 --access-log --log-level info
 ExecReload=/bin/kill -HUP \$MAINPID
 KillMode=mixed
 TimeoutStopSec=5
@@ -273,8 +273,8 @@ echo "  Restart:       sudo systemctl restart $SERVICE_NAME"
 echo "  Stop:          sudo systemctl stop $SERVICE_NAME"
 echo "  Status:        sudo systemctl status $SERVICE_NAME"
 echo ""
-echo "Backend API will be available at: http://localhost:5000"
-echo "Health check: curl http://localhost:5000/health"
+echo "Backend API will be available at: http://localhost:5001"
+echo "Health check: curl http://localhost:5001/health"
 echo ""
 echo -e "${BLUE}Next steps:${NC}"
 echo "1. Install and configure MQTT broker (Mosquitto)"

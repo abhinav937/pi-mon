@@ -26,9 +26,10 @@ from dotenv import load_dotenv
 from system_monitor import SystemMonitor
 from power_management import PowerManager
 from service_management import ServiceManager
+from config import get_config
 
-# Load environment variables
-load_dotenv()
+# Load configuration
+config = get_config()
 
 # Configure structured logging
 structlog.configure(
@@ -50,14 +51,14 @@ structlog.configure(
 
 logger = structlog.get_logger()
 
-# Configuration
-JWT_SECRET = os.getenv("JWT_SECRET", "your-super-secret-jwt-key")
-JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
-JWT_EXPIRATION_HOURS = int(os.getenv("JWT_EXPIRATION_HOURS", "24"))
-MQTT_BROKER = os.getenv("MQTT_BROKER", "localhost")
-MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
-BACKEND_PORT = int(os.getenv("BACKEND_PORT", "5000"))
+# Configuration (using centralized config)
+JWT_SECRET = config.jwt_secret
+JWT_ALGORITHM = config.jwt_algorithm
+JWT_EXPIRATION_HOURS = config.jwt_expiration_hours
+MQTT_BROKER = config.mqtt_broker
+MQTT_PORT = config.mqtt_port
+REDIS_URL = config.redis_url
+BACKEND_PORT = config.backend_port
 
 # Security
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -116,9 +117,9 @@ combined_app = socketio.ASGIApp(sio, app)
 mqtt_config = MQTTConfig(
     host=MQTT_BROKER,
     port=MQTT_PORT,
-    keepalive=60,
-    username=os.getenv("MQTT_USERNAME"),
-    password=os.getenv("MQTT_PASSWORD")
+    keepalive=config.mqtt_keepalive,
+    username=config.mqtt_username,
+    password=config.mqtt_password
 )
 
 mqtt = FastMQTT(config=mqtt_config)
@@ -386,8 +387,8 @@ if __name__ == "__main__":
     # Run the server
     uvicorn.run(
         combined_app,
-        host="0.0.0.0",
-        port=BACKEND_PORT,
-        log_level="info",
+        host=config.backend_host,
+        port=config.backend_port,
+        log_level=config.log_level,
         access_log=True
     )

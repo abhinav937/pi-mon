@@ -1,16 +1,13 @@
 [Unit]
-Description=Pi Monitor Backend Service
-After=network.target docker.service
-Requires=docker.service
+Description=Pi Monitor Backend
+After=network.target
 
 [Service]
-Type=oneshot
-RemainAfterExit=yes
-ExecStart=/bin/bash -c 'cd /path/to/pi-mon && ./deploy_pi.sh'
-ExecStop=/bin/bash -c 'docker stop pi-monitor-backend || true'
-ExecReload=/bin/bash -c 'docker restart pi-monitor-backend || true'
-TimeoutStartSec=60
-TimeoutStopSec=30
+User=abhinav
+WorkingDirectory=/home/abhinav/pi-mon/backend
+ExecStart=/usr/bin/python3 simple_server.py
+Restart=always
+RestartSec=5
 
 [Install]
 WantedBy=multi-user.target

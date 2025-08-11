@@ -280,7 +280,9 @@ class EnhancedMetricsCollector:
             if os.path.exists('/sys/class/thermal/thermal_zone0/temp'):
                 with open('/sys/class/thermal/thermal_zone0/temp', 'r') as f:
                     temp_raw = f.read().strip()
-                    return round(float(temp_raw) / 1000.0, 1)
+                    temp_value = float(temp_raw) / 1000.0
+                    if temp_value > 0 and temp_value < 200:  # Sanity check for reasonable temperature range
+                        return round(temp_value, 1)
             
             # Try other thermal zones
             for i in range(10):
@@ -288,7 +290,9 @@ class EnhancedMetricsCollector:
                 if os.path.exists(thermal_path):
                     with open(thermal_path, 'r') as f:
                         temp_raw = f.read().strip()
-                        return round(float(temp_raw) / 1000.0, 1)
+                        temp_value = float(temp_raw) / 1000.0
+                        if temp_value > 0 and temp_value < 200:  # Sanity check for reasonable temperature range
+                            return round(temp_value, 1)
             
             # Try vcgencmd for Raspberry Pi
             try:
@@ -296,7 +300,9 @@ class EnhancedMetricsCollector:
                 if result.returncode == 0:
                     temp_match = re.search(r'temp=(\d+\.?\d*)', result.stdout)
                     if temp_match:
-                        return round(float(temp_match.group(1)), 1)
+                        temp_value = float(temp_match.group(1))
+                        if temp_value > 0 and temp_value < 200:  # Sanity check for reasonable temperature range
+                            return round(temp_value, 1)
             except:
                 pass
             
@@ -310,14 +316,17 @@ class EnhancedMetricsCollector:
                         if isinstance(values, dict):
                             for key, value in values.items():
                                 if 'temp' in key.lower() and isinstance(value, (int, float)):
-                                    return round(float(value), 1)
+                                    temp_value = float(value)
+                                    if temp_value > 0 and temp_value < 200:  # Sanity check for reasonable temperature range
+                                        return round(temp_value, 1)
             except:
                 pass
                 
         except Exception:
             pass
         
-        return 0.0
+        # Return a safe default value if all methods fail
+        return 25.0  # Room temperature as safe default
     
     def _run_command_with_fallback(self, command_name, primary_command, fallback_commands=None):
         """Run a command with fallback options for Pi-specific commands"""
@@ -1556,18 +1565,19 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
             # Get uptime
             uptime = self._get_uptime()
             
+            # Ensure all numeric values are valid numbers, not None
             return {
                 "timestamp": time.time(),
                 "uptime": uptime,
-                "cpu_percent": round(cpu_percent, 1),
-                "memory_percent": round(memory.percent, 1),
-                "disk_percent": round(disk.percent, 1),
-                "temperature": temperature,
+                "cpu_percent": round(float(cpu_percent) if cpu_percent is not None else 0.0, 1),
+                "memory_percent": round(float(memory.percent) if memory.percent is not None else 0.0, 1),
+                "disk_percent": round(float(disk.percent) if disk.percent is not None else 0.0, 1),
+                "temperature": float(temperature) if temperature is not None else 0.0,
                 "network": {
-                    "bytes_sent": network.bytes_sent,
-                    "bytes_recv": network.bytes_recv,
-                    "packets_sent": network.packets_sent,
-                    "packets_recv": network.packets_recv
+                    "bytes_sent": network.bytes_sent if network else 0,
+                    "bytes_recv": network.bytes_recv if network else 0,
+                    "packets_sent": network.packets_sent if network else 0,
+                    "packets_recv": network.packets_recv if network else 0
                 },
                 "disk_io": {
                     "read_bytes": disk_io.read_bytes if disk_io else 0,
@@ -1591,21 +1601,21 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
             # Aggregate metrics for the last N minutes
             aggregated_metrics = {
                 "timestamp": time.time(), # Current timestamp for the response
-                "cpu_percent": round(sum(m['cpu_percent'] for m in recent_metrics) / len(recent_metrics), 1),
-                "memory_percent": round(sum(m['memory_percent'] for m in recent_metrics) / len(recent_metrics), 1),
-                "disk_percent": round(sum(m['disk_percent'] for m in recent_metrics) / len(recent_metrics), 1),
-                "temperature": round(sum(m['temperature'] for m in recent_metrics) / len(recent_metrics), 1),
+                "cpu_percent": round(sum(float(m['cpu_percent']) if m['cpu_percent'] is not None else 0.0 for m in recent_metrics) / len(recent_metrics), 1),
+                "memory_percent": round(sum(float(m['memory_percent']) if m['memory_percent'] is not None else 0.0 for m in recent_metrics) / len(recent_metrics), 1),
+                "disk_percent": round(sum(float(m['disk_percent']) if m['disk_percent'] is not None else 0.0 for m in recent_metrics) / len(recent_metrics), 1),
+                "temperature": round(sum(float(m['temperature']) if m['temperature'] is not None else 0.0 for m in recent_metrics) / len(recent_metrics), 1),
                 "network": {
-                    "bytes_sent": sum(m['network']['bytes_sent'] for m in recent_metrics),
-                    "bytes_recv": sum(m['network']['bytes_recv'] for m in recent_metrics),
-                    "packets_sent": sum(m['network']['packets_sent'] for m in recent_metrics),
-                    "packets_recv": sum(m['network']['packets_recv'] for m in recent_metrics)
+                    "bytes_sent": sum(m['network']['bytes_sent'] if m['network'] and m['network']['bytes_sent'] is not None else 0 for m in recent_metrics),
+                    "bytes_recv": sum(m['network']['bytes_recv'] if m['network'] and m['network']['bytes_recv'] is not None else 0 for m in recent_metrics),
+                    "packets_sent": sum(m['network']['packets_sent'] if m['network'] and m['network']['packets_sent'] is not None else 0 for m in recent_metrics),
+                    "packets_recv": sum(m['network']['packets_recv'] if m['network'] and m['network']['packets_recv'] is not None else 0 for m in recent_metrics)
                 },
                 "disk_io": {
-                    "read_bytes": sum(m['disk_io']['read_bytes'] for m in recent_metrics),
-                    "write_bytes": sum(m['disk_io']['write_bytes'] for m in recent_metrics),
-                    "read_count": sum(m['disk_io']['read_count'] for m in recent_metrics),
-                    "write_count": sum(m['disk_io']['write_count'] for m in recent_metrics)
+                    "read_bytes": sum(m['disk_io']['read_bytes'] if m['disk_io'] and m['disk_io']['read_bytes'] is not None else 0 for m in recent_metrics),
+                    "write_bytes": sum(m['disk_io']['write_bytes'] if m['disk_io'] and m['disk_io']['write_bytes'] is not None else 0 for m in recent_metrics),
+                    "read_count": sum(m['disk_io']['read_count'] if m['disk_io'] and m['disk_io']['read_count'] is not None else 0 for m in recent_metrics),
+                    "write_count": sum(m['disk_io']['write_count'] if m['disk_io'] and m['disk_io']['write_count'] is not None else 0 for m in recent_metrics)
                 }
             }
             return aggregated_metrics

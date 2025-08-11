@@ -50,28 +50,28 @@ const ResourceChart = ({ unifiedClient }) => {
         setChartData(prevData => {
           const newData = { ...prevData };
           
-          // Update CPU data
-          if (systemData.cpu_percent !== undefined) {
+          // Update CPU data - ensure value is a valid number
+          if (systemData.cpu_percent !== undefined && systemData.cpu_percent !== null && !isNaN(systemData.cpu_percent)) {
             newData.cpu.labels = [...prevData.cpu.labels, timestamp].slice(-maxDataPoints);
-            newData.cpu.data = [...prevData.cpu.data, systemData.cpu_percent].slice(-maxDataPoints);
+            newData.cpu.data = [...prevData.cpu.data, parseFloat(systemData.cpu_percent)].slice(-maxDataPoints);
           }
           
-          // Update Memory data
-          if (systemData.memory_percent !== undefined) {
+          // Update Memory data - ensure value is a valid number
+          if (systemData.memory_percent !== undefined && systemData.memory_percent !== null && !isNaN(systemData.memory_percent)) {
             newData.memory.labels = [...prevData.memory.labels, timestamp].slice(-maxDataPoints);
-            newData.memory.data = [...prevData.memory.data, systemData.memory_percent].slice(-maxDataPoints);
+            newData.memory.data = [...prevData.memory.data, parseFloat(systemData.memory_percent)].slice(-maxDataPoints);
           }
           
-          // Update Temperature data
-          if (systemData.temperature !== undefined) {
+          // Update Temperature data - ensure value is a valid number
+          if (systemData.temperature !== undefined && systemData.temperature !== null && !isNaN(systemData.temperature)) {
             newData.temperature.labels = [...prevData.temperature.labels, timestamp].slice(-maxDataPoints);
-            newData.temperature.data = [...prevData.temperature.data, systemData.temperature].slice(-maxDataPoints);
+            newData.temperature.data = [...prevData.temperature.data, parseFloat(systemData.temperature)].slice(-maxDataPoints);
           }
           
-          // Update Disk data
-          if (systemData.disk_percent !== undefined) {
+          // Update Disk data - ensure value is a valid number
+          if (systemData.disk_percent !== undefined && systemData.disk_percent !== null && !isNaN(systemData.disk_percent)) {
             newData.disk.labels = [...prevData.disk.labels, timestamp].slice(-maxDataPoints);
-            newData.disk.data = [...prevData.disk.data, systemData.disk_percent].slice(-maxDataPoints);
+            newData.disk.data = [...prevData.disk.data, parseFloat(systemData.disk_percent)].slice(-maxDataPoints);
           }
           
           return newData;
@@ -265,7 +265,16 @@ const ResourceChart = ({ unifiedClient }) => {
   ];
 
   const chartConfig = getChartConfig(selectedMetric);
-  const hasData = chartData[selectedMetric].data.length > 0;
+  const hasData = chartData[selectedMetric] && 
+                  chartData[selectedMetric].data && 
+                  Array.isArray(chartData[selectedMetric].data) && 
+                  chartData[selectedMetric].data.length > 0 &&
+                  chartData[selectedMetric].data.some(val => val !== null && val !== undefined && !isNaN(val));
+
+  // Safety check to ensure chartData is properly initialized
+  if (!chartData[selectedMetric] || !Array.isArray(chartData[selectedMetric].data)) {
+    console.warn(`Chart data for ${selectedMetric} is not properly initialized`);
+  }
 
   return (
     <div className="space-y-6">
@@ -330,7 +339,35 @@ const ResourceChart = ({ unifiedClient }) => {
       <div className="chart-container">
         {hasData ? (
           <div className="chart-responsive" style={{ height: '400px' }}>
-            <Line {...chartConfig} />
+            {(() => {
+              try {
+                // Ensure all data points are valid numbers
+                const validatedData = {
+                  ...chartConfig,
+                  data: {
+                    ...chartConfig.data,
+                    datasets: chartConfig.data.datasets.map(dataset => ({
+                      ...dataset,
+                      data: dataset.data.map(val => 
+                        val !== null && val !== undefined && !isNaN(val) ? parseFloat(val) : 0
+                      )
+                    }))
+                  }
+                };
+                return <Line {...validatedData} />;
+              } catch (error) {
+                console.error('Error rendering chart:', error);
+                return (
+                  <div className="h-96 flex items-center justify-center text-red-500">
+                    <div className="text-center">
+                      <Activity className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                      <p className="text-lg font-medium mb-2">Chart Error</p>
+                      <p className="text-sm">Failed to render chart data</p>
+                    </div>
+                  </div>
+                );
+              }
+            })()}
           </div>
         ) : (
           <div className="h-96 flex items-center justify-center text-gray-500 dark:text-gray-400">
@@ -351,7 +388,10 @@ const ResourceChart = ({ unifiedClient }) => {
               Current Value
             </div>
             <div className="text-2xl font-bold text-gray-900 dark:text-white">
-              {chartData[selectedMetric].data.length > 0 
+              {chartData[selectedMetric].data.length > 0 && 
+               chartData[selectedMetric].data[chartData[selectedMetric].data.length - 1] !== null &&
+               chartData[selectedMetric].data[chartData[selectedMetric].data.length - 1] !== undefined &&
+               !isNaN(chartData[selectedMetric].data[chartData[selectedMetric].data.length - 1])
                 ? `${chartData[selectedMetric].data[chartData[selectedMetric].data.length - 1].toFixed(1)}${selectedMetric === 'temperature' ? '°C' : '%'}`
                 : 'N/A'
               }
@@ -364,7 +404,14 @@ const ResourceChart = ({ unifiedClient }) => {
             </div>
             <div className="text-2xl font-bold text-gray-900 dark:text-white">
               {chartData[selectedMetric].data.length > 0 
-                ? `${(chartData[selectedMetric].data.reduce((a, b) => a + b, 0) / chartData[selectedMetric].data.length).toFixed(1)}${selectedMetric === 'temperature' ? '°C' : '%'}`
+                ? (() => {
+                    const validData = chartData[selectedMetric].data.filter(val => 
+                      val !== null && val !== undefined && !isNaN(val)
+                    );
+                    if (validData.length === 0) return 'N/A';
+                    const average = validData.reduce((a, b) => a + b, 0) / validData.length;
+                    return `${average.toFixed(1)}${selectedMetric === 'temperature' ? '°C' : '%'}`;
+                  })()
                 : 'N/A'
               }
             </div>
@@ -376,7 +423,14 @@ const ResourceChart = ({ unifiedClient }) => {
             </div>
             <div className="text-2xl font-bold text-gray-900 dark:text-white">
               {chartData[selectedMetric].data.length > 0 
-                ? `${Math.max(...chartData[selectedMetric].data).toFixed(1)}${selectedMetric === 'temperature' ? '°C' : '%'}`
+                ? (() => {
+                    const validData = chartData[selectedMetric].data.filter(val => 
+                      val !== null && val !== undefined && !isNaN(val)
+                    );
+                    if (validData.length === 0) return 'N/A';
+                    const maxValue = Math.max(...validData);
+                    return `${maxValue.toFixed(1)}${selectedMetric === 'temperature' ? '°C' : '%'}`;
+                  })()
                 : 'N/A'
               }
             </div>

@@ -60,12 +60,14 @@ const Dashboard = ({ unifiedClient }) => {
   const currentData = realTimeData || systemStats;
 
   const getStatusColor = (percentage) => {
+    if (percentage === null || percentage === undefined || isNaN(percentage)) return 'text-gray-500';
     if (percentage >= 90) return 'text-red-600';
     if (percentage >= 70) return 'text-yellow-600';
     return 'text-green-600';
   };
 
   const getProgressBarColor = (percentage) => {
+    if (percentage === null || percentage === undefined || isNaN(percentage)) return 'bg-gray-400';
     if (percentage >= 90) return 'bg-red-500';
     if (percentage >= 70) return 'bg-yellow-500';
     return 'bg-green-500';
@@ -154,17 +156,19 @@ const Dashboard = ({ unifiedClient }) => {
               <div>
                 <p className="metric-label">CPU Usage</p>
                 <p className={`metric-value ${getStatusColor(currentData.cpu_percent)}`}>
-                  {currentData.cpu_percent?.toFixed(1)}%
+                  {currentData.cpu_percent !== null && currentData.cpu_percent !== undefined && !isNaN(currentData.cpu_percent)
+                    ? `${currentData.cpu_percent.toFixed(1)}%`
+                    : 'N/A'
+                  }
                 </p>
               </div>
             </div>
-          </div>
-          <div className="progress-bar">
-            <div
-              className={`progress-bar-fill ${getProgressBarColor(currentData.cpu_percent)}`}
-              style={{ width: `${Math.min(currentData.cpu_percent, 100)}%` }}
-            />
-          </div>
+            <div className="progress-bar">
+              <div
+                className={`progress-bar-fill ${getProgressBarColor(currentData.cpu_percent)}`}
+                style={{ width: `${Math.min(currentData.cpu_percent || 0, 100)}%` }}
+              />
+            </div>
         </div>
 
         {/* Memory Usage */}
@@ -177,17 +181,19 @@ const Dashboard = ({ unifiedClient }) => {
               <div>
                 <p className="metric-label">Memory</p>
                 <p className={`metric-value ${getStatusColor(currentData.memory_percent)}`}>
-                  {currentData.memory_percent?.toFixed(1)}%
+                  {currentData.memory_percent !== null && currentData.memory_percent !== undefined && !isNaN(currentData.memory_percent)
+                    ? `${currentData.memory_percent.toFixed(1)}%`
+                    : 'N/A'
+                  }
                 </p>
               </div>
             </div>
-          </div>
-          <div className="progress-bar">
-            <div
-              className={`progress-bar-fill ${getProgressBarColor(currentData.memory_percent)}`}
-              style={{ width: `${Math.min(currentData.memory_percent, 100)}%` }}
-            />
-          </div>
+            <div className="progress-bar">
+              <div
+                className={`progress-bar-fill ${getProgressBarColor(currentData.memory_percent)}`}
+                style={{ width: `${Math.min(currentData.memory_percent || 0, 100)}%` }}
+              />
+            </div>
         </div>
 
         {/* Disk Usage */}
@@ -200,7 +206,10 @@ const Dashboard = ({ unifiedClient }) => {
               <div>
                 <p className="metric-label">Disk Space</p>
                 <p className={`metric-value ${getStatusColor(currentData.disk_percent)}`}>
-                  {currentData.disk_percent?.toFixed(1)}%
+                  {currentData.disk_percent !== null && currentData.disk_percent !== undefined && !isNaN(currentData.disk_percent) 
+                    ? `${currentData.disk_percent.toFixed(1)}%` 
+                    : 'N/A'
+                  }
                 </p>
               </div>
             </div>
@@ -208,7 +217,7 @@ const Dashboard = ({ unifiedClient }) => {
           <div className="progress-bar">
             <div
               className={`progress-bar-fill ${getProgressBarColor(currentData.disk_percent)}`}
-              style={{ width: `${Math.min(currentData.disk_percent, 100)}%` }}
+              style={{ width: `${Math.min(currentData.disk_percent || 0, 100)}%` }}
             />
           </div>
         </div>
@@ -222,20 +231,23 @@ const Dashboard = ({ unifiedClient }) => {
               </div>
               <div>
                 <p className="metric-label">Temperature</p>
-                <p className={`metric-value ${currentData.temperature > 70 ? 'text-red-600' : currentData.temperature > 60 ? 'text-yellow-600' : 'text-green-600'}`}>
-                  {currentData.temperature?.toFixed(1)}°C
+                <p className={`metric-value ${(currentData.temperature || 0) > 70 ? 'text-red-600' : (currentData.temperature || 0) > 60 ? 'text-yellow-600' : 'text-green-600'}`}>
+                  {currentData.temperature !== null && currentData.temperature !== undefined && !isNaN(currentData.temperature)
+                    ? `${currentData.temperature.toFixed(1)}°C`
+                    : 'N/A'
+                  }
                 </p>
               </div>
             </div>
           </div>
           <div className="text-sm text-gray-500 dark:text-gray-400">
-            {currentData.temperature > 80 && (
+            {currentData.temperature !== null && currentData.temperature !== undefined && !isNaN(currentData.temperature) && currentData.temperature > 80 && (
               <span className="status-badge-error">🔥 High Temperature</span>
             )}
-            {currentData.temperature <= 80 && currentData.temperature > 70 && (
+            {currentData.temperature !== null && currentData.temperature !== undefined && !isNaN(currentData.temperature) && currentData.temperature <= 80 && currentData.temperature > 70 && (
               <span className="status-badge-warning">⚠️ Warm</span>
             )}
-            {currentData.temperature <= 70 && (
+            {currentData.temperature !== null && currentData.temperature !== undefined && !isNaN(currentData.temperature) && currentData.temperature <= 70 && (
               <span className="status-badge-success">✅ Normal</span>
             )}
           </div>
@@ -354,25 +366,37 @@ const Dashboard = ({ unifiedClient }) => {
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
                 <div className="text-center">
                   <div className="font-medium text-gray-900 dark:text-white">
-                    {metricsHistory.metrics[metricsHistory.metrics.length - 1]?.cpu_percent?.toFixed(1) || 0}%
+                    {(() => {
+                      const value = metricsHistory.metrics[metricsHistory.metrics.length - 1]?.cpu_percent;
+                      return value !== null && value !== undefined && !isNaN(value) ? `${value.toFixed(1)}%` : 'N/A';
+                    })()}
                   </div>
                   <div className="text-gray-500 dark:text-gray-400">Current CPU</div>
                 </div>
                 <div className="text-center">
                   <div className="font-medium text-gray-900 dark:text-white">
-                    {metricsHistory.metrics[metricsHistory.metrics.length - 1]?.memory_percent?.toFixed(1) || 0}%
+                    {(() => {
+                      const value = metricsHistory.metrics[metricsHistory.metrics.length - 1]?.memory_percent;
+                      return value !== null && value !== undefined && !isNaN(value) ? `${value.toFixed(1)}%` : 'N/A';
+                    })()}
                   </div>
                   <div className="text-gray-500 dark:text-gray-400">Current Memory</div>
                 </div>
                 <div className="text-center">
                   <div className="font-medium text-gray-900 dark:text-white">
-                    {metricsHistory.metrics[metricsHistory.metrics.length - 1]?.temperature?.toFixed(1) || 0}°C
+                    {(() => {
+                      const value = metricsHistory.metrics[metricsHistory.metrics.length - 1]?.temperature;
+                      return value !== null && value !== undefined && !isNaN(value) ? `${value.toFixed(1)}°C` : 'N/A';
+                    })()}
                   </div>
                   <div className="text-gray-500 dark:text-gray-400">Current Temp</div>
                 </div>
                 <div className="text-center">
                   <div className="font-medium text-gray-900 dark:text-white">
-                    {metricsHistory.metrics[metricsHistory.metrics.length - 1]?.disk_percent?.toFixed(1) || 0}%
+                    {(() => {
+                      const value = metricsHistory.metrics[metricsHistory.metrics.length - 1]?.disk_percent;
+                      return value !== null && value !== undefined && !isNaN(value) ? `${value.toFixed(1)}%` : 'N/A';
+                    })()}
                   </div>
                   <div className="text-gray-500 dark:text-gray-400">Current Disk</div>
                 </div>
@@ -389,19 +413,19 @@ const Dashboard = ({ unifiedClient }) => {
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div className="flex items-center space-x-3">
-            <div className={`w-3 h-3 rounded-full ${currentData.cpu_percent > 80 ? 'bg-red-500' : currentData.cpu_percent > 60 ? 'bg-yellow-500' : 'bg-green-500'}`}></div>
+            <div className={`w-3 h-3 rounded-full ${(currentData.cpu_percent || 0) > 80 ? 'bg-red-500' : (currentData.cpu_percent || 0) > 60 ? 'bg-yellow-500' : 'bg-green-500'}`}></div>
             <span className="text-sm font-medium text-gray-700 dark:text-gray-300">CPU</span>
           </div>
           <div className="flex items-center space-x-3">
-            <div className={`w-3 h-3 rounded-full ${currentData.memory_percent > 80 ? 'bg-red-500' : currentData.memory_percent > 60 ? 'bg-yellow-500' : 'bg-green-500'}`}></div>
+            <div className={`w-3 h-3 rounded-full ${(currentData.memory_percent || 0) > 80 ? 'bg-red-500' : (currentData.memory_percent || 0) > 60 ? 'bg-yellow-500' : 'bg-green-500'}`}></div>
             <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Memory</span>
           </div>
           <div className="flex items-center space-x-3">
-            <div className={`w-3 h-3 rounded-full ${currentData.disk_percent > 90 ? 'bg-red-500' : currentData.disk_percent > 70 ? 'bg-yellow-500' : 'bg-green-500'}`}></div>
+            <div className={`w-3 h-3 rounded-full ${(currentData.disk_percent || 0) > 90 ? 'bg-red-500' : (currentData.disk_percent || 0) > 70 ? 'bg-yellow-500' : 'bg-green-500'}`}></div>
             <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Storage</span>
           </div>
           <div className="flex items-center space-x-3">
-            <div className={`w-3 h-3 rounded-full ${currentData.temperature > 70 ? 'bg-red-500' : currentData.temperature > 60 ? 'bg-yellow-500' : 'bg-green-500'}`}></div>
+            <div className={`w-3 h-3 rounded-full ${(currentData.temperature || 0) > 70 ? 'bg-red-500' : (currentData.temperature || 0) > 60 ? 'bg-yellow-500' : 'bg-green-500'}`}></div>
             <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Temperature</span>
           </div>
         </div>

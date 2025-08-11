@@ -195,10 +195,13 @@ const SystemStatus = ({ unifiedClient }) => {
             <div className="flex justify-between">
               <span className="text-sm font-medium text-gray-500 dark:text-gray-400">Usage</span>
               <span className={`text-sm font-semibold ${
-                currentData?.cpu_percent > 80 ? 'text-red-600' : 
-                currentData?.cpu_percent > 60 ? 'text-yellow-600' : 'text-green-600'
+                (currentData?.cpu_percent || 0) > 80 ? 'text-red-600' : 
+                (currentData?.cpu_percent || 0) > 60 ? 'text-yellow-600' : 'text-green-600'
               }`}>
-                {currentData?.cpu_percent?.toFixed(1)}%
+                {currentData?.cpu_percent !== null && currentData?.cpu_percent !== undefined && !isNaN(currentData?.cpu_percent)
+                  ? `${currentData.cpu_percent.toFixed(1)}%`
+                  : 'N/A'
+                }
               </span>
             </div>
             <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
@@ -226,10 +229,13 @@ const SystemStatus = ({ unifiedClient }) => {
             <div className="flex justify-between">
               <span className="text-sm font-medium text-gray-500 dark:text-gray-400">Usage</span>
               <span className={`text-sm font-semibold ${
-                currentData?.memory_percent > 80 ? 'text-red-600' : 
-                currentData?.memory_percent > 60 ? 'text-yellow-600' : 'text-green-600'
+                (currentData?.memory_percent || 0) > 80 ? 'text-red-600' : 
+                (currentData?.memory_percent || 0) > 60 ? 'text-yellow-600' : 'text-green-600'
               }`}>
-                {currentData?.memory_percent?.toFixed(1)}%
+                {currentData?.memory_percent !== null && currentData?.memory_percent !== undefined && !isNaN(currentData?.memory_percent)
+                  ? `${currentData.memory_percent.toFixed(1)}%`
+                  : 'N/A'
+                }
               </span>
             </div>
             <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
@@ -257,10 +263,13 @@ const SystemStatus = ({ unifiedClient }) => {
             <div className="flex justify-between">
               <span className="text-sm font-medium text-gray-500 dark:text-gray-400">Usage</span>
               <span className={`text-sm font-semibold ${
-                currentData?.disk_percent > 90 ? 'text-red-600' : 
-                currentData?.disk_percent > 70 ? 'text-yellow-600' : 'text-green-600'
+                (currentData?.disk_percent || 0) > 90 ? 'text-red-600' : 
+                (currentData?.disk_percent || 0) > 70 ? 'text-yellow-600' : 'text-green-600'
               }`}>
-                {currentData?.disk_percent?.toFixed(1)}%
+                {currentData?.disk_percent !== null && currentData?.disk_percent !== undefined && !isNaN(currentData?.disk_percent)
+                  ? `${currentData.disk_percent.toFixed(1)}%`
+                  : 'N/A'
+                }
               </span>
             </div>
             <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
@@ -336,10 +345,13 @@ const SystemStatus = ({ unifiedClient }) => {
               Temperature
             </div>
             <div className={`text-base font-semibold ${
-              currentData?.temperature > 70 ? 'text-red-600' : 
-              currentData?.temperature > 60 ? 'text-yellow-600' : 'text-green-600'
+              (currentData?.temperature || 0) > 70 ? 'text-red-600' : 
+              (currentData?.temperature || 0) > 60 ? 'text-yellow-600' : 'text-green-600'
             }`}>
-              {currentData?.temperature?.toFixed(1)}°C
+              {currentData?.temperature !== null && currentData?.temperature !== undefined && !isNaN(currentData?.temperature)
+                ? `${currentData.temperature.toFixed(1)}°C`
+                : 'N/A'
+              }
             </div>
           </div>
           <div>

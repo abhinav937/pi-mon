@@ -22,8 +22,9 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the simple server
+# Copy the simple server and config
 COPY simple_server.py .
+COPY config.py .
 
 # Expose port
 EXPOSE 5001

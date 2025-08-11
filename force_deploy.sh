@@ -329,18 +329,43 @@ find_port_user() {
     netstat -tulpn 2>/dev/null | grep ":$port " || ss -tulpn 2>/dev/null | grep ":$port " || echo "  No specific process found"
 }
 
-# Function to stop system services safely
+# Function to stop system services safely with MASK to prevent restart
 stop_system_service() {
     local service=$1
     if systemctl is-active --quiet "$service" 2>/dev/null; then
         echo -e "${YELLOW}  🛑 Stopping system service: $service${NC}"
-        sudo systemctl stop "$service" || echo -e "${RED}    ❌ Failed to stop $service${NC}"
         
-        # Also disable it to prevent auto-restart
-        if systemctl is-enabled --quiet "$service" 2>/dev/null; then
-            echo -e "${YELLOW}  🚫 Disabling auto-start for: $service${NC}"
-            sudo systemctl disable "$service" || echo -e "${RED}    ❌ Failed to disable $service${NC}"
+        # MASK the service first to prevent any restart
+        echo "    Masking $service to prevent restart..."
+        sudo systemctl mask "$service" 2>/dev/null || true
+        
+        # Stop the service
+        sudo systemctl stop "$service" 2>/dev/null || true
+        
+        # Kill the service if it's still running
+        sudo systemctl kill "$service" 2>/dev/null || true
+        
+        # Wait a moment
+        sleep 2
+        
+        # Verify it's actually stopped
+        if systemctl is-active --quiet "$service" 2>/dev/null; then
+            echo -e "${RED}    🚨 $service is STILL active after stop - force killing...${NC}"
+            # Get the main PID and kill it
+            main_pid=$(systemctl show --property MainPID --value "$service" 2>/dev/null || true)
+            if [[ -n "$main_pid" && "$main_pid" != "0" ]]; then
+                echo "      Killing main PID $main_pid for $service"
+                sudo kill -9 "$main_pid" 2>/dev/null || true
+            fi
+            # Kill all processes with this name
+            sudo pkill -9 -f "$service" 2>/dev/null || true
         fi
+        
+        echo -e "${GREEN}    ✅ $service stopped and masked${NC}"
+    else
+        # Still mask it to be safe
+        sudo systemctl mask "$service" 2>/dev/null || true
+        echo -e "${GREEN}    ✅ $service was already stopped (now masked)${NC}"
     fi
 }
 
@@ -802,9 +827,19 @@ for port in 1883 6379 5001 80; do
         # Nuclear approach: kill everything that could be using this port
         case $port in
             1883)
-                echo "      Killing all mosquitto processes..."
+                echo "      🔥 NUCLEAR mosquitto cleanup..."
+                # Mask the service to prevent restart
+                sudo systemctl mask mosquitto 2>/dev/null || true
+                sudo systemctl stop mosquitto 2>/dev/null || true
+                sudo systemctl kill mosquitto 2>/dev/null || true
+                sleep 2
+                # Kill ALL mosquitto processes with extreme prejudice
                 sudo pkill -9 -f "mosquitto" 2>/dev/null || true
                 sudo killall mosquitto 2>/dev/null || true
+                sudo killall -9 mosquitto 2>/dev/null || true
+                # Find and kill by exact process name
+                pgrep mosquitto | xargs -r sudo kill -9 2>/dev/null || true
+                sleep 2
                 ;;
             6379)
                 echo "      Killing all redis processes..."

@@ -14,12 +14,15 @@ services:
       - PORT=5001
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
     networks:
-      - pi-monitor-network
+      pi-monitor-network:
+        aliases:
+          - backend
+          - backend-service
     logging:
       driver: "json-file"
       options:
@@ -45,9 +48,12 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 10s
+      start_period: 30s
     networks:
-      - pi-monitor-network
+      pi-monitor-network:
+        aliases:
+          - frontend
+          - frontend-service
     logging:
       driver: "json-file"
       options:
@@ -57,5 +63,8 @@ services:
 networks:
   pi-monitor-network:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
 
 volumes: {}

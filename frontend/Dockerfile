@@ -35,11 +35,18 @@ FROM nginx:alpine
 LABEL architecture="arm64"
 LABEL description="Pi Monitor Frontend - React Dashboard"
 
+# Install wget for health checks and curl for backend connectivity testing
+RUN apk add --no-cache wget curl
+
 # Copy built app from builder stage
 COPY --from=builder /app/build /usr/share/nginx/html
 
 # Copy custom nginx configuration
 COPY nginx.conf /etc/nginx/nginx.conf
+
+# Copy startup script
+COPY startup.sh /startup.sh
+RUN chmod +x /startup.sh
 
 # Expose port 80
 EXPOSE 80
@@ -48,5 +55,5 @@ EXPOSE 80
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD wget --no-verbose --tries=1 --spider http://localhost:80/ || exit 1
 
-# Start nginx
-CMD ["nginx", "-g", "daemon off;"]
+# Start with our custom startup script
+CMD ["/startup.sh"]

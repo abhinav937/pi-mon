@@ -337,87 +337,7 @@ get_network_ip() {
     echo "$ip"
 }
 
-# Function to stop system services safely
-stop_system_service() {
-    local service=$1
-    if systemctl is-active --quiet "$service" 2>/dev/null; then
-        echo -e "${YELLOW}  🛑 Stopping system service: $service${NC}"
-        sudo systemctl stop "$service" || echo -e "${RED}    ❌ Failed to stop $service${NC}"
-        
-        # Also disable it to prevent auto-restart
-        if systemctl is-enabled --quiet "$service" 2>/dev/null; then
-            echo -e "${YELLOW}  🚫 Disabling auto-start for: $service${NC}"
-            sudo systemctl disable "$service" || echo -e "${RED}    ❌ Failed to disable $service${NC}"
-        fi
-    fi
-}
-
-# Function to aggressively kill processes using specific ports
-kill_port_processes() {
-    local port=$1
-    local process_name=$2
-    
-    echo -e "${YELLOW}  🔪 Forcefully freeing port $port...${NC}"
-    
-    # Method 1: Use fuser to kill processes on the port
-    if command -v fuser >/dev/null 2>&1; then
-        sudo fuser -k ${port}/tcp 2>/dev/null || true
-        sudo fuser -k ${port}/udp 2>/dev/null || true
-    fi
-    
-    # Method 2: Use lsof to find and kill processes
-    if command -v lsof >/dev/null 2>&1; then
-        local pids=$(lsof -ti:$port 2>/dev/null || true)
-        if [[ -n "$pids" ]]; then
-            echo -e "${YELLOW}    🎯 Killing PIDs using port $port: $pids${NC}"
-            echo "$pids" | xargs -r sudo kill -TERM 2>/dev/null || true
-            sleep 2
-            echo "$pids" | xargs -r sudo kill -KILL 2>/dev/null || true
-        fi
-    fi
-    
-    # Method 3: Use netstat/ss to find and kill processes
-    local pids=$(netstat -tlnp 2>/dev/null | grep ":$port " | awk '{print $7}' | cut -d'/' -f1 | grep -E '^[0-9]+$' || true)
-    if [[ -z "$pids" ]]; then
-        pids=$(ss -tlnp 2>/dev/null | grep ":$port " | sed 's/.*pid=\([0-9]*\).*/\1/' | grep -E '^[0-9]+$' || true)
-    fi
-    
-    if [[ -n "$pids" ]]; then
-        for pid in $pids; do
-            if ps -p "$pid" >/dev/null 2>&1; then
-                local cmd=$(ps -p "$pid" -o comm= 2>/dev/null || echo "unknown")
-                echo -e "${YELLOW}    🔪 Killing $cmd (PID: $pid) using port $port${NC}"
-                sudo kill -TERM "$pid" 2>/dev/null || true
-                sleep 1
-                sudo kill -KILL "$pid" 2>/dev/null || true
-            fi
-        done
-    fi
-}
-
-# Function to kill Python processes that might be running our backend
-kill_python_processes() {
-    echo -e "${YELLOW}  🐍 Stopping Python processes...${NC}"
-    
-    for process in "${PYTHON_PROCESSES[@]}"; do
-        local pids=$(pgrep -f "$process" 2>/dev/null || true)
-        if [[ -n "$pids" ]]; then
-            echo -e "${YELLOW}    🔪 Killing $process processes: $pids${NC}"
-            echo "$pids" | xargs -r sudo kill -TERM 2>/dev/null || true
-            sleep 2
-            echo "$pids" | xargs -r sudo kill -KILL 2>/dev/null || true
-        fi
-    done
-    
-    # Also kill any process containing 'pi-mon' or 'main_server'
-    local pids=$(pgrep -f "pi-mon\|main_server\|uvicorn.*5000\|uvicorn.*5001" 2>/dev/null || true)
-    if [[ -n "$pids" ]]; then
-        echo -e "${YELLOW}    🔪 Killing pi-mon related processes: $pids${NC}"
-        echo "$pids" | xargs -r sudo kill -TERM 2>/dev/null || true
-        sleep 2
-        echo "$pids" | xargs -r sudo kill -KILL 2>/dev/null || true
-    fi
-}
+# Simplified helper functions (removed complex port killing functions)
 
 # Step 1: Check for Docker and Docker Compose
 echo -e "${BLUE}📦 Checking Docker installation...${NC}"
@@ -448,258 +368,99 @@ if [[ ! -f "$COMPOSE_FILE" ]]; then
     exit 1
 fi
 
-# Step 3: Stop conflicting system services (unless in quick mode)
+# Step 3: Simple port cleanup
 if [[ "$QUICK_MODE" == false ]]; then
     echo ""
-    echo -e "${BLUE}🔍 Checking for conflicting system services...${NC}"
-    for service in "${CONFLICTING_SERVICES[@]}"; do
-        log_verbose "Checking service: $service"
-        stop_system_service "$service"
-    done
+    echo -e "${BLUE}🧹 Cleaning up conflicting services and ports...${NC}"
     
-    # Also proactively kill Python processes if not in quick mode
-    echo ""
-    echo -e "${BLUE}🐍 Proactively cleaning Python processes...${NC}"
-    kill_python_processes
-else
-    log_verbose "Skipping system service checks (quick mode)"
-fi
-
-# Step 4: Check for port conflicts (unless in quick mode)
-if [[ "$QUICK_MODE" == false ]]; then
-    echo ""
-    echo -e "${BLUE}🔌 Checking for port conflicts...${NC}"
-    conflicts_found=false
-    for port in "${CONFLICTING_PORTS[@]}"; do
-        log_verbose "Checking port: $port"
-        if check_port "$port"; then
-            echo -e "${YELLOW}⚠️  Port $port is in use:${NC}"
-            find_port_user "$port"
-            conflicts_found=true
-        fi
-    done
-else
-    log_verbose "Skipping port conflict checks (quick mode)"
-    conflicts_found=false
-fi
-
-if [[ "$conflicts_found" == true ]]; then
-    echo ""
-    echo -e "${YELLOW}⚠️  Some ports are still in use. Attempting aggressive cleanup...${NC}"
-    
-    # Step 1: Kill Python processes first
-    kill_python_processes
-    
-    # Step 2: Aggressively free each conflicting port
-    for port in "${CONFLICTING_PORTS[@]}"; do
-        if check_port "$port"; then
-            kill_port_processes "$port"
+    # Stop common system services that conflict
+    echo -e "${YELLOW}  🛑 Stopping system services...${NC}"
+    for service in mosquitto redis-server nginx apache2; do
+        if systemctl is-active --quiet "$service" 2>/dev/null; then
+            echo "    Stopping $service..."
+            sudo systemctl stop "$service" 2>/dev/null || true
         fi
     done
     
-    # Step 3: Additional Docker cleanup
-    echo -e "${YELLOW}  🐳 Additional Docker cleanup...${NC}"
-    sudo systemctl stop docker 2>/dev/null || true
-    sleep 2
-    sudo systemctl start docker 2>/dev/null || true
+    # Kill Python processes
+    echo -e "${YELLOW}  🐍 Stopping Python processes...${NC}"
+    pkill -f "uvicorn\|gunicorn\|main_server" 2>/dev/null || true
+    
+    # Simple port cleanup
+    echo -e "${YELLOW}  🔌 Freeing up ports...${NC}"
+    for port in 6379 1883 5000 5001 80 9001 3000; do
+        sudo fuser -k ${port}/tcp 2>/dev/null || true
+    done
+    
     sleep 3
-    
-    # Step 4: Wait for processes to fully terminate
-    echo -e "${BLUE}  ⏳ Waiting for processes to terminate...${NC}"
-    sleep 5
-    
-    # Verify ports are now free
+    echo -e "${GREEN}    ✅ Cleanup completed${NC}"
+else
+    log_verbose "Skipping service checks (quick mode)"
+fi
+
+# Step 4: Quick port check
+if [[ "$QUICK_MODE" == false ]]; then
     echo ""
-    echo -e "${BLUE}🔍 Verifying ports are now free...${NC}"
-    remaining_conflicts=false
-    for port in "${CONFLICTING_PORTS[@]}"; do
+    echo -e "${BLUE}🔍 Checking if key ports are free...${NC}"
+    
+    # Check critical ports - if still busy, show simple message
+    busy_ports=""
+    for port in 6379 1883 5001 80; do
         if check_port "$port"; then
-            echo -e "${RED}  ❌ Port $port is still in use after cleanup attempt${NC}"
-            find_port_user "$port"
-            remaining_conflicts=true
-        else
-            echo -e "${GREEN}  ✅ Port $port is now free${NC}"
+            busy_ports="$busy_ports $port"
         fi
     done
     
-    # If ports are still in use, warn user but continue (they might be using different ports)
-    if [[ "$remaining_conflicts" == true ]]; then
-        echo ""
-        echo -e "${RED}⚠️  WARNING: Some ports are still in use!${NC}"
-        echo -e "${YELLOW}This deployment will continue, but may fail if these ports conflict with your services.${NC}"
-        echo -e "${YELLOW}Consider checking your docker-compose.yml port mappings or stopping the conflicting processes manually.${NC}"
-        
+    if [[ -n "$busy_ports" ]]; then
+        echo -e "${YELLOW}⚠️  Ports still in use:$busy_ports${NC}"
+        echo -e "${YELLOW}   This might cause deployment issues, but continuing anyway...${NC}"
         if [[ "$SKIP_CONFIRMATION" == false ]]; then
-            echo ""
-            read -p "Do you want to continue anyway? (y/N): " -n 1 -r
+            read -p "Continue? (y/N): " -n 1 -r
             echo
             if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-                echo "Deployment cancelled due to port conflicts."
+                echo "Deployment cancelled."
                 exit 1
             fi
         fi
     else
-        echo -e "${GREEN}✅ All port conflicts resolved successfully${NC}"
+        echo -e "${GREEN}✅ All critical ports are free${NC}"
     fi
 fi
 
-# Step 5: Complete Docker cleanup (unless --no-cleanup)
+# Step 5: Simple Docker cleanup (unless --no-cleanup)
 if [[ "$SKIP_CLEANUP" == false ]]; then
     echo ""
-    echo -e "${BLUE}🧹 Performing complete Docker cleanup...${NC}"
+    echo -e "${BLUE}🧹 Cleaning up Docker...${NC}"
     
-    # Nuclear option - completely reset Docker if requested
+    # Nuclear option if requested
     if [[ "$FORCE_NUCLEAR" == true ]]; then
-        echo -e "${RED}☢️  NUCLEAR CLEANUP MODE ACTIVATED${NC}"
-        echo -e "${YELLOW}  🧨 Stopping all Docker containers...${NC}"
+        echo -e "${RED}☢️  Nuclear cleanup - removing everything${NC}"
         docker stop $(docker ps -aq) 2>/dev/null || true
-        
-        echo -e "${YELLOW}  🗑️  Removing all Docker containers...${NC}"
         docker rm $(docker ps -aq) 2>/dev/null || true
-        
-        echo -e "${YELLOW}  🗑️  Removing all Docker images...${NC}"
         docker rmi $(docker images -q) 2>/dev/null || true
-        
-        echo -e "${YELLOW}  🗑️  Removing all Docker volumes...${NC}"
         docker volume rm $(docker volume ls -q) 2>/dev/null || true
-        
-        echo -e "${YELLOW}  🗑️  Removing all Docker networks...${NC}"
-        docker network rm $(docker network ls -q) 2>/dev/null || true
-        
-        echo -e "${YELLOW}  🧽 Nuclear Docker system prune...${NC}"
-        docker system prune -af --volumes || true
-        
-        echo -e "${YELLOW}  🔄 Restarting Docker daemon...${NC}"
+        docker system prune -af --volumes 2>/dev/null || true
         sudo systemctl restart docker
-        sleep 10
-        
-        echo -e "${GREEN}✅ Nuclear cleanup completed${NC}"
-    fi
-
-    # Stop all pi-mon containers
-    log_verbose "Stopping containers..."
-    echo -e "${YELLOW}  🛑 Stopping all pi-mon containers...${NC}"
-    $COMPOSE_CMD down --remove-orphans || echo "No containers to stop"
-
-    # Remove all pi-mon containers (including stopped ones)
-    containers=$(docker ps -aq --filter "name=$PROJECT_NAME" 2>/dev/null || true)
-    if [[ -n "$containers" ]]; then
-        log_verbose "Found containers to remove: $containers"
-        echo -e "${YELLOW}  🗑️  Removing all pi-mon containers...${NC}"
-        docker rm -f $containers || echo "Some containers couldn't be removed"
-    fi
-
-    # Remove all pi-mon images
-    images=$(docker images --filter "reference=*$PROJECT_NAME*" -q 2>/dev/null || true)
-    if [[ -n "$images" ]]; then
-        log_verbose "Found images to remove: $images"
-        echo -e "${YELLOW}  🗑️  Removing all pi-mon images...${NC}"
-        docker rmi -f $images || echo "Some images couldn't be removed"
-    fi
-
-    # Remove all pi-mon volumes
-    volumes=$(docker volume ls --filter "name=$PROJECT_NAME" -q 2>/dev/null || true)
-    if [[ -n "$volumes" ]]; then
-        log_verbose "Found volumes to remove: $volumes"
-        echo -e "${YELLOW}  🗑️  Removing all pi-mon volumes...${NC}"
-        docker volume rm $volumes || echo "Some volumes couldn't be removed"
-    fi
-
-    # Remove specific volumes from $COMPOSE_CMD
-    echo -e "${YELLOW}  🗑️  Removing compose volumes...${NC}"
-    $COMPOSE_CMD down -v --remove-orphans || true
-
-    # Clean up Docker system
-    echo -e "${YELLOW}  🧽 Cleaning Docker system...${NC}"
-    docker system prune -f --volumes || true
-
-    echo -e "${GREEN}✅ Docker cleanup completed${NC}"
-    
-    # Step 5.5: Verify all ports are now free after cleanup
-    echo ""
-    echo -e "${BLUE}🔍 Verifying all ports are free after cleanup...${NC}"
-    cleanup_port_conflicts=false
-    for port in "${CONFLICTING_PORTS[@]}"; do
-        if check_port "$port"; then
-            echo -e "${RED}  ❌ Port $port is STILL in use after cleanup:${NC}"
-            find_port_user "$port"
-            cleanup_port_conflicts=true
-        else
-            echo -e "${GREEN}  ✅ Port $port is free${NC}"
-        fi
-    done
-    
-    if [[ "$cleanup_port_conflicts" == true ]]; then
-        echo ""
-        echo -e "${RED}⚠️  CRITICAL: Some ports are still in use after cleanup!${NC}"
-        echo -e "${YELLOW}Attempting final aggressive port cleanup...${NC}"
-        
-        # Final aggressive cleanup
-        for port in "${CONFLICTING_PORTS[@]}"; do
-            if check_port "$port"; then
-                echo -e "${RED}  🔥 Final cleanup for port $port${NC}"
-                kill_port_processes "$port"
-            fi
-        done
-        
-        # Wait and check one more time
-        sleep 3
-        echo ""
-        echo -e "${BLUE}🔍 Final port verification...${NC}"
-        final_conflicts=false
-        for port in "${CONFLICTING_PORTS[@]}"; do
-            if check_port "$port"; then
-                echo -e "${RED}  ❌ Port $port is PERMANENTLY blocked${NC}"
-                find_port_user "$port"
-                final_conflicts=true
-            else
-                echo -e "${GREEN}  ✅ Port $port is now free${NC}"
-            fi
-        done
-        
-        if [[ "$final_conflicts" == true ]]; then
-            echo ""
-            echo -e "${RED}💀 DEPLOYMENT BLOCKED: Critical ports still in use!${NC}"
-            echo -e "${YELLOW}Manual intervention required. Consider:${NC}"
-            echo -e "${YELLOW}  1. Reboot the system: sudo reboot${NC}"
-            echo -e "${YELLOW}  2. Use nuclear option: $0 --nuclear --yes${NC}"
-            echo -e "${YELLOW}  3. Manually kill blocking processes shown above${NC}"
-            
-            if [[ "$SKIP_CONFIRMATION" == false ]]; then
-                echo ""
-                read -p "Do you want to continue anyway and risk deployment failure? (y/N): " -n 1 -r
-                echo
-                if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-                    echo "Deployment cancelled due to port conflicts."
-                    exit 1
-                fi
-            else
-                echo -e "${RED}Auto-continuing due to --yes flag, but deployment may fail...${NC}"
-            fi
-        else
-            echo -e "${GREEN}✅ All ports successfully freed after final cleanup${NC}"
-        fi
+        sleep 5
+        echo -e "${GREEN}✅ Nuclear cleanup done${NC}"
     else
-        echo -e "${GREEN}✅ All required ports are free and ready for deployment${NC}"
+        # Normal cleanup - just pi-mon stuff
+        echo -e "${YELLOW}  🛑 Stopping pi-mon services...${NC}"
+        $COMPOSE_CMD down --remove-orphans -v 2>/dev/null || true
+        
+        echo -e "${YELLOW}  🗑️  Removing old images...${NC}"
+        docker images --filter "reference=*pi-monitor*" -q | xargs -r docker rmi -f 2>/dev/null || true
+        
+        echo -e "${YELLOW}  🧽 Quick system cleanup...${NC}"
+        docker system prune -f 2>/dev/null || true
+        
+        echo -e "${GREEN}✅ Docker cleanup done${NC}"
     fi
     
 else
     echo ""
-    echo -e "${YELLOW}⏩ Skipping cleanup phase (--no-cleanup flag)${NC}"
-    # Still stop containers for deployment
-    $COMPOSE_CMD down --remove-orphans || echo "No containers to stop"
-    
-    # Even without cleanup, verify ports are available
-    echo ""
-    echo -e "${BLUE}🔍 Checking port availability (no-cleanup mode)...${NC}"
-    for port in "${CONFLICTING_PORTS[@]}"; do
-        if check_port "$port"; then
-            echo -e "${YELLOW}  ⚠️  Port $port is in use (may cause deployment issues)${NC}"
-            find_port_user "$port"
-        else
-            echo -e "${GREEN}  ✅ Port $port is free${NC}"
-        fi
-    done
+    echo -e "${YELLOW}⏩ Skipping cleanup (--no-cleanup flag)${NC}"
+    $COMPOSE_CMD down --remove-orphans 2>/dev/null || true
 fi
 
 # Step 6: Build and deploy
@@ -779,35 +540,7 @@ if [[ "$BUILD_ONLY" == true ]]; then
     exit 0
 fi
 
-# Step 8: Final port check before starting services
-echo ""
-echo -e "${BLUE}🔍 Final port check before starting services...${NC}"
-pre_start_conflicts=false
-for port in "${CONFLICTING_PORTS[@]}"; do
-    if check_port "$port"; then
-        echo -e "${YELLOW}  ⚠️  Port $port became busy again:${NC}"
-        find_port_user "$port"
-        pre_start_conflicts=true
-    else
-        log_verbose "Port $port is still free"
-    fi
-done
-
-if [[ "$pre_start_conflicts" == true ]]; then
-    echo -e "${YELLOW}⚠️  Some ports became busy again. This may cause service startup issues.${NC}"
-    if [[ "$SKIP_CONFIRMATION" == false ]]; then
-        read -p "Continue with startup anyway? (y/N): " -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            echo "Startup cancelled due to port conflicts."
-            exit 1
-        fi
-    fi
-else
-    echo -e "${GREEN}✅ All ports clear for service startup${NC}"
-fi
-
-# Step 9: Start services
+# Step 8: Start services
 echo ""
 echo -e "${BLUE}🚀 Starting services...${NC}"
 if [[ -n "$COMPOSE_SERVICES" ]]; then
@@ -818,17 +551,8 @@ else
     $COMPOSE_CMD up -d
 fi
 
-# Step 9.5: Verify ports are now properly occupied by our services
-echo ""
-echo -e "${BLUE}🔍 Verifying our services are using the expected ports...${NC}"
-sleep 5  # Give services time to start
-for port in "${CONFLICTING_PORTS[@]}"; do
-    if check_port "$port"; then
-        echo -e "${GREEN}  ✅ Port $port is now in use (by our services)${NC}"
-    else
-        echo -e "${YELLOW}  ⚠️  Port $port is not in use (service may not have started)${NC}"
-    fi
-done
+# Give services time to start
+sleep 3
 
 # Step 10: Wait and perform health checks (unless --no-health-check)
 if [[ "$SKIP_HEALTH_CHECK" == false ]]; then

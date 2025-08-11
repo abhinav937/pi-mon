@@ -1,17 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
 import { Play, Square, RotateCcw, RefreshCw, Settings, CheckCircle, AlertCircle, XCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 function ServiceManagement({ unifiedClient }) {
-  const [services, setServices] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [actionLoading, setActionLoading] = useState({});
   const queryClient = useQueryClient();
 
   // Query for services
-  const { data: servicesData, isLoading, error: queryError, refetch } = useQuery(
+  const { data: services, isLoading, error: queryError, refetch } = useQuery(
     'services',
     async () => {
       if (!unifiedClient) return [];

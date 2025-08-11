@@ -85,12 +85,17 @@ cd frontend
 npm install
 npm run build
 cd ..
-# Copy build to Apache root
+# Clear old files and copy build to Apache root
+echo -e "${BLUE}📁 Copying frontend files...${NC}"
+sudo rm -rf /var/www/html/*
 sudo cp -r frontend/build/* /var/www/html/
 sudo chown -R www-data:www-data /var/www/html/
+sudo chmod -R 755 /var/www/html/
 # Copy Apache config
+echo -e "${BLUE}⚙️  Updating Apache configuration...${NC}"
 sudo cp frontend/apache.conf /etc/apache2/sites-available/000-default.conf
 # Restart Apache
+echo -e "${BLUE}🔄 Restarting Apache...${NC}"
 sudo systemctl restart apache2
 
 # Wait for frontend to be ready

@@ -1,1 +1,101 @@
-"import axios from 'axios'; const CONNECTION_STATES = { DISCONNECTED: 'disconnected', CONNECTING: 'connecting', CONNECTED: 'connected', ERROR: 'error' }; class UnifiedClient { constructor(options = {}) { this.serverUrl = options.serverUrl || \`http://\${window.location.hostname}:5001\`; this.onConnectionChange = options.onConnectionChange || (() => {}); this.onDataUpdate = options.onDataUpdate || (() => {}); this.connectionState = CONNECTION_STATES.DISCONNECTED; this.authToken = localStorage.getItem('pi-monitor-token'); this.httpClient = axios.create({ baseURL: this.serverUrl, timeout: 10000 }); this.initializeConnection(); } async initializeConnection() { try { if (!this.authToken) { await this.authenticate(); } await this.checkHealth(); this.setConnectionState(CONNECTION_STATES.CONNECTED); this.startPolling(); } catch (error) { console.error('Failed to initialize connection:', error); this.setConnectionState(CONNECTION_STATES.ERROR); } } async authenticate() { try { const response = await this.httpClient.post('/api/auth/token', { username: 'abhinav', password: 'kavachi' }); this.authToken = response.data.access_token; localStorage.setItem('pi-monitor-token', this.authToken); } catch (error) { throw new Error('Failed to authenticate'); } } setConnectionState(state) { if (this.connectionState !== state) { this.connectionState = state; this.onConnectionChange(state); } } startPolling() { this.pollingInterval = setInterval(async () => { try { if (this.connectionState === CONNECTION_STATES.CONNECTED) { const stats = await this.getSystemStats(); this.onDataUpdate({ type: 'periodic_update', data: stats }); } } catch (error) { console.error('Polling error:', error); } } }, 5000); } async getSystemStats() { try { const response = await this.httpClient.get('/api/system'); return response.data; } catch (error) { throw error; } } async checkHealth() { try { const response = await this.httpClient.get('/health'); return response.data; } catch (error) { throw error; } } getConnectionState() { return this.connectionState; } disconnect() { if (this.pollingInterval) { clearInterval(this.pollingInterval); } this.setConnectionState(CONNECTION_STATES.DISCONNECTED); } } export { UnifiedClient, CONNECTION_STATES };" 
+import axios from 'axios';
+
+const CONNECTION_STATES = {
+  DISCONNECTED: 'disconnected',
+  CONNECTING: 'connecting',
+  CONNECTED: 'connected',
+  ERROR: 'error'
+};
+
+class UnifiedClient {
+  constructor(options = {}) {
+    this.serverUrl = options.serverUrl || `http://${window.location.hostname}:5001`;
+    this.onConnectionChange = options.onConnectionChange || (() => {});
+    this.onDataUpdate = options.onDataUpdate || (() => {});
+    this.connectionState = CONNECTION_STATES.DISCONNECTED;
+    this.authToken = localStorage.getItem('pi-monitor-token');
+    this.httpClient = axios.create({
+      baseURL: this.serverUrl,
+      timeout: 10000
+    });
+    this.initializeConnection();
+  }
+
+  async initializeConnection() {
+    try {
+      if (!this.authToken) {
+        await this.authenticate();
+      }
+      await this.checkHealth();
+      this.setConnectionState(CONNECTION_STATES.CONNECTED);
+      this.startPolling();
+    } catch (error) {
+      console.error('Failed to initialize connection:', error);
+      this.setConnectionState(CONNECTION_STATES.ERROR);
+    }
+  }
+
+  async authenticate() {
+    try {
+      const response = await this.httpClient.post('/api/auth/token', {
+        username: 'abhinav',
+        password: 'kavachi'
+      });
+      this.authToken = response.data.access_token;
+      localStorage.setItem('pi-monitor-token', this.authToken);
+    } catch (error) {
+      throw new Error('Failed to authenticate');
+    }
+  }
+
+  setConnectionState(state) {
+    if (this.connectionState !== state) {
+      this.connectionState = state;
+      this.onConnectionChange(state);
+    }
+  }
+
+  startPolling() {
+    this.pollingInterval = setInterval(async () => {
+      try {
+        if (this.connectionState === CONNECTION_STATES.CONNECTED) {
+          const stats = await this.getSystemStats();
+          this.onDataUpdate({ type: 'periodic_update', data: stats });
+        }
+      } catch (error) {
+        console.error('Polling error:', error);
+      }
+    }, 5000);
+  }
+
+  async getSystemStats() {
+    try {
+      const response = await this.httpClient.get('/api/system');
+      return response.data;
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  async checkHealth() {
+    try {
+      const response = await this.httpClient.get('/health');
+      return response.data;
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  getConnectionState() {
+    return this.connectionState;
+  }
+
+  disconnect() {
+    if (this.pollingInterval) {
+      clearInterval(this.pollingInterval);
+    }
+    this.setConnectionState(CONNECTION_STATES.DISCONNECTED);
+  }
+}
+
+export { UnifiedClient, CONNECTION_STATES }; 

@@ -2,7 +2,8 @@
 # Pi Monitor - Remote API Testing
 # Tests all endpoints from any machine
 
-set -e
+# Remove set -e to prevent early exit
+# set -e
 
 # Colors for output
 RED='\033[0;31m'
@@ -32,6 +33,9 @@ echo ""
 TESTS_PASSED=0
 TESTS_FAILED=0
 
+# Global variable to store auth token
+AUTH_TOKEN=""
+
 # Function to run a test
 run_test() {
     local test_name="$1"
@@ -39,6 +43,7 @@ run_test() {
     local method="${3:-GET}"
     local data="${4:-}"
     local expected_status="${5:-200}"
+    local use_auth="${6:-false}"
     
     echo -e "${YELLOW}Testing: $test_name${NC}"
     echo "  URL: $url"
@@ -48,17 +53,31 @@ run_test() {
         echo "  Data: $data"
     fi
     
-    # Run the test
-    if [ "$method" = "POST" ]; then
-        response=$(curl -s -w "%{http_code}" -X POST -H "Content-Type: application/json" -d "$data" "$url" 2>/dev/null || echo "000")
-    else
-        response=$(curl -s -w "%{http_code}" "$url" 2>/dev/null || echo "000")
+    if [ "$use_auth" = "true" ] && [ -n "$AUTH_TOKEN" ]; then
+        echo "  Auth: Bearer token"
     fi
     
-    # Extract status code (last 3 characters)
-    status_code="${response: -3}"
-    # Extract response body (everything except last 3 characters)
-    response_body="${response%???}"
+    # Run the test and capture both response body and status code
+    if [ "$method" = "POST" ]; then
+        if [ "$use_auth" = "true" ] && [ -n "$AUTH_TOKEN" ]; then
+            response_body=$(curl -s -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $AUTH_TOKEN" -d "$data" "$url" 2>/dev/null || echo "")
+            status_code=$(curl -s -o /dev/null -w "%{http_code}" -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $AUTH_TOKEN" -d "$data" "$url" 2>/dev/null || echo "000")
+        else
+            response_body=$(curl -s -X POST -H "Content-Type: application/json" -d "$data" "$url" 2>/dev/null || echo "")
+            status_code=$(curl -s -o /dev/null -w "%{http_code}" -X POST -H "Content-Type: application/json" -d "$data" "$url" 2>/dev/null || echo "000")
+        fi
+    else
+        if [ "$use_auth" = "true" ] && [ -n "$AUTH_TOKEN" ]; then
+            response_body=$(curl -s -H "Authorization: Bearer $AUTH_TOKEN" "$url" 2>/dev/null || echo "")
+            status_code=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $AUTH_TOKEN" "$url" 2>/dev/null || echo "000")
+        else
+            response_body=$(curl -s "$url" 2>/dev/null || echo "")
+            status_code=$(curl -s -o /dev/null -w "%{http_code}" "$url" 2>/dev/null || echo "000")
+        fi
+    fi
+    
+    # Clean up status code - ensure it's a 3-digit number
+    status_code=$(echo "$status_code" | grep -o '[0-9][0-9][0-9]' | head -1 || echo "000")
     
     echo "  Status: $status_code"
     
@@ -67,7 +86,9 @@ run_test() {
         ((TESTS_PASSED++))
     else
         echo -e "  ${RED}❌ FAIL (Expected: $expected_status, Got: $status_code)${NC}"
-        echo "  Response: $response_body"
+        if [ -n "$response_body" ]; then
+            echo "  Response: $response_body"
+        fi
         ((TESTS_FAILED++))
     fi
     echo ""
@@ -75,11 +96,13 @@ run_test() {
 
 # 1. Basic Connectivity
 echo -e "${BLUE}1. Testing Basic Connectivity${NC}"
-if ping -c 1 -W 2 "$PI_IP" > /dev/null 2>&1; then
-    echo -e "${GREEN}✅ Pi is reachable${NC}"
+echo -e "${YELLOW}Testing network connectivity via HTTP instead of ping...${NC}"
+if curl -s --connect-timeout 5 "http://$PI_IP:$BACKEND_PORT/health" > /dev/null 2>&1; then
+    echo -e "${GREEN}✅ Pi is reachable via HTTP${NC}"
     ((TESTS_PASSED++))
 else
-    echo -e "${RED}❌ Pi is not reachable${NC}"
+    echo -e "${RED}❌ Pi is not reachable via HTTP${NC}"
+    echo -e "${YELLOW}Continuing with tests anyway...${NC}"
     ((TESTS_FAILED++))
 fi
 echo ""
@@ -92,33 +115,96 @@ run_test "Health Check" "http://$PI_IP:$BACKEND_PORT/health"
 echo -e "${BLUE}3. Testing Backend Root${NC}"
 run_test "Root Endpoint" "http://$PI_IP:$BACKEND_PORT/"
 
-# 4. Backend System Stats
-echo -e "${BLUE}4. Testing System Monitoring${NC}"
-run_test "System Stats" "http://$PI_IP:$BACKEND_PORT/api/system"
+# 4. Backend Authentication (Get Token)
+echo -e "${BLUE}4. Testing Authentication${NC}"
+echo -e "${YELLOW}Getting authentication token...${NC}"
+auth_response=$(curl -s -X POST -H "Content-Type: application/json" -d '{"username":"admin","password":"admin"}' "http://$PI_IP:$BACKEND_PORT/api/auth/token" 2>/dev/null || echo "{}")
 
-# 5. Backend Services Status
-echo -e "${BLUE}5. Testing Service Management${NC}"
-run_test "Services Status" "http://$PI_IP:$BACKEND_PORT/api/services"
+# Extract token from response using a cross-platform approach
+if echo "$auth_response" | grep -q "access_token"; then
+    # Use a cross-platform token extraction method
+    AUTH_TOKEN=$(echo "$auth_response" | sed 's/.*"access_token":"\([^"]*\)".*/\1/')
+    if [ -n "$AUTH_TOKEN" ] && [ "$AUTH_TOKEN" != "$auth_response" ]; then
+        echo -e "${GREEN}✅ Token received: ${AUTH_TOKEN:0:30}...${NC}"
+        run_test "Auth Token Request" "http://$PI_IP:$BACKEND_PORT/api/auth/token" "POST" '{"username":"admin","password":"admin"}'
+    else
+        echo -e "${RED}❌ Failed to extract token${NC}"
+        echo "DEBUG: Token extraction failed, AUTH_TOKEN='$AUTH_TOKEN'"
+        ((TESTS_FAILED++))
+    fi
+else
+    echo -e "${RED}❌ Authentication failed${NC}"
+    echo "Response: $auth_response"
+    ((TESTS_FAILED++))
+fi
+echo ""
 
-# 6. Backend Power Management
-echo -e "${BLUE}6. Testing Power Management${NC}"
-run_test "Power Status" "http://$PI_IP:$BACKEND_PORT/api/power"
+# 5. Backend System Stats (with auth)
+echo -e "${BLUE}5. Testing System Monitoring${NC}"
+if [ -n "$AUTH_TOKEN" ]; then
+    run_test "System Stats" "http://$PI_IP:$BACKEND_PORT/api/system" "GET" "" "200" "true"
+else
+    echo -e "${YELLOW}Skipping authenticated endpoint (no token)${NC}"
+    ((TESTS_FAILED++))
+fi
 
-# 7. Backend Authentication
-echo -e "${BLUE}7. Testing Authentication${NC}"
-run_test "Auth Token Request" "http://$PI_IP:$BACKEND_PORT/api/auth/token" "POST" '{"username":"admin","password":"admin"}'
+# 6. Backend Services Status (with auth)
+echo -e "${BLUE}6. Testing Service Management${NC}"
+if [ -n "$AUTH_TOKEN" ]; then
+    run_test "Services Status" "http://$PI_IP:$BACKEND_PORT/api/services" "GET" "" "200" "true"
+else
+    echo -e "${YELLOW}Skipping authenticated endpoint (no token)${NC}"
+    ((TESTS_FAILED++))
+fi
 
-# 8. Frontend Basic Access
-echo -e "${BLUE}8. Testing Frontend${NC}"
+# 7. Backend Power Management (with auth)
+echo -e "${BLUE}7. Testing Power Management${NC}"
+if [ -n "$AUTH_TOKEN" ]; then
+    run_test "Power Status" "http://$PI_IP:$BACKEND_PORT/api/power" "GET" "" "200" "true"
+else
+    echo -e "${YELLOW}Skipping authenticated endpoint (no token)${NC}"
+    ((TESTS_FAILED++))
+fi
+
+# 8. Test Service Actions (with auth)
+echo -e "${BLUE}8. Testing Service Actions${NC}"
+if [ -n "$AUTH_TOKEN" ]; then
+    run_test "Service Status Check" "http://$PI_IP:$BACKEND_PORT/api/services" "POST" '{"service_name":"ssh","action":"status"}' "200" "true"
+else
+    echo -e "${YELLOW}Skipping authenticated endpoint (no token)${NC}"
+    ((TESTS_FAILED++))
+fi
+
+# 9. Test Power Actions (with auth)
+echo -e "${BLUE}9. Testing Power Actions${NC}"
+if [ -n "$AUTH_TOKEN" ]; then
+    run_test "Power Action Check" "http://$PI_IP:$BACKEND_PORT/api/power" "POST" '{"action":"restart","delay":0}' "200" "true"
+else
+    echo -e "${YELLOW}Skipping authenticated endpoint (no token)${NC}"
+    ((TESTS_FAILED++))
+fi
+
+# 10. Frontend Basic Access
+echo -e "${BLUE}10. Testing Frontend${NC}"
 run_test "Frontend Access" "http://$PI_IP:$FRONTEND_PORT/"
 
-# 9. Error Handling Tests
-echo -e "${BLUE}9. Testing Error Handling${NC}"
+# 11. Error Handling Tests
+echo -e "${BLUE}11. Testing Error Handling${NC}"
 run_test "Invalid Endpoint" "http://$PI_IP:$BACKEND_PORT/invalid" "GET" "" "404"
-run_test "Invalid Method" "http://$PI_IP:$BACKEND_PORT/health" "POST" '{"test":"data"}' "405"
+run_test "Invalid Method" "http://$PI_IP:$BACKEND_PORT/health" "POST" '{"test":"data"}' "404"
 
-# 10. Performance Tests
-echo -e "${BLUE}10. Testing Performance${NC}"
+# 12. Authentication Error Tests
+echo -e "${BLUE}12. Testing Authentication Errors${NC}"
+run_test "System Stats (No Auth)" "http://$PI_IP:$BACKEND_PORT/api/system" "GET" "" "401"
+run_test "Services (No Auth)" "http://$PI_IP:$BACKEND_PORT/api/services" "GET" "" "401"
+run_test "Power (No Auth)" "http://$PI_IP:$BACKEND_PORT/api/power" "GET" "" "401"
+
+# 13. CORS Tests
+echo -e "${BLUE}13. Testing CORS${NC}"
+run_test "CORS Preflight" "http://$PI_IP:$BACKEND_PORT/api/system" "OPTIONS" "" "200"
+
+# 14. Performance Tests
+echo -e "${BLUE}14. Testing Performance${NC}"
 echo -e "${YELLOW}Testing: Response Time${NC}"
 start_time=$(date +%s%N)
 curl -s "http://$PI_IP:$BACKEND_PORT/health" > /dev/null

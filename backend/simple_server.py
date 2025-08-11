@@ -219,6 +219,17 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                 response = self.handle_power_action()
                 self.wfile.write(json.dumps(response).encode())
                 
+        elif path == '/health':
+            # Health endpoint doesn't support POST
+            self.send_response(405)
+            self.send_header('Content-type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+            self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+            self.end_headers()
+            response = {"error": "Method not allowed"}
+            self.wfile.write(json.dumps(response).encode())
+                
         else:
             # 404 for unknown paths
             self.send_response(404)
@@ -232,10 +243,15 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
     
     def do_OPTIONS(self):
         """Handle CORS preflight"""
+        parsed_url = urlparse(self.path)
+        path = parsed_url.path
+        
+        # Set CORS headers for preflight
         self.send_response(200)
         self.send_header('Access-Control-Allow-Origin', '*')
         self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+        self.send_header('Access-Control-Max-Age', '86400')  # Cache preflight for 24 hours
         self.end_headers()
     
     def check_auth(self):
@@ -249,17 +265,48 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
     
     def handle_auth(self):
         """Handle authentication and return token"""
-        # Simple demo authentication - always succeeds
-        token = self.generate_token()
-        SimplePiMonitorHandler.auth_tokens[token] = {
-            'user': 'pi-monitor',
-            'expires': time.time() + JWT_EXPIRATION
-        }
-        
-        return {
-            "access_token": token,
-            "token_type": "bearer"
-        }
+        # Get content length from headers
+        content_length = int(self.headers.get('Content-Length', 0))
+        if content_length > 0:
+            # Read POST data
+            post_data = self.rfile.read(content_length)
+            try:
+                # Parse JSON data
+                auth_data = json.loads(post_data.decode('utf-8'))
+                username = auth_data.get('username', '')
+                password = auth_data.get('password', '')
+                
+                # Check credentials
+                if username == 'abhinav' and password == 'kavachi':
+                    # Authentication successful
+                    token = self.generate_token()
+                    SimplePiMonitorHandler.auth_tokens[token] = {
+                        'user': username,
+                        'expires': time.time() + JWT_EXPIRATION
+                    }
+                    
+                    return {
+                        "access_token": token,
+                        "token_type": "bearer",
+                        "message": "Authentication successful"
+                    }
+                else:
+                    # Authentication failed
+                    return {
+                        "error": "Invalid username or password",
+                        "message": "Authentication failed"
+                    }
+                    
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                return {
+                    "error": "Invalid JSON data",
+                    "message": "Request body must be valid JSON"
+                }
+        else:
+            return {
+                "error": "Missing request body",
+                "message": "Username and password required"
+            }
     
     def generate_token(self):
         """Generate a simple token"""

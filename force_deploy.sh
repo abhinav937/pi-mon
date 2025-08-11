@@ -2,39 +2,23 @@
 # Pi Monitor - Force Deployment Script
 # Handles port conflicts, removes previous versions, and deploys latest with full cleanup
 
-# Don't use set -e during cleanup as we expect some commands to fail
-# set -e  # Exit on any error
+set -e  # Exit on any error
 
-# Function to setup colors after argument parsing
-setup_colors() {
-    # Colors for output - auto-detect terminal support
-    if [[ -t 1 ]] && [[ "${TERM:-}" != "dumb" ]] && [[ "${NO_COLOR:-}" == "" ]] && [[ "$NO_COLOR_FLAG" == false ]]; then
-        RED='\033[0;31m'
-        GREEN='\033[0;32m'
-        YELLOW='\033[1;33m'
-        BLUE='\033[0;34m'
-        PURPLE='\033[0;35m'
-        CYAN='\033[0;36m'
-        NC='\033[0m' # No Color
-    else
-        # No color support or disabled
-        RED=''
-        GREEN=''
-        YELLOW=''
-        BLUE=''
-        PURPLE=''
-        CYAN=''
-        NC=''
-    fi
-}
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+PURPLE='\033[0;35m'
+CYAN='\033[0;36m'
+NC='\033[0m' # No Color
 
 # Configuration
 PROJECT_NAME="pi-mon"
 COMPOSE_CMD="docker-compose"
 COMPOSE_FILE="$COMPOSE_CMD.yml"
-CONFLICTING_SERVICES=("redis" "redis-server" "mosquitto" "nginx" "apache2")
-CONFLICTING_PORTS=(6379 1883 5000 5001 80 9001 3000)
-PYTHON_PROCESSES=("uvicorn" "gunicorn" "python3" "main_server" "agent.py")
+CONFLICTING_SERVICES=("redis" "redis-server" "mosquitto")
+CONFLICTING_PORTS=(6379 1883 5001 80 9001)
 
 # Docker Compose command setup
 setup_compose_command() {
@@ -91,7 +75,6 @@ SKIP_HEALTH_CHECK=false
 PULL_IMAGES=true
 CREATE_VENV=true
 FORCE_NUCLEAR=false
-NO_COLOR_FLAG=false
 
 # Function to show help
 show_help() {
@@ -236,10 +219,6 @@ parse_arguments() {
                 FORCE_NUCLEAR=true
                 shift
                 ;;
-            --no-color)
-                NO_COLOR_FLAG=true
-                shift
-                ;;
             *)
                 echo -e "${RED}❌ Unknown option: $1${NC}"
                 echo "Use --help for usage information."
@@ -285,9 +264,6 @@ progress_msg() {
 
 # Parse command line arguments first
 parse_arguments "$@"
-
-# Setup colors after arguments are parsed
-setup_colors
 
 # Setup Docker Compose command based on mode
 setup_compose_command
@@ -353,6 +329,21 @@ find_port_user() {
     netstat -tulpn 2>/dev/null | grep ":$port " || ss -tulpn 2>/dev/null | grep ":$port " || echo "  No specific process found"
 }
 
+# Function to stop system services safely
+stop_system_service() {
+    local service=$1
+    if systemctl is-active --quiet "$service" 2>/dev/null; then
+        echo -e "${YELLOW}  🛑 Stopping system service: $service${NC}"
+        sudo systemctl stop "$service" || echo -e "${RED}    ❌ Failed to stop $service${NC}"
+        
+        # Also disable it to prevent auto-restart
+        if systemctl is-enabled --quiet "$service" 2>/dev/null; then
+            echo -e "${YELLOW}  🚫 Disabling auto-start for: $service${NC}"
+            sudo systemctl disable "$service" || echo -e "${RED}    ❌ Failed to disable $service${NC}"
+        fi
+    fi
+}
+
 # Function to get the Pi's network IP address
 get_network_ip() {
     # Try multiple methods to get the network IP
@@ -378,8 +369,6 @@ get_network_ip() {
     
     echo "$ip"
 }
-
-# Simplified helper functions (removed complex port killing functions)
 
 # Step 1: Check for Docker and Docker Compose
 echo -e "${BLUE}📦 Checking Docker installation...${NC}"
@@ -410,10 +399,67 @@ if [[ ! -f "$COMPOSE_FILE" ]]; then
     exit 1
 fi
 
-# Step 3: Complete Docker and service cleanup 
+# Step 3: Stop conflicting system services (unless in quick mode)
+if [[ "$QUICK_MODE" == false ]]; then
+    echo ""
+    echo -e "${BLUE}🔍 Checking for conflicting system services...${NC}"
+    for service in "${CONFLICTING_SERVICES[@]}"; do
+        log_verbose "Checking service: $service"
+        stop_system_service "$service"
+    done
+else
+    log_verbose "Skipping system service checks (quick mode)"
+fi
+
+# Step 4: Check for port conflicts (unless in quick mode)
+if [[ "$QUICK_MODE" == false ]]; then
+    echo ""
+    echo -e "${BLUE}🔌 Checking for port conflicts...${NC}"
+    conflicts_found=false
+    for port in "${CONFLICTING_PORTS[@]}"; do
+        log_verbose "Checking port: $port"
+        if check_port "$port"; then
+            echo -e "${YELLOW}⚠️  Port $port is in use:${NC}"
+            find_port_user "$port"
+            conflicts_found=true
+        fi
+    done
+else
+    log_verbose "Skipping port conflict checks (quick mode)"
+    conflicts_found=false
+fi
+
+if [[ "$conflicts_found" == true ]]; then
+    echo ""
+    echo -e "${YELLOW}⚠️  Some ports are still in use. Attempting to resolve...${NC}"
+    
+    # Try to kill processes using our ports (be careful here)
+    for port in "${CONFLICTING_PORTS[@]}"; do
+        if check_port "$port"; then
+            echo -e "${YELLOW}  🔧 Attempting to free port $port...${NC}"
+            # Find and kill processes using these specific ports (only if they're likely ours)
+            pids=$(netstat -tlnp 2>/dev/null | grep ":$port " | awk '{print $7}' | cut -d'/' -f1 | grep -E '^[0-9]+$' || true)
+            if [[ -n "$pids" ]]; then
+                for pid in $pids; do
+                    if ps -p "$pid" -o comm= 2>/dev/null | grep -E "(redis|mosquitto)" &>/dev/null; then
+                        echo -e "${YELLOW}    🔪 Killing process $pid using port $port${NC}"
+                        sudo kill -TERM "$pid" 2>/dev/null || true
+                        sleep 2
+                        sudo kill -KILL "$pid" 2>/dev/null || true
+                    fi
+                done
+            fi
+        fi
+    done
+fi
+
+# Step 5: Complete Docker cleanup (unless --no-cleanup) 
 if [[ "$SKIP_CLEANUP" == false ]]; then
     echo ""
     echo -e "${BLUE}🧹 Complete cleanup - Docker and services...${NC}"
+    
+    # Temporarily disable error checking for cleanup
+    set +e
     
     # Nuclear option if requested
     if [[ "$FORCE_NUCLEAR" == true ]]; then
@@ -427,69 +473,55 @@ if [[ "$SKIP_CLEANUP" == false ]]; then
         sleep 5
         echo -e "${GREEN}✅ Nuclear cleanup done${NC}"
     else
-        # Step 3a: Docker cleanup FIRST
-        echo -e "${YELLOW}  🐳 Docker cleanup first...${NC}"
-        
-        # Stop all docker-compose services
-        echo "    Stopping docker-compose services..."
-        $COMPOSE_CMD down --remove-orphans -v 2>/dev/null || true
-        
-        # Force stop and remove ALL pi-monitor containers
-        echo "    Force cleaning pi-monitor containers..."
-        docker ps -aq --filter "name=pi-monitor" | xargs -r docker rm -f 2>/dev/null || true
-        
-        # Remove old images
-        echo "    Removing old pi-monitor images..."
-        docker images --filter "reference=*pi-monitor*" -q | xargs -r docker rmi -f 2>/dev/null || true
-        
-        # Clean system
-        docker system prune -f 2>/dev/null || true
-        docker network ls --filter "name=pi-monitor" -q | xargs -r docker network rm 2>/dev/null || true
-        
-        # Step 3b: System services cleanup
-        echo -e "${YELLOW}  🛑 Stopping system services...${NC}"
-        for service in mosquitto redis-server nginx apache2; do
-            if systemctl is-active --quiet "$service" 2>/dev/null; then
-                echo "    Stopping $service..."
-                sudo systemctl stop "$service" 2>/dev/null || true
-                sudo systemctl stop "$service.socket" 2>/dev/null || true
-            fi
-        done
-        
-        # Step 3c: Process cleanup
-        echo -e "${YELLOW}  💀 Killing conflicting processes...${NC}"
-        echo "    Killing mosquitto processes..."
-        sudo pkill -9 -f "mosquitto" >/dev/null 2>&1 || true
-        sleep 1
-        echo "    Killing redis-server processes..."
-        sudo pkill -9 -f "redis-server" >/dev/null 2>&1 || true
-        sleep 1
-        echo "    Killing web server processes..."
-        sudo pkill -9 -f "uvicorn\|gunicorn\|main_server" >/dev/null 2>&1 || true
-        sleep 1
-        
-        # Step 3d: Port cleanup  
-        echo -e "${YELLOW}  🔌 Freeing up ports forcefully...${NC}"
-        for port in 6379 1883 5000 5001 80 9001 3000; do
-            echo "    Freeing port $port..."
-            sudo fuser -k ${port}/tcp >/dev/null 2>&1 || true
-            sleep 1
-            # Double-check and force kill if needed
-            if sudo netstat -tulpn 2>/dev/null | grep -q ":$port "; then
-                echo "      Force killing remaining processes on port $port..."
-                sudo lsof -ti:$port | xargs -r sudo kill -9 >/dev/null 2>&1 || true
-                sleep 1
-            fi
-        done
-        
-        # Give everything time to fully terminate
-        sleep 8
-        echo -e "${GREEN}✅ Complete cleanup done${NC}"
+        # Stop all pi-mon containers
+        log_verbose "Stopping containers..."
+        echo -e "${YELLOW}  🛑 Stopping all pi-mon containers...${NC}"
+        $COMPOSE_CMD down --remove-orphans || echo "No containers to stop"
+
+        # Remove all pi-mon containers (including stopped ones)
+        containers=$(docker ps -aq --filter "name=$PROJECT_NAME" 2>/dev/null || true)
+        if [[ -n "$containers" ]]; then
+            log_verbose "Found containers to remove: $containers"
+            echo -e "${YELLOW}  🗑️  Removing all pi-mon containers...${NC}"
+            docker rm -f $containers || echo "Some containers couldn't be removed"
+        fi
+
+        # Remove all pi-mon images
+        images=$(docker images --filter "reference=*$PROJECT_NAME*" -q 2>/dev/null || true)
+        if [[ -n "$images" ]]; then
+            log_verbose "Found images to remove: $images"
+            echo -e "${YELLOW}  🗑️  Removing all pi-mon images...${NC}"
+            docker rmi -f $images || echo "Some images couldn't be removed"
+        fi
+
+        # Remove all pi-mon volumes
+        volumes=$(docker volume ls --filter "name=$PROJECT_NAME" -q 2>/dev/null || true)
+        if [[ -n "$volumes" ]]; then
+            log_verbose "Found volumes to remove: $volumes"
+            echo -e "${YELLOW}  🗑️  Removing all pi-mon volumes...${NC}"
+            docker volume rm $volumes || echo "Some volumes couldn't be removed"
+        fi
+
+        # Remove specific volumes from $COMPOSE_CMD
+        echo -e "${YELLOW}  🗑️  Removing compose volumes...${NC}"
+        $COMPOSE_CMD down -v --remove-orphans || true
+
+        # Clean up Docker system
+        echo -e "${YELLOW}  🧽 Cleaning Docker system...${NC}"
+        docker system prune -f --volumes || true
+
+        echo -e "${GREEN}✅ Docker cleanup completed${NC}"
     fi
+    
+    # Re-enable error checking
+    set -e
     
 elif [[ "$QUICK_MODE" == true ]]; then
     echo ""
     echo -e "${BLUE}⚡ Quick cleanup mode...${NC}"
+    
+    # Temporarily disable error checking for cleanup
+    set +e
     
     # Quick Docker cleanup only
     echo -e "${YELLOW}  🐳 Quick Docker cleanup...${NC}"
@@ -506,13 +538,20 @@ elif [[ "$QUICK_MODE" == true ]]; then
     sleep 2
     
     log_verbose "Quick cleanup completed"
+    
+    # Re-enable error checking
+    set -e
 else
     echo ""
     echo -e "${YELLOW}⏩ Skipping cleanup (--no-cleanup flag)${NC}"
+    # Temporarily disable error checking
+    set +e
     $COMPOSE_CMD down --remove-orphans 2>/dev/null || true
+    # Re-enable error checking
+    set -e
 fi
 
-# Step 4: Enhanced port verification
+# Step 6: Enhanced port verification
 if [[ "$QUICK_MODE" == false ]]; then
     echo ""
     echo -e "${BLUE}🔍 Verifying ports are free...${NC}"
@@ -551,7 +590,7 @@ if [[ "$QUICK_MODE" == false ]]; then
                     echo "    sudo systemctl stop nginx apache2"
                     echo "    sudo fuser -k 80/tcp"
                     ;;
-                5001|5000)
+                5001)
                     echo "    sudo pkill -f 'uvicorn\|gunicorn\|main_server'"
                     echo "    sudo fuser -k $port/tcp"
                     ;;
@@ -573,7 +612,7 @@ if [[ "$QUICK_MODE" == false ]]; then
     fi
 fi
 
-# Step 5: Build and deploy
+# Step 7: Build and deploy
 echo ""
 echo -e "${BLUE}🏗️  Building and deploying latest version...${NC}"
 
@@ -615,7 +654,7 @@ else
     $COMPOSE_CMD build $BUILD_ARGS
 fi
 
-# Step 6: Create Python virtual environment for host tools (unless --no-venv)
+# Step 8: Create Python virtual environment for host tools (unless --no-venv)
 if [[ "$CREATE_VENV" == true ]]; then
     echo ""
     echo -e "${BLUE}🐍 Setting up Python virtual environment for host tools...${NC}"
@@ -650,35 +689,43 @@ if [[ "$BUILD_ONLY" == true ]]; then
     exit 0
 fi
 
-# Step 7: Final pre-deployment cleanup
+# Step 9: Final pre-deployment cleanup
 echo ""
 echo -e "${BLUE}🔄 Final pre-deployment cleanup...${NC}"
 
 # Remove any leftover containers with the exact names we're about to create
 echo -e "${YELLOW}  🗑️  Removing containers by exact name...${NC}"
+# Temporarily disable error checking for container cleanup
+set +e
 for container in pi-monitor-redis pi-monitor-mosquitto pi-monitor-backend pi-monitor-frontend; do
     if docker ps -aq --filter "name=^${container}$" | grep -q .; then
         echo "    Removing container: $container"
         docker rm -f "$container" 2>/dev/null || true
     fi
 done
+# Re-enable error checking
+set -e
 
 # Final port check and cleanup
 echo -e "${YELLOW}  🔌 Final port cleanup...${NC}"
+# Temporarily disable error checking for port cleanup
+set +e
 echo "    Final cleanup of port 1883..."
 sudo fuser -k 1883/tcp >/dev/null 2>&1 || true
 sleep 1
 echo "    Final cleanup of port 6379..."
 sudo fuser -k 6379/tcp >/dev/null 2>&1 || true
+sleep 1
+echo "    Final cleanup of port 5001..."
+sudo fuser -k 5001/tcp >/dev/null 2>&1 || true
 sleep 2
 echo "    Ports cleared - ready for deployment"
+# Re-enable error checking
+set -e
 
-# Step 8: Start services
+# Step 10: Start services
 echo ""
 echo -e "${BLUE}🚀 Starting services...${NC}"
-
-# Enable error checking for the deployment phase
-set -e
 
 if [[ -n "$COMPOSE_SERVICES" ]]; then
     log_verbose "Starting services: $COMPOSE_SERVICES"
@@ -688,13 +735,10 @@ else
     $COMPOSE_CMD up -d
 fi
 
-# Disable error checking again for post-deployment
-set +e
-
 # Give services time to start
 sleep 3
 
-# Step 9: Wait and perform health checks (unless --no-health-check)
+# Step 11: Wait and perform health checks (unless --no-health-check)
 if [[ "$SKIP_HEALTH_CHECK" == false ]]; then
     echo ""
     echo -e "${BLUE}🏥 Performing health checks...${NC}"
@@ -767,7 +811,7 @@ else
     echo -e "${YELLOW}⏩ Skipping health checks (--no-health-check flag)${NC}"
 fi
 
-# Step 10: Final verification
+# Step 12: Final verification
 echo ""
 echo -e "${BLUE}📋 Final verification...${NC}"
 

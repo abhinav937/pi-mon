@@ -2,7 +2,8 @@
 # Pi Monitor - Force Deployment Script
 # Handles port conflicts, removes previous versions, and deploys latest with full cleanup
 
-set -e  # Exit on any error
+# Don't use set -e during cleanup as we expect some commands to fail
+# set -e  # Exit on any error
 
 # Colors for output
 RED='\033[0;31m'
@@ -368,62 +369,96 @@ if [[ ! -f "$COMPOSE_FILE" ]]; then
     exit 1
 fi
 
-# Step 3: Enhanced port and service cleanup
-if [[ "$QUICK_MODE" == false ]]; then
+# Step 3: Complete Docker and service cleanup 
+if [[ "$SKIP_CLEANUP" == false ]]; then
     echo ""
-    echo -e "${BLUE}🧹 Cleaning up conflicting services and ports...${NC}"
+    echo -e "${BLUE}🧹 Complete cleanup - Docker and services...${NC}"
     
-    # First stop existing Docker containers
-    echo -e "${YELLOW}  🐳 Stopping existing Docker containers...${NC}"
-    
-    # Stop pi-monitor containers specifically
-    if docker ps -q --filter "name=pi-monitor" | grep -q .; then
-        echo "    Stopping pi-monitor containers..."
-        docker kill $(docker ps -q --filter "name=pi-monitor") 2>/dev/null || true
+    # Nuclear option if requested
+    if [[ "$FORCE_NUCLEAR" == true ]]; then
+        echo -e "${RED}☢️  Nuclear cleanup - removing everything${NC}"
+        docker stop $(docker ps -aq) 2>/dev/null || true
+        docker rm $(docker ps -aq) 2>/dev/null || true
+        docker rmi $(docker images -q) 2>/dev/null || true
+        docker volume rm $(docker volume ls -q) 2>/dev/null || true
+        docker system prune -af --volumes 2>/dev/null || true
+        sudo systemctl restart docker
+        sleep 5
+        echo -e "${GREEN}✅ Nuclear cleanup done${NC}"
+    else
+        # Step 3a: Docker cleanup FIRST
+        echo -e "${YELLOW}  🐳 Docker cleanup first...${NC}"
+        
+        # Stop all docker-compose services
+        echo "    Stopping docker-compose services..."
+        $COMPOSE_CMD down --remove-orphans -v 2>/dev/null || true
+        
+        # Force stop and remove ALL pi-monitor containers
+        echo "    Force cleaning pi-monitor containers..."
+        docker ps -aq --filter "name=pi-monitor" | xargs -r docker rm -f 2>/dev/null || true
+        
+        # Remove old images
+        echo "    Removing old pi-monitor images..."
+        docker images --filter "reference=*pi-monitor*" -q | xargs -r docker rmi -f 2>/dev/null || true
+        
+        # Clean system
+        docker system prune -f 2>/dev/null || true
+        docker network ls --filter "name=pi-monitor" -q | xargs -r docker network rm 2>/dev/null || true
+        
+        # Step 3b: System services cleanup
+        echo -e "${YELLOW}  🛑 Stopping system services...${NC}"
+        for service in mosquitto redis-server nginx apache2; do
+            if systemctl is-active --quiet "$service" 2>/dev/null; then
+                echo "    Stopping $service..."
+                sudo systemctl stop "$service" 2>/dev/null || true
+                sudo systemctl stop "$service.socket" 2>/dev/null || true
+            fi
+        done
+        
+        # Step 3c: Process cleanup
+        echo -e "${YELLOW}  💀 Killing conflicting processes...${NC}"
+        sudo pkill -9 -f "mosquitto" 2>/dev/null || true
+        sudo pkill -9 -f "redis-server" 2>/dev/null || true
+        sudo pkill -9 -f "uvicorn\|gunicorn\|main_server" 2>/dev/null || true
+        
+        # Step 3d: Port cleanup  
+        echo -e "${YELLOW}  🔌 Freeing up ports forcefully...${NC}"
+        for port in 6379 1883 5000 5001 80 9001 3000; do
+            echo "    Freeing port $port..."
+            sudo fuser -k ${port}/tcp 2>/dev/null || true
+            sleep 0.5
+            # Double-check and force kill if needed
+            if sudo netstat -tulpn 2>/dev/null | grep -q ":$port "; then
+                echo "    Force killing remaining processes on port $port..."
+                sudo lsof -ti:$port | xargs -r sudo kill -9 2>/dev/null || true
+            fi
+        done
+        
+        # Give everything time to fully terminate
+        sleep 8
+        echo -e "${GREEN}✅ Complete cleanup done${NC}"
     fi
     
-    # Remove pi-monitor containers
-    if docker ps -aq --filter "name=pi-monitor" | grep -q .; then
-        echo "    Removing pi-monitor containers..."
-        docker rm -f $(docker ps -aq --filter "name=pi-monitor") 2>/dev/null || true
-    fi
+elif [[ "$QUICK_MODE" == true ]]; then
+    echo ""
+    echo -e "${BLUE}⚡ Quick cleanup mode...${NC}"
     
-    # Stop common system services that conflict
-    echo -e "${YELLOW}  🛑 Stopping system services...${NC}"
-    for service in mosquitto redis-server nginx apache2; do
-        if systemctl is-active --quiet "$service" 2>/dev/null; then
-            echo "    Stopping $service..."
-            sudo systemctl stop "$service" 2>/dev/null || true
-            # Also disable it temporarily to prevent auto-restart
-            sudo systemctl stop "$service.socket" 2>/dev/null || true
-        fi
-    done
+    # Quick Docker cleanup only
+    echo -e "${YELLOW}  🐳 Quick Docker cleanup...${NC}"
+    $COMPOSE_CMD down --remove-orphans -v 2>/dev/null || true
+    docker ps -aq --filter "name=pi-monitor" | xargs -r docker rm -f 2>/dev/null || true
     
-    # Kill processes by name (more reliable)
-    echo -e "${YELLOW}  💀 Killing conflicting processes...${NC}"
-    sudo pkill -f "mosquitto" 2>/dev/null || true
-    sudo pkill -f "redis-server" 2>/dev/null || true
-    sudo pkill -f "uvicorn\|gunicorn\|main_server" 2>/dev/null || true
+    # Quick port cleanup
+    echo -e "${YELLOW}  🔌 Quick port cleanup...${NC}"
+    sudo fuser -k 1883/tcp 2>/dev/null || true
+    sudo fuser -k 6379/tcp 2>/dev/null || true
+    sleep 3
     
-    # Force kill processes using specific ports
-    echo -e "${YELLOW}  🔌 Freeing up ports forcefully...${NC}"
-    for port in 6379 1883 5000 5001 80 9001 3000; do
-        echo "    Freeing port $port..."
-        sudo fuser -k ${port}/tcp 2>/dev/null || true
-        # Wait a moment for processes to die
-        sleep 0.5
-        # Double-check and force kill if needed
-        if sudo netstat -tulpn 2>/dev/null | grep -q ":$port "; then
-            echo "    Force killing remaining processes on port $port..."
-            sudo lsof -ti:$port | xargs -r sudo kill -9 2>/dev/null || true
-        fi
-    done
-    
-    # Give processes time to fully terminate
-    sleep 5
-    echo -e "${GREEN}    ✅ Cleanup completed${NC}"
+    log_verbose "Quick cleanup completed"
 else
-    log_verbose "Skipping service checks (quick mode)"
+    echo ""
+    echo -e "${YELLOW}⏩ Skipping cleanup (--no-cleanup flag)${NC}"
+    $COMPOSE_CMD down --remove-orphans 2>/dev/null || true
 fi
 
 # Step 4: Enhanced port verification
@@ -487,56 +522,7 @@ if [[ "$QUICK_MODE" == false ]]; then
     fi
 fi
 
-# Step 5: Simple Docker cleanup (unless --no-cleanup)
-if [[ "$SKIP_CLEANUP" == false ]]; then
-    echo ""
-    echo -e "${BLUE}🧹 Cleaning up Docker...${NC}"
-    
-    # Nuclear option if requested
-    if [[ "$FORCE_NUCLEAR" == true ]]; then
-        echo -e "${RED}☢️  Nuclear cleanup - removing everything${NC}"
-        docker stop $(docker ps -aq) 2>/dev/null || true
-        docker rm $(docker ps -aq) 2>/dev/null || true
-        docker rmi $(docker images -q) 2>/dev/null || true
-        docker volume rm $(docker volume ls -q) 2>/dev/null || true
-        docker system prune -af --volumes 2>/dev/null || true
-        sudo systemctl restart docker
-        sleep 5
-        echo -e "${GREEN}✅ Nuclear cleanup done${NC}"
-    else
-        # Normal cleanup - just pi-mon stuff
-        echo -e "${YELLOW}  🛑 Stopping pi-mon services...${NC}"
-        $COMPOSE_CMD down --remove-orphans -v 2>/dev/null || true
-        
-        # Additional cleanup for stubborn containers
-        echo -e "${YELLOW}  🧹 Cleaning up containers and images...${NC}"
-        
-        # Force remove any remaining pi-monitor containers
-        if docker ps -aq --filter "name=pi-monitor" | grep -q .; then
-            echo "    Force removing remaining pi-monitor containers..."
-            docker rm -f $(docker ps -aq --filter "name=pi-monitor") 2>/dev/null || true
-        fi
-        
-        echo -e "${YELLOW}  🗑️  Removing old images...${NC}"
-        docker images --filter "reference=*pi-monitor*" -q | xargs -r docker rmi -f 2>/dev/null || true
-        
-        # Clean up any dangling images and networks
-        echo -e "${YELLOW}  🧽 Quick system cleanup...${NC}"
-        docker system prune -f 2>/dev/null || true
-        
-        # Remove any pi-monitor networks
-        docker network ls --filter "name=pi-monitor" -q | xargs -r docker network rm 2>/dev/null || true
-        
-        echo -e "${GREEN}✅ Docker cleanup done${NC}"
-    fi
-    
-else
-    echo ""
-    echo -e "${YELLOW}⏩ Skipping cleanup (--no-cleanup flag)${NC}"
-    $COMPOSE_CMD down --remove-orphans 2>/dev/null || true
-fi
-
-# Step 6: Build and deploy
+# Step 5: Build and deploy
 echo ""
 echo -e "${BLUE}🏗️  Building and deploying latest version...${NC}"
 
@@ -578,7 +564,7 @@ else
     $COMPOSE_CMD build $BUILD_ARGS
 fi
 
-# Step 7: Create Python virtual environment for host tools (unless --no-venv)
+# Step 6: Create Python virtual environment for host tools (unless --no-venv)
 if [[ "$CREATE_VENV" == true ]]; then
     echo ""
     echo -e "${BLUE}🐍 Setting up Python virtual environment for host tools...${NC}"
@@ -613,9 +599,32 @@ if [[ "$BUILD_ONLY" == true ]]; then
     exit 0
 fi
 
+# Step 7: Final pre-deployment cleanup
+echo ""
+echo -e "${BLUE}🔄 Final pre-deployment cleanup...${NC}"
+
+# Remove any leftover containers with the exact names we're about to create
+echo -e "${YELLOW}  🗑️  Removing containers by exact name...${NC}"
+for container in pi-monitor-redis pi-monitor-mosquitto pi-monitor-backend pi-monitor-frontend; do
+    if docker ps -aq --filter "name=^${container}$" | grep -q .; then
+        echo "    Removing container: $container"
+        docker rm -f "$container" 2>/dev/null || true
+    fi
+done
+
+# Final port check and cleanup
+echo -e "${YELLOW}  🔌 Final port cleanup...${NC}"
+sudo fuser -k 1883/tcp 2>/dev/null || true
+sudo fuser -k 6379/tcp 2>/dev/null || true
+sleep 2
+
 # Step 8: Start services
 echo ""
 echo -e "${BLUE}🚀 Starting services...${NC}"
+
+# Enable error checking for the deployment phase
+set -e
+
 if [[ -n "$COMPOSE_SERVICES" ]]; then
     log_verbose "Starting services: $COMPOSE_SERVICES"
     $COMPOSE_CMD up -d $COMPOSE_SERVICES
@@ -624,10 +633,13 @@ else
     $COMPOSE_CMD up -d
 fi
 
+# Disable error checking again for post-deployment
+set +e
+
 # Give services time to start
 sleep 3
 
-# Step 10: Wait and perform health checks (unless --no-health-check)
+# Step 9: Wait and perform health checks (unless --no-health-check)
 if [[ "$SKIP_HEALTH_CHECK" == false ]]; then
     echo ""
     echo -e "${BLUE}🏥 Performing health checks...${NC}"
@@ -700,7 +712,7 @@ else
     echo -e "${YELLOW}⏩ Skipping health checks (--no-health-check flag)${NC}"
 fi
 
-# Step 11: Final verification
+# Step 10: Final verification
 echo ""
 echo -e "${BLUE}📋 Final verification...${NC}"
 

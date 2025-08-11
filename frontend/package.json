@@ -1,6 +1,6 @@
 {
   "name": "pi-monitor-frontend",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Pi Monitor - React Frontend Dashboard",
   "private": true,
   "dependencies": {
@@ -26,7 +26,8 @@
     "@tailwindcss/forms": "^0.5.7",
     "autoprefixer": "^10.4.16",
     "postcss": "^8.4.32",
-    "web-vitals": "^3.5.0"
+    "web-vitals": "^3.5.0",
+    "eslint": "^8.57.1"
   },
   "scripts": {
     "start": "react-scripts start",
@@ -34,13 +35,19 @@
     "test": "react-scripts test",
     "eject": "react-scripts eject",
     "build:docker": "npm run build && docker build -t pi-monitor-frontend .",
-    "dev": "npm start"
+    "dev": "npm start",
+    "lint": "eslint src --ext .js,.jsx",
+    "lint:fix": "eslint src --ext .js,.jsx --fix"
   },
   "eslintConfig": {
     "extends": [
       "react-app",
       "react-app/jest"
-    ]
+    ],
+    "rules": {
+      "no-unused-vars": "warn",
+      "no-console": "warn"
+    }
   },
   "browserslist": {
     "production": [
@@ -53,5 +60,9 @@
       "last 1 firefox version",
       "last 1 safari version"
     ]
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=8.0.0"
   }
 }

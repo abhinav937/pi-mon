@@ -1,42 +1,63 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { QueryClient, QueryClientProvider } from 'react-query';
 import { Toaster } from 'react-hot-toast';
-import { AlertCircle, Wifi, WifiOff } from 'lucide-react';
+import { AlertCircle, Wifi, WifiOff, Sun, Moon, Settings, RefreshCw } from 'lucide-react';
 
-import Dashboard from './components/Dashboard';
-import SystemStatus from './components/SystemStatus';
-import ResourceChart from './components/ResourceChart';
-import PowerManagement from './components/PowerManagement';
-import ServiceManagement from './components/ServiceManagement';
+// Lazy load components for better performance
+const Dashboard = lazy(() => import('./components/Dashboard'));
+const SystemStatus = lazy(() => import('./components/SystemStatus'));
+const ResourceChart = lazy(() => import('./components/ResourceChart'));
+const PowerManagement = lazy(() => import('./components/PowerManagement'));
+const ServiceManagement = lazy(() => import('./components/ServiceManagement'));
+const NetworkMonitor = lazy(() => import('./components/NetworkMonitor'));
+const LogViewer = lazy(() => import('./components/LogViewer'));
+const SettingsPanel = lazy(() => import('./components/SettingsPanel'));
+
 import { UnifiedClient } from './services/unifiedClient';
+import ErrorBoundary from './components/ErrorBoundary';
+import LoadingSpinner from './components/LoadingSpinner';
+import ConnectionStatus from './components/ConnectionStatus';
 
 // Tailwind CSS imports
 import './index.css';
 
-// Create a QueryClient instance
+// Create a QueryClient instance with better error handling
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      retry: 3,
+      retry: (failureCount, error) => {
+        // Don't retry on 4xx errors
+        if (error?.response?.status >= 400 && error?.response?.status < 500) {
+          return false;
+        }
+        return Math.min(failureCount, 3);
+      },
       retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000),
       staleTime: 30000, // 30 seconds
       cacheTime: 5 * 60 * 1000, // 5 minutes
       refetchOnWindowFocus: false,
       refetchOnReconnect: true,
+      refetchOnMount: true,
     },
     mutations: {
       retry: 1,
+      onError: (error) => {
+        console.error('Mutation error:', error);
+      },
     },
   },
 });
 
-// Navigation tabs
+// Enhanced navigation tabs with more features
 const TABS = [
-  { id: 'dashboard', name: 'Dashboard', icon: '📊' },
-  { id: 'system', name: 'System Status', icon: '💻' },
-  { id: 'charts', name: 'Charts', icon: '📈' },
-  { id: 'power', name: 'Power', icon: '⚡' },
-  { id: 'services', name: 'Services', icon: '🔧' },
+  { id: 'dashboard', name: 'Dashboard', icon: '📊', description: 'System overview and key metrics' },
+  { id: 'system', name: 'System Status', icon: '💻', description: 'Detailed system information' },
+  { id: 'charts', name: 'Charts', icon: '📈', description: 'Performance graphs and trends' },
+  { id: 'power', name: 'Power', icon: '⚡', description: 'Power management and monitoring' },
+  { id: 'services', name: 'Services', icon: '🔧', description: 'System service management' },
+  { id: 'network', name: 'Network', icon: '🌐', description: 'Network monitoring and diagnostics' },
+  { id: 'logs', name: 'Logs', icon: '📋', description: 'System and application logs' },
+  { id: 'settings', name: 'Settings', icon: '⚙️', description: 'Configuration and preferences' },
 ];
 
 function App() {
@@ -45,8 +66,14 @@ function App() {
   const [connectionStatus, setConnectionStatus] = useState('connecting');
   const [unifiedClient, setUnifiedClient] = useState(null);
   const [lastUpdate, setLastUpdate] = useState(null);
+  const [isDarkMode, setIsDarkMode] = useState(() => {
+    const saved = localStorage.getItem('darkMode');
+    return saved ? JSON.parse(saved) : window.matchMedia('(prefers-color-scheme: dark)').matches;
+  });
+  const [showSettings, setShowSettings] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // Initialize unified client
+  // Initialize unified client with better error handling
   useEffect(() => {
     const client = new UnifiedClient({
       serverUrl: process.env.REACT_APP_SERVER_URL === 'dynamic' 
@@ -54,11 +81,17 @@ function App() {
         : (process.env.REACT_APP_SERVER_URL || `http://${window.location.hostname}:5001`),
       onConnectionChange: (status) => {
         setConnectionStatus(status);
+        if (status === 'connected') {
+          setLastUpdate(new Date());
+        }
       },
       onDataUpdate: (data) => {
         setLastUpdate(new Date());
-        // Handle real-time data updates
         console.log('Real-time update:', data);
+      },
+      onError: (error) => {
+        console.error('Client error:', error);
+        setConnectionStatus('error');
       },
     });
 
@@ -83,20 +116,54 @@ function App() {
     };
   }, []);
 
+  // Handle dark mode toggle
+  useEffect(() => {
+    localStorage.setItem('darkMode', JSON.stringify(isDarkMode));
+    if (isDarkMode) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [isDarkMode]);
+
+  // Handle refresh
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      if (unifiedClient) {
+        await unifiedClient.refresh();
+      }
+      // Force refetch all queries
+      queryClient.invalidateQueries();
+    } catch (error) {
+      console.error('Refresh failed:', error);
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
   const renderActiveComponent = () => {
+    const props = { unifiedClient, isDarkMode };
+    
     switch (activeTab) {
       case 'dashboard':
-        return <Dashboard unifiedClient={unifiedClient} />;
+        return <Dashboard {...props} />;
       case 'system':
-        return <SystemStatus unifiedClient={unifiedClient} />;
+        return <SystemStatus {...props} />;
       case 'charts':
-        return <ResourceChart unifiedClient={unifiedClient} />;
+        return <ResourceChart {...props} />;
       case 'power':
-        return <PowerManagement unifiedClient={unifiedClient} />;
+        return <PowerManagement {...props} />;
       case 'services':
-        return <ServiceManagement unifiedClient={unifiedClient} />;
+        return <ServiceManagement {...props} />;
+      case 'network':
+        return <NetworkMonitor {...props} />;
+      case 'logs':
+        return <LogViewer {...props} />;
+      case 'settings':
+        return <SettingsPanel {...props} />;
       default:
-        return <Dashboard unifiedClient={unifiedClient} />;
+        return <Dashboard {...props} />;
     }
   };
 
@@ -108,6 +175,8 @@ function App() {
         return 'text-red-500';
       case 'connecting':
         return 'text-yellow-500';
+      case 'error':
+        return 'text-red-600';
       default:
         return 'text-gray-500';
     }
@@ -122,7 +191,9 @@ function App() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+      <div className={`min-h-screen transition-colors duration-200 ${
+        isDarkMode ? 'dark bg-gray-900' : 'bg-gray-50'
+      }`}>
         {/* Header */}
         <header className="bg-white dark:bg-gray-800 shadow-sm border-b border-gray-200 dark:border-gray-700">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -136,48 +207,69 @@ function App() {
                 </div>
               </div>
 
-              {/* Connection Status and Info */}
+              {/* Connection Status and Controls */}
               <div className="flex items-center space-x-4">
                 {/* Offline Banner */}
                 {!isOnline && (
-                  <div className="flex items-center space-x-2 px-3 py-1 bg-red-100 text-red-800 rounded-full text-sm">
+                  <div className="flex items-center space-x-2 px-3 py-1 bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 rounded-full text-sm">
                     <AlertCircle className="h-4 w-4" />
                     <span>Offline</span>
                   </div>
                 )}
 
                 {/* Connection Status */}
-                <div className="flex items-center space-x-2">
-                  {getConnectionStatusIcon()}
-                  <span className={`text-sm font-medium ${getConnectionStatusColor()}`}>
-                    {connectionStatus.charAt(0).toUpperCase() + connectionStatus.slice(1)}
-                  </span>
-                </div>
+                <ConnectionStatus 
+                  status={connectionStatus}
+                  isOnline={isOnline}
+                  lastUpdate={lastUpdate}
+                />
 
-                {/* Last Update */}
-                {lastUpdate && (
-                  <div className="text-sm text-gray-500 dark:text-gray-400">
-                    Last update: {lastUpdate.toLocaleTimeString()}
-                  </div>
-                )}
+                {/* Refresh Button */}
+                <button
+                  onClick={handleRefresh}
+                  disabled={isRefreshing}
+                  className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-200"
+                  title="Refresh data"
+                >
+                  <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+                </button>
+
+                {/* Theme Toggle */}
+                <button
+                  onClick={() => setIsDarkMode(!isDarkMode)}
+                  className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-200"
+                  title={`Switch to ${isDarkMode ? 'light' : 'dark'} mode`}
+                >
+                  {isDarkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+                </button>
+
+                {/* Settings Button */}
+                <button
+                  onClick={() => setShowSettings(!showSettings)}
+                  className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-200"
+                  title="Settings"
+                >
+                  <Settings className="h-4 w-4" />
+                </button>
               </div>
             </div>
           </div>
         </header>
 
         {/* Navigation */}
-        <nav className="bg-white dark:bg-gray-800 shadow-sm">
+        <nav className="bg-white dark:bg-gray-800 shadow-sm border-b border-gray-200 dark:border-gray-700">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="flex space-x-8">
+            <div className="flex space-x-8 overflow-x-auto">
               {TABS.map((tab) => (
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
-                  className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors duration-200 ${
+                  className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors duration-200 whitespace-nowrap ${
                     activeTab === tab.id
                       ? 'border-blue-500 text-blue-600 dark:text-blue-400'
                       : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
                   }`}
+                  title={tab.description}
                 >
                   <span className="mr-2">{tab.icon}</span>
                   {tab.name}
@@ -190,9 +282,28 @@ function App() {
         {/* Main Content */}
         <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
           <div className="px-4 py-6 sm:px-0">
-            {renderActiveComponent()}
+            <ErrorBoundary>
+              <Suspense fallback={<LoadingSpinner />}>
+                {renderActiveComponent()}
+              </Suspense>
+            </ErrorBoundary>
           </div>
         </main>
+
+        {/* Settings Panel */}
+        {showSettings && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
+            <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md w-full mx-4">
+              <Suspense fallback={<LoadingSpinner />}>
+                <SettingsPanel 
+                  isDarkMode={isDarkMode}
+                  setIsDarkMode={setIsDarkMode}
+                  onClose={() => setShowSettings(false)}
+                />
+              </Suspense>
+            </div>
+          </div>
+        )}
 
         {/* Footer */}
         <footer className="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 mt-auto">
@@ -202,9 +313,9 @@ function App() {
                 © 2024 Pi Monitor - Raspberry Pi Monitoring Dashboard
               </div>
               <div className="flex items-center space-x-4">
-                <span>Version 1.0.0</span>
+                <span>Version 2.0.0</span>
                 {process.env.NODE_ENV === 'development' && (
-                  <span className="px-2 py-1 bg-yellow-100 text-yellow-800 rounded text-xs">
+                  <span className="px-2 py-1 bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200 rounded text-xs">
                     DEV
                   </span>
                 )}
@@ -219,19 +330,22 @@ function App() {
           toastOptions={{
             duration: 4000,
             style: {
-              background: '#374151',
-              color: '#fff',
+              background: isDarkMode ? '#374151' : '#fff',
+              color: isDarkMode ? '#fff' : '#374151',
+              border: isDarkMode ? '1px solid #4b5563' : '1px solid #e5e7eb',
             },
             success: {
               duration: 3000,
               style: {
                 background: '#10b981',
+                color: '#fff',
               },
             },
             error: {
               duration: 5000,
               style: {
                 background: '#ef4444',
+                color: '#fff',
               },
             },
           }}

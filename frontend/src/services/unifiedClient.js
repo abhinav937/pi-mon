@@ -12,6 +12,7 @@ class UnifiedClient {
     this.serverUrl = options.serverUrl || `http://${window.location.hostname}:5001`;
     this.onConnectionChange = options.onConnectionChange || (() => {});
     this.onDataUpdate = options.onDataUpdate || (() => {});
+    this.onError = options.onError || (() => {});
     this.connectionState = CONNECTION_STATES.DISCONNECTED;
     this.authToken = localStorage.getItem('pi-monitor-token');
     this.httpClient = axios.create({
@@ -32,6 +33,7 @@ class UnifiedClient {
     } catch (error) {
       console.error('Failed to initialize connection:', error);
       this.setConnectionState(CONNECTION_STATES.ERROR);
+      this.onError(error);
     }
   }
 
@@ -80,6 +82,138 @@ class UnifiedClient {
   async checkHealth() {
     try {
       const response = await this.httpClient.get('/health');
+      return response.data;
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  async getServices() {
+    try {
+      const response = await this.httpClient.get('/api/services');
+      return response.data;
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  async controlService(serviceName, action) {
+    try {
+      const response = await this.httpClient.post(`/api/services/${serviceName}/${action}`);
+      return response.data;
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  async getMetricsHistory(minutes = 60) {
+    try {
+      const response = await this.httpClient.get(`/api/metrics/history?minutes=${minutes}`);
+      return response.data;
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  // Network monitoring methods
+  async getNetworkInfo() {
+    try {
+      const response = await this.httpClient.get('/api/network');
+      return response.data;
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  async getNetworkStats() {
+    try {
+      const response = await this.httpClient.get('/api/network/stats');
+      return response.data;
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  // Log viewing methods
+  async getAvailableLogs() {
+    try {
+      const response = await this.httpClient.get('/api/logs');
+      return response.data;
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  async getLogContent(logName, maxLines = 100) {
+    try {
+      const response = await this.httpClient.get(`/api/logs/${logName}?lines=${maxLines}`);
+      return response.data;
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  async downloadLog(logName) {
+    try {
+      const response = await this.httpClient.get(`/api/logs/${logName}/download`, {
+        responseType: 'text'
+      });
+      return response.data;
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  async clearLog(logName) {
+    try {
+      const response = await this.httpClient.delete(`/api/logs/${logName}`);
+      return response.data;
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  // Power management methods
+  async getPowerStatus() {
+    try {
+      const response = await this.httpClient.get('/api/power/status');
+      return response.data;
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  async shutdown() {
+    try {
+      const response = await this.httpClient.post('/api/power/shutdown');
+      return response.data;
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  async restart() {
+    try {
+      const response = await this.httpClient.post('/api/power/restart');
+      return response.data;
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  async sleep() {
+    try {
+      const response = await this.httpClient.post('/api/power/sleep');
+      return response.data;
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  // Utility methods
+  async refresh() {
+    try {
+      const response = await this.httpClient.post('/api/refresh');
       return response.data;
     } catch (error) {
       throw error;

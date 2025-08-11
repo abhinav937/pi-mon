@@ -30,7 +30,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the server and config files
 COPY simple_server.py .
-COPY ../config.py .
+COPY config.py .
 
 # Create a simple startup script
 RUN echo '#!/bin/bash\npython simple_server.py' > start.sh && chmod +x start.sh

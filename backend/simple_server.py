@@ -37,16 +37,15 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
         parsed_url = urlparse(self.path)
         path = parsed_url.path
         
-        # Set CORS headers
-        self.send_response(200)
-        self.send_header('Content-type', 'application/json')
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-        self.end_headers()
-        
         if path == '/':
             # Root endpoint
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+            self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+            self.end_headers()
+            
             response = {
                 "message": "Pi Monitor Backend is running!",
                 "status": "ok",
@@ -54,8 +53,17 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                 "version": config.get('project.version', '1.0.0'),
                 "endpoints": config.get_backend_endpoints()
             }
+            self.wfile.write(json.dumps(response).encode())
+            
         elif path == '/health':
             # Health check
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+            self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+            self.end_headers()
+            
             response = {
                 "status": "healthy",
                 "timestamp": time.strftime('%Y-%m-%d %H:%M:%S'),
@@ -65,83 +73,162 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                     "features": config.get('backend.features', {})
                 }
             }
+            self.wfile.write(json.dumps(response).encode())
+            
         elif path == '/api/system':
             # System stats endpoint
             if not self.check_auth():
                 self.send_response(401)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
                 self.end_headers()
                 response = {"error": "Unauthorized"}
+                self.wfile.write(json.dumps(response).encode())
             else:
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+                self.end_headers()
                 response = self.get_system_stats()
+                self.wfile.write(json.dumps(response).encode())
+                
         elif path == '/api/services':
             # Services endpoint
             if not self.check_auth():
                 self.send_response(401)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
                 self.end_headers()
                 response = {"error": "Unauthorized"}
+                self.wfile.write(json.dumps(response).encode())
             else:
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+                self.end_headers()
                 response = self.get_services_status()
+                self.wfile.write(json.dumps(response).encode())
+                
         elif path == '/api/power':
             # Power management endpoint
             if not self.check_auth():
                 self.send_response(401)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
                 self.end_headers()
                 response = {"error": "Unauthorized"}
+                self.wfile.write(json.dumps(response).encode())
             else:
-                response = self.get_power_status()
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+                self.end_headers()
+                response = self.handle_power_action()
+                self.wfile.write(json.dumps(response).encode())
+                
+        elif path == '/health':
+            # Health endpoint doesn't support POST
+            self.send_response(405)
+            self.send_header('Content-type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+            self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+            self.end_headers()
+            response = {"error": "Method not allowed"}
+            self.wfile.write(json.dumps(response).encode())
+                
         else:
             # 404 for unknown paths
             self.send_response(404)
+            self.send_header('Content-type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+            self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
             self.end_headers()
             response = {"error": "Not found"}
             self.wfile.write(json.dumps(response).encode())
-            return
-        
-        # Send response
-        self.wfile.write(json.dumps(response).encode())
     
     def do_POST(self):
         """Handle POST requests"""
         parsed_url = urlparse(self.path)
         path = parsed_url.path
         
-        # Set CORS headers
-        self.send_response(200)
-        self.send_header('Content-type', 'application/json')
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-        self.end_headers()
-        
         if path == '/api/auth/token':
             # Authentication endpoint
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+            self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+            self.end_headers()
+            
             response = self.handle_auth()
+            self.wfile.write(json.dumps(response).encode())
+            
         elif path == '/api/services':
             # Service control endpoint
             if not self.check_auth():
                 self.send_response(401)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
                 self.end_headers()
                 response = {"error": "Unauthorized"}
+                self.wfile.write(json.dumps(response).encode())
             else:
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+                self.end_headers()
                 response = self.handle_service_action()
+                self.wfile.write(json.dumps(response).encode())
+                
         elif path == '/api/power':
             # Power management endpoint
             if not self.check_auth():
                 self.send_response(401)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
                 self.end_headers()
                 response = {"error": "Unauthorized"}
+                self.wfile.write(json.dumps(response).encode())
             else:
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+                self.end_headers()
                 response = self.handle_power_action()
+                self.wfile.write(json.dumps(response).encode())
+                
         else:
             # 404 for unknown paths
             self.send_response(404)
+            self.send_header('Content-type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+            self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
             self.end_headers()
             response = {"error": "Not found"}
             self.wfile.write(json.dumps(response).encode())
-            return
-        
-        # Send response
-        self.wfile.write(json.dumps(response).encode())
     
     def do_OPTIONS(self):
         """Handle CORS preflight"""

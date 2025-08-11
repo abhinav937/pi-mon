@@ -223,14 +223,14 @@ run_test "Frontend Access" "http://$PI_IP:$FRONTEND_PORT/"
 
 # 11. Error Handling Tests
 echo -e "${BLUE}11. Testing Error Handling${NC}"
-run_test "Invalid Endpoint" "http://$PI_IP:$BACKEND_PORT/invalid" "GET" "" "200"
-run_test "Invalid Method" "http://$PI_IP:$BACKEND_PORT/health" "POST" '{"test":"data"}' "200"
+run_test "Invalid Endpoint" "http://$PI_IP:$BACKEND_PORT/invalid" "GET" "" "404"
+run_test "Invalid Method" "http://$PI_IP:$BACKEND_PORT/health" "POST" '{"test":"data"}' "405"
 
 # 12. Authentication Error Tests
 echo -e "${BLUE}12. Testing Authentication Errors${NC}"
-run_test "System Stats (No Auth)" "http://$PI_IP:$BACKEND_PORT/api/system" "GET" "" "200"
-run_test "Services (No Auth)" "http://$PI_IP:$BACKEND_PORT/api/services" "GET" "" "200"
-run_test "Power (No Auth)" "http://$PI_IP:$BACKEND_PORT/api/power" "GET" "" "200"
+run_test "System Stats (No Auth)" "http://$PI_IP:$BACKEND_PORT/api/system" "GET" "" "401"
+run_test "Services (No Auth)" "http://$PI_IP:$BACKEND_PORT/api/services" "GET" "" "401"
+run_test "Power (No Auth)" "http://$PI_IP:$BACKEND_PORT/api/power" "GET" "" "401"
 
 # 13. CORS Tests
 echo -e "${BLUE}13. Testing CORS${NC}"

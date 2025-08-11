@@ -706,39 +706,246 @@ done
 # Re-enable error checking
 set -e
 
-# Final port check and cleanup
-echo -e "${YELLOW}  🔌 Final port cleanup...${NC}"
-# Temporarily disable error checking for port cleanup
+# Step 9a: Aggressive port debugging and cleanup
+echo ""
+echo -e "${BLUE}🔍 DETAILED PORT DEBUGGING BEFORE DEPLOYMENT${NC}"
+echo -e "${YELLOW}  📊 Checking what's using critical ports...${NC}"
+
+# Temporarily disable error checking for debugging
 set +e
-echo "    Final cleanup of port 1883..."
-sudo fuser -k 1883/tcp >/dev/null 2>&1 || true
-sleep 1
-echo "    Final cleanup of port 6379..."
-sudo fuser -k 6379/tcp >/dev/null 2>&1 || true
-sleep 1
-echo "    Final cleanup of port 5001..."
-sudo fuser -k 5001/tcp >/dev/null 2>&1 || true
-sleep 2
-echo "    Ports cleared - ready for deployment"
+
+# Check each critical port with detailed debugging
+for port in 1883 6379 5001 80; do
+    echo ""
+    echo -e "${CYAN}🔍 Debugging port $port:${NC}"
+    
+    # Method 1: netstat
+    echo "  netstat results:"
+    netstat -tulpn 2>/dev/null | grep ":$port " | head -5 || echo "    No netstat results for port $port"
+    
+    # Method 2: ss (socket statistics)
+    echo "  ss results:"
+    ss -tulpn 2>/dev/null | grep ":$port " | head -5 || echo "    No ss results for port $port"
+    
+    # Method 3: lsof
+    echo "  lsof results:"
+    sudo lsof -i:$port 2>/dev/null | head -5 || echo "    No lsof results for port $port"
+    
+    # Method 4: fuser
+    echo "  fuser results:"
+    sudo fuser -v ${port}/tcp 2>&1 | head -5 || echo "    No fuser results for port $port"
+done
+
+echo ""
+echo -e "${RED}🔥 AGGRESSIVE PORT CLEANUP - ROUND 1${NC}"
+# Kill processes by port using multiple methods
+for port in 1883 6379 5001 80; do
+    echo -e "${YELLOW}  💀 Aggressively freeing port $port...${NC}"
+    
+    # Method 1: fuser with kill
+    echo "    Using fuser to kill port $port..."
+    sudo fuser -k ${port}/tcp >/dev/null 2>&1 || true
+    sleep 1
+    
+    # Method 2: lsof with kill
+    echo "    Using lsof to kill port $port..."
+    sudo lsof -ti:$port | xargs -r sudo kill -9 >/dev/null 2>&1 || true
+    sleep 1
+    
+    # Method 3: netstat parsing and kill
+    echo "    Using netstat to find and kill processes on port $port..."
+    pids=$(netstat -tlnp 2>/dev/null | grep ":$port " | awk '{print $7}' | cut -d'/' -f1 | grep -E '^[0-9]+$' | sort -u || true)
+    if [[ -n "$pids" ]]; then
+        for pid in $pids; do
+            echo "      Killing PID $pid using port $port"
+            sudo kill -9 "$pid" 2>/dev/null || true
+        done
+    fi
+    
+    # Give time for cleanup
+    sleep 2
+done
+
+echo ""
+echo -e "${RED}🔥 AGGRESSIVE PORT CLEANUP - ROUND 2 (Double-check)${NC}"
+# Second round of cleanup for stubborn processes
+for port in 1883 6379 5001 80; do
+    if check_port "$port"; then
+        echo -e "${RED}    ⚠️  Port $port STILL in use after round 1!${NC}"
+        echo "    Attempting nuclear cleanup for port $port..."
+        
+        # Nuclear approach: kill everything that could be using this port
+        case $port in
+            1883)
+                echo "      Killing all mosquitto processes..."
+                sudo pkill -9 -f "mosquitto" 2>/dev/null || true
+                sudo killall mosquitto 2>/dev/null || true
+                ;;
+            6379)
+                echo "      Killing all redis processes..."
+                sudo pkill -9 -f "redis" 2>/dev/null || true
+                sudo killall redis-server 2>/dev/null || true
+                ;;
+            5001)
+                echo "      Killing all web server processes..."
+                sudo pkill -9 -f "uvicorn\|gunicorn\|main_server\|fastapi" 2>/dev/null || true
+                ;;
+            80)
+                echo "      Killing all web servers..."
+                sudo pkill -9 -f "nginx\|apache" 2>/dev/null || true
+                ;;
+        esac
+        
+        # Final fuser kill
+        sudo fuser -k ${port}/tcp >/dev/null 2>&1 || true
+        sleep 3
+        
+        # Check again
+        if check_port "$port"; then
+            echo -e "${RED}      ❌ Port $port STILL in use after nuclear cleanup!${NC}"
+            echo "      Process details:"
+            sudo lsof -i:$port 2>/dev/null || echo "        No lsof results"
+            sudo netstat -tulpn 2>/dev/null | grep ":$port " || echo "        No netstat results"
+        else
+            echo -e "${GREEN}      ✅ Port $port successfully freed${NC}"
+        fi
+    else
+        echo -e "${GREEN}    ✅ Port $port is free${NC}"
+    fi
+done
+
+# Wait for all processes to fully terminate
+echo ""
+echo -e "${BLUE}⏳ Waiting for all processes to fully terminate...${NC}"
+sleep 5
+
 # Re-enable error checking
 set -e
 
-# Step 10: Start services
+# Step 10: MANDATORY Pre-deployment port verification
+echo ""
+echo -e "${RED}🚨 MANDATORY PORT VERIFICATION BEFORE DEPLOYMENT${NC}"
+echo -e "${YELLOW}  🔍 Final check - these ports MUST be free or deployment will fail...${NC}"
+
+# Check if any critical ports are still in use
+deployment_blocking_ports=""
+for port in 1883 6379 5001 80; do
+    if check_port "$port"; then
+        deployment_blocking_ports="$deployment_blocking_ports $port"
+        echo -e "${RED}    ❌ BLOCKER: Port $port is still in use!${NC}"
+        echo "      What's using it:"
+        sudo lsof -i:$port 2>/dev/null | head -3 || echo "        (Unable to determine)"
+    else
+        echo -e "${GREEN}    ✅ Port $port is free${NC}"
+    fi
+done
+
+if [[ -n "$deployment_blocking_ports" ]]; then
+    echo ""
+    echo -e "${RED}🛑 DEPLOYMENT BLOCKED!${NC}"
+    echo -e "${YELLOW}   Ports still in use:$deployment_blocking_ports${NC}"
+    echo ""
+    echo -e "${CYAN}🔧 EMERGENCY FIXES - Run these commands manually:${NC}"
+    
+    for port in $deployment_blocking_ports; do
+        case $port in
+            1883)
+                echo "  # Fix MQTT port 1883:"
+                echo "  sudo systemctl stop mosquitto"
+                echo "  sudo pkill -9 -f mosquitto"
+                echo "  sudo fuser -k 1883/tcp"
+                echo "  sudo lsof -ti:1883 | xargs -r sudo kill -9"
+                ;;
+            6379)
+                echo "  # Fix Redis port 6379:"
+                echo "  sudo systemctl stop redis-server"
+                echo "  sudo pkill -9 -f redis"
+                echo "  sudo fuser -k 6379/tcp"
+                echo "  sudo lsof -ti:6379 | xargs -r sudo kill -9"
+                ;;
+            5001)
+                echo "  # Fix Backend port 5001:"
+                echo "  sudo pkill -9 -f 'uvicorn|gunicorn|main_server'"
+                echo "  sudo fuser -k 5001/tcp"
+                echo "  sudo lsof -ti:5001 | xargs -r sudo kill -9"
+                ;;
+            80)
+                echo "  # Fix Web port 80:"
+                echo "  sudo systemctl stop nginx apache2"
+                echo "  sudo fuser -k 80/tcp"
+                echo "  sudo lsof -ti:80 | xargs -r sudo kill -9"
+                ;;
+        esac
+        echo ""
+    done
+    
+    echo -e "${CYAN}🔄 After running the fixes above, re-run this deployment script.${NC}"
+    echo ""
+    echo -e "${YELLOW}⚡ Or try the nuclear option: ./force_deploy.sh --nuclear --yes${NC}"
+    
+    if [[ "$SKIP_CONFIRMATION" == false ]]; then
+        echo ""
+        read -p "Continue deployment anyway? (NOT RECOMMENDED) (y/N): " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            echo -e "${BLUE}Deployment cancelled. Fix the port conflicts first.${NC}"
+            exit 1
+        fi
+        echo -e "${RED}⚠️  PROCEEDING DESPITE PORT CONFLICTS - EXPECT FAILURES!${NC}"
+        sleep 3
+    else
+        echo -e "${RED}Deployment cancelled due to port conflicts.${NC}"
+        exit 1
+    fi
+fi
+
+echo -e "${GREEN}✅ All critical ports are free - proceeding with deployment${NC}"
+
+# Step 11: Start services with error monitoring
 echo ""
 echo -e "${BLUE}🚀 Starting services...${NC}"
 
+# Attempt to start services with detailed error reporting
 if [[ -n "$COMPOSE_SERVICES" ]]; then
     log_verbose "Starting services: $COMPOSE_SERVICES"
-    $COMPOSE_CMD up -d $COMPOSE_SERVICES
+    echo -e "${YELLOW}  🔄 Running: $COMPOSE_CMD up -d $COMPOSE_SERVICES${NC}"
+    
+    if ! $COMPOSE_CMD up -d $COMPOSE_SERVICES; then
+        echo ""
+        echo -e "${RED}❌ Docker Compose failed to start services!${NC}"
+        echo -e "${YELLOW}📝 Recent logs from failed services:${NC}"
+        $COMPOSE_CMD logs --tail=20 $COMPOSE_SERVICES 2>/dev/null || true
+        echo ""
+        echo -e "${CYAN}🔍 Container status:${NC}"
+        $COMPOSE_CMD ps $COMPOSE_SERVICES 2>/dev/null || true
+        echo ""
+        echo -e "${RED}🛑 Deployment failed. Check the errors above.${NC}"
+        exit 1
+    fi
 else
     log_verbose "Starting all services"
-    $COMPOSE_CMD up -d
+    echo -e "${YELLOW}  🔄 Running: $COMPOSE_CMD up -d${NC}"
+    
+    if ! $COMPOSE_CMD up -d; then
+        echo ""
+        echo -e "${RED}❌ Docker Compose failed to start services!${NC}"
+        echo -e "${YELLOW}📝 Recent logs from failed services:${NC}"
+        $COMPOSE_CMD logs --tail=20 2>/dev/null || true
+        echo ""
+        echo -e "${CYAN}🔍 Container status:${NC}"
+        $COMPOSE_CMD ps 2>/dev/null || true
+        echo ""
+        echo -e "${RED}🛑 Deployment failed. Check the errors above.${NC}"
+        exit 1
+    fi
 fi
+
+echo -e "${GREEN}✅ Services started successfully!${NC}"
 
 # Give services time to start
 sleep 3
 
-# Step 11: Wait and perform health checks (unless --no-health-check)
+# Step 12: Wait and perform health checks (unless --no-health-check)
 if [[ "$SKIP_HEALTH_CHECK" == false ]]; then
     echo ""
     echo -e "${BLUE}🏥 Performing health checks...${NC}"
@@ -811,7 +1018,7 @@ else
     echo -e "${YELLOW}⏩ Skipping health checks (--no-health-check flag)${NC}"
 fi
 
-# Step 12: Final verification
+# Step 13: Final verification
 echo ""
 echo -e "${BLUE}📋 Final verification...${NC}"
 

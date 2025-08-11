@@ -270,11 +270,17 @@ log_verbose() {
 # Function to ensure clean output
 echo_clean() {
     echo -e "$1"
-    # Flush output to prevent terminal display issues
-    if command -v sync &> /dev/null; then
-        sync
-    fi
-    sleep 0.1
+    # Ensure output is flushed immediately
+    exec 1>&1  # Force flush stdout
+    sleep 0.2  # Give terminal time to process
+}
+
+# Function for progress messages with clean output
+progress_msg() {
+    echo ""
+    echo -e "$1"
+    echo ""
+    sleep 0.3
 }
 
 # Parse command line arguments first
@@ -452,20 +458,27 @@ if [[ "$SKIP_CLEANUP" == false ]]; then
         
         # Step 3c: Process cleanup
         echo -e "${YELLOW}  💀 Killing conflicting processes...${NC}"
-        sudo pkill -9 -f "mosquitto" 2>/dev/null || true
-        sudo pkill -9 -f "redis-server" 2>/dev/null || true
-        sudo pkill -9 -f "uvicorn\|gunicorn\|main_server" 2>/dev/null || true
+        echo "    Killing mosquitto processes..."
+        sudo pkill -9 -f "mosquitto" >/dev/null 2>&1 || true
+        sleep 1
+        echo "    Killing redis-server processes..."
+        sudo pkill -9 -f "redis-server" >/dev/null 2>&1 || true
+        sleep 1
+        echo "    Killing web server processes..."
+        sudo pkill -9 -f "uvicorn\|gunicorn\|main_server" >/dev/null 2>&1 || true
+        sleep 1
         
         # Step 3d: Port cleanup  
         echo -e "${YELLOW}  🔌 Freeing up ports forcefully...${NC}"
         for port in 6379 1883 5000 5001 80 9001 3000; do
             echo "    Freeing port $port..."
-            sudo fuser -k ${port}/tcp 2>/dev/null || true
-            sleep 0.5
+            sudo fuser -k ${port}/tcp >/dev/null 2>&1 || true
+            sleep 1
             # Double-check and force kill if needed
             if sudo netstat -tulpn 2>/dev/null | grep -q ":$port "; then
-                echo "    Force killing remaining processes on port $port..."
-                sudo lsof -ti:$port | xargs -r sudo kill -9 2>/dev/null || true
+                echo "      Force killing remaining processes on port $port..."
+                sudo lsof -ti:$port | xargs -r sudo kill -9 >/dev/null 2>&1 || true
+                sleep 1
             fi
         done
         
@@ -485,9 +498,12 @@ elif [[ "$QUICK_MODE" == true ]]; then
     
     # Quick port cleanup
     echo -e "${YELLOW}  🔌 Quick port cleanup...${NC}"
-    sudo fuser -k 1883/tcp 2>/dev/null || true
-    sudo fuser -k 6379/tcp 2>/dev/null || true
-    sleep 3
+    echo "    Freeing port 1883..."
+    sudo fuser -k 1883/tcp >/dev/null 2>&1 || true
+    sleep 1
+    echo "    Freeing port 6379..."
+    sudo fuser -k 6379/tcp >/dev/null 2>&1 || true
+    sleep 2
     
     log_verbose "Quick cleanup completed"
 else
@@ -649,9 +665,13 @@ done
 
 # Final port check and cleanup
 echo -e "${YELLOW}  🔌 Final port cleanup...${NC}"
-sudo fuser -k 1883/tcp 2>/dev/null || true
-sudo fuser -k 6379/tcp 2>/dev/null || true
+echo "    Final cleanup of port 1883..."
+sudo fuser -k 1883/tcp >/dev/null 2>&1 || true
+sleep 1
+echo "    Final cleanup of port 6379..."
+sudo fuser -k 6379/tcp >/dev/null 2>&1 || true
 sleep 2
+echo "    Ports cleared - ready for deployment"
 
 # Step 8: Start services
 echo ""

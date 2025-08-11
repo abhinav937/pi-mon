@@ -3,9 +3,17 @@
 echo "🚀 Pi Monitor Frontend Starting..."
 echo "⏳ Waiting for backend to be available..."
 
-# Wait for backend to be ready (using explicit network alias)
-until curl -f http://backend:5001/health > /dev/null 2>&1; do
+# Debug: Show network info
+echo "🔍 Network debugging info:"
+echo "  - Container name: pi-monitor-backend"
+echo "  - Target URL: http://pi-monitor-backend:5001/health"
+echo "  - Current container: $(hostname)"
+
+# Wait for backend to be ready (using exact container name)
+until curl -f http://pi-monitor-backend:5001/health > /dev/null 2>&1; do
   echo "⏳ Backend not ready, waiting..."
+  echo "🔍 Testing connection..."
+  curl -v http://pi-monitor-backend:5001/health || echo "Connection failed"
   sleep 3
 done
 

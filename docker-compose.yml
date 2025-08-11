@@ -4,8 +4,8 @@ services:
   # Backend Simple HTTP Server
   backend:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./backend/Dockerfile
     container_name: pi-monitor-backend
     restart: unless-stopped
     ports:

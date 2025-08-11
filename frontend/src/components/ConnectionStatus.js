@@ -1,7 +1,7 @@
 import React from 'react';
 import { Wifi, WifiOff, Clock } from 'lucide-react';
 
-const ConnectionStatus = ({ status, isOnline, lastUpdate }) => {
+const ConnectionStatus = ({ status, isOnline, lastUpdate, isMobile = false }) => {
   const getStatusColor = () => {
     switch (status) {
       case 'connected':
@@ -29,6 +29,19 @@ const ConnectionStatus = ({ status, isOnline, lastUpdate }) => {
     return status.charAt(0).toUpperCase() + status.slice(1);
   };
 
+  // Mobile compact version
+  if (isMobile) {
+    return (
+      <div className="flex items-center space-x-2">
+        {getStatusIcon()}
+        <span className={`text-xs font-medium ${getStatusColor()}`}>
+          {getStatusText()}
+        </span>
+      </div>
+    );
+  }
+
+  // Desktop full version
   return (
     <div className="flex items-center space-x-4">
       {/* Connection Status */}

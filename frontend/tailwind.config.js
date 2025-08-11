@@ -7,6 +7,11 @@ module.exports = {
   darkMode: 'media', // Use system preference
   theme: {
     extend: {
+      screens: {
+        'xs': '475px',
+        '3xl': '1600px',
+        '4xl': '1920px',
+      },
       colors: {
         // Custom color palette
         primary: {
@@ -78,6 +83,52 @@ module.exports = {
         '18': '4.5rem',
         '88': '22rem',
         '128': '32rem',
+        // Mobile-specific spacing
+        '11': '2.75rem',
+        '13': '3.25rem',
+        '15': '3.75rem',
+        '17': '4.25rem',
+        '19': '4.75rem',
+        '21': '5.25rem',
+        '23': '5.75rem',
+        '25': '6.25rem',
+        '27': '6.75rem',
+        '29': '7.25rem',
+        '31': '7.75rem',
+        '33': '8.25rem',
+        '35': '8.75rem',
+        '37': '9.25rem',
+        '39': '9.75rem',
+        '41': '10.25rem',
+        '43': '10.75rem',
+        '45': '11.25rem',
+        '47': '11.75rem',
+        '49': '12.25rem',
+        '51': '12.75rem',
+        '53': '13.25rem',
+        '55': '13.75rem',
+        '57': '14.25rem',
+        '59': '14.75rem',
+        '61': '15.25rem',
+        '63': '15.75rem',
+        '65': '16.25rem',
+        '67': '16.75rem',
+        '69': '17.25rem',
+        '71': '17.75rem',
+        '73': '18.25rem',
+        '75': '18.75rem',
+        '77': '19.25rem',
+        '79': '19.75rem',
+        '81': '20.25rem',
+        '83': '20.75rem',
+        '85': '21.25rem',
+        '87': '21.75rem',
+        '89': '22.25rem',
+        '91': '22.75rem',
+        '93': '23.25rem',
+        '95': '23.75rem',
+        '97': '24.25rem',
+        '99': '24.75rem',
       },
       animation: {
         'fade-in': 'fadeIn 0.5s ease-in-out',
@@ -87,6 +138,11 @@ module.exports = {
         'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
         'bounce-slow': 'bounce 2s infinite',
         'spin-slow': 'spin 3s linear infinite',
+        // Mobile-specific animations
+        'slide-up': 'slideUp 0.3s ease-out',
+        'slide-down': 'slideDown 0.3s ease-out',
+        'scale-in': 'scaleIn 0.2s ease-out',
+        'scale-out': 'scaleOut 0.2s ease-out',
       },
       keyframes: {
         fadeIn: {
@@ -105,11 +161,32 @@ module.exports = {
           '0%': { transform: 'translateX(0)' },
           '100%': { transform: 'translateX(-100%)' },
         },
+        // Mobile-specific keyframes
+        slideUp: {
+          '0%': { transform: 'translateY(100%)' },
+          '100%': { transform: 'translateY(0)' },
+        },
+        slideDown: {
+          '0%': { transform: 'translateY(0)' },
+          '100%': { transform: 'translateY(100%)' },
+        },
+        scaleIn: {
+          '0%': { transform: 'scale(0.95)' },
+          '100%': { transform: 'scale(1)' },
+        },
+        scaleOut: {
+          '0%': { transform: 'scale(1)' },
+          '100%': { transform: 'scale(0.95)' },
+        },
       },
       boxShadow: {
         'soft': '0 2px 15px 0 rgba(0, 0, 0, 0.05)',
         'medium': '0 4px 20px 0 rgba(0, 0, 0, 0.1)',
         'hard': '0 8px 30px 0 rgba(0, 0, 0, 0.15)',
+        // Mobile-specific shadows
+        'mobile': '0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06)',
+        'mobile-lg': '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
+        'mobile-xl': '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
       },
       backdropBlur: {
         'xs': '2px',
@@ -118,10 +195,19 @@ module.exports = {
         'xl': '1rem',
         '2xl': '1.5rem',
         '3xl': '2rem',
+        // Mobile-specific border radius
+        'mobile': '0.75rem',
+        'mobile-lg': '1rem',
+        'mobile-xl': '1.25rem',
       },
       maxWidth: {
         '8xl': '88rem',
         '9xl': '96rem',
+        // Mobile-specific max widths
+        'mobile': '100vw',
+        'mobile-sm': '95vw',
+        'mobile-md': '90vw',
+        'mobile-lg': '85vw',
       },
       zIndex: {
         '60': '60',
@@ -129,7 +215,31 @@ module.exports = {
         '80': '80',
         '90': '90',
         '100': '100',
-      }
+        // Mobile-specific z-index
+        'mobile-menu': '1000',
+        'mobile-overlay': '999',
+        'mobile-modal': '1001',
+      },
+      // Mobile-specific sizing
+      minHeight: {
+        'mobile-button': '44px',
+        'mobile-input': '44px',
+        'mobile-touch': '48px',
+      },
+      minWidth: {
+        'mobile-button': '44px',
+        'mobile-input': '44px',
+        'mobile-touch': '48px',
+      },
+      // Mobile-specific typography
+      fontSize: {
+        'mobile-xs': ['0.75rem', { lineHeight: '1rem' }],
+        'mobile-sm': ['0.875rem', { lineHeight: '1.25rem' }],
+        'mobile-base': ['1rem', { lineHeight: '1.5rem' }],
+        'mobile-lg': ['1.125rem', { lineHeight: '1.75rem' }],
+        'mobile-xl': ['1.25rem', { lineHeight: '1.75rem' }],
+        'mobile-2xl': ['1.5rem', { lineHeight: '2rem' }],
+      },
     },
   },
   plugins: [
@@ -179,6 +289,57 @@ module.exports = {
           '@media (prefers-color-scheme: dark)': {
             backgroundColor: theme('colors.gray.800'),
             borderColor: theme('colors.gray.700'),
+          }
+        },
+        // Mobile-specific components
+        '.mobile-card': {
+          backgroundColor: theme('colors.white'),
+          borderRadius: theme('borderRadius.mobile'),
+          boxShadow: theme('boxShadow.mobile'),
+          border: '1px solid ' + theme('colors.gray.200'),
+          padding: theme('spacing.4'),
+          transition: 'all 0.2s ease-in-out',
+          '@media (prefers-color-scheme: dark)': {
+            backgroundColor: theme('colors.gray.800'),
+            borderColor: theme('colors.gray.700'),
+          }
+        },
+        '.mobile-button': {
+          width: '100%',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: theme('spacing.2'),
+          padding: theme('spacing.3'),
+          borderRadius: theme('borderRadius.lg'),
+          transition: 'all 0.2s ease-in-out',
+          minHeight: theme('minHeight.mobile-touch'),
+          fontSize: theme('fontSize.sm'),
+          fontWeight: theme('fontWeight.medium'),
+        },
+        '.mobile-input': {
+          display: 'block',
+          width: '100%',
+          padding: theme('spacing.3') + ' ' + theme('spacing.2'),
+          border: '1px solid ' + theme('colors.gray.300'),
+          borderRadius: theme('borderRadius.md'),
+          boxShadow: theme('boxShadow.sm'),
+          fontSize: '16px', // Prevent zoom on iOS
+          minHeight: theme('minHeight.mobile-input'),
+          '&:focus': {
+            outline: 'none',
+            ring: '2px',
+            ringColor: theme('colors.blue.500'),
+            borderColor: theme('colors.blue.500'),
+          },
+          '@media (prefers-color-scheme: dark)': {
+            backgroundColor: theme('colors.gray.700'),
+            borderColor: theme('colors.gray.600'),
+            color: theme('colors.white'),
+            '&:focus': {
+              ringColor: theme('colors.blue.400'),
+              borderColor: theme('colors.blue.400'),
+            },
           }
         },
       })

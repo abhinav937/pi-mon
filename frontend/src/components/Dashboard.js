@@ -87,11 +87,11 @@ const Dashboard = ({ unifiedClient }) => {
 
   if (isLoading) {
     return (
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
         {[...Array(6)].map((_, i) => (
           <div key={i} className="metric-card animate-pulse">
-            <div className="skeleton h-8 w-24 mb-2"></div>
-            <div className="skeleton h-12 w-32 mb-4"></div>
+            <div className="skeleton h-6 sm:h-8 w-20 sm:w-24 mb-2"></div>
+            <div className="skeleton h-10 sm:h-12 w-28 sm:w-32 mb-4"></div>
             <div className="skeleton h-2 w-full"></div>
           </div>
         ))}
@@ -103,16 +103,16 @@ const Dashboard = ({ unifiedClient }) => {
     return (
       <div className="metric-card bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800">
         <div className="text-center">
-          <div className="text-red-600 dark:text-red-400 text-4xl mb-4">⚠️</div>
-          <h3 className="text-lg font-semibold text-red-800 dark:text-red-200 mb-2">
+          <div className="text-red-600 dark:text-red-400 text-3xl sm:text-4xl mb-4">⚠️</div>
+          <h3 className="text-base sm:text-lg font-semibold text-red-800 dark:text-red-200 mb-2">
             Unable to load system data
           </h3>
-          <p className="text-red-600 dark:text-red-400 mb-4">
+          <p className="text-red-600 dark:text-red-400 mb-4 text-sm sm:text-base">
             {error.message || 'Failed to connect to the Pi Monitor server'}
           </p>
           <button
             onClick={() => refetch()}
-            className="button-primary bg-red-600 hover:bg-red-700"
+            className="button-primary bg-red-600 hover:bg-red-700 px-4 py-2 sm:px-6 sm:py-3 text-sm sm:text-base"
           >
             Retry
           </button>
@@ -124,7 +124,7 @@ const Dashboard = ({ unifiedClient }) => {
   if (!currentData) {
     return (
       <div className="metric-card">
-        <div className="text-center text-gray-500 dark:text-gray-400">
+        <div className="text-center text-gray-500 dark:text-gray-400 text-sm sm:text-base">
           No system data available
         </div>
       </div>
@@ -132,30 +132,30 @@ const Dashboard = ({ unifiedClient }) => {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between space-y-2 sm:space-y-0">
+        <h2 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-white">
           System Overview
         </h2>
-        <div className="flex items-center space-x-2 text-sm text-gray-500 dark:text-gray-400">
-          <Activity className="h-4 w-4" />
+        <div className="flex items-center space-x-2 text-xs sm:text-sm text-gray-500 dark:text-gray-400">
+          <Activity className="h-3 w-3 sm:h-4 sm:w-4" />
           <span>Live Data</span>
         </div>
       </div>
 
       {/* Main Metrics Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
         {/* CPU Usage */}
-        <div className="metric-card">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center space-x-3">
-              <div className="p-2 bg-blue-100 dark:bg-blue-900 rounded-lg">
-                <Cpu className="h-6 w-6 text-blue-600 dark:text-blue-400" />
+        <div className="metric-card p-4 sm:p-6">
+          <div className="flex items-center justify-between mb-3 sm:mb-4">
+            <div className="flex items-center space-x-2 sm:space-x-3">
+              <div className="p-1.5 sm:p-2 bg-blue-100 dark:bg-blue-900 rounded-lg">
+                <Cpu className="h-4 w-4 sm:h-6 sm:w-6 text-blue-600 dark:text-blue-400" />
               </div>
               <div>
-                <p className="metric-label">CPU Usage</p>
-                <p className={`metric-value ${getStatusColor(currentData.cpu_percent)}`}>
+                <p className="metric-label text-xs sm:text-sm">CPU Usage</p>
+                <p className={`metric-value text-xl sm:text-3xl ${getStatusColor(currentData.cpu_percent)}`}>
                   {currentData.cpu_percent !== null && currentData.cpu_percent !== undefined && !isNaN(currentData.cpu_percent)
                     ? `${currentData.cpu_percent.toFixed(1)}%`
                     : 'N/A'
@@ -173,15 +173,15 @@ const Dashboard = ({ unifiedClient }) => {
         </div>
 
         {/* Memory Usage */}
-        <div className="metric-card">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center space-x-3">
-              <div className="p-2 bg-purple-100 dark:bg-purple-900 rounded-lg">
-                <Activity className="h-6 w-6 text-purple-600 dark:text-purple-400" />
+        <div className="metric-card p-4 sm:p-6">
+          <div className="flex items-center justify-between mb-3 sm:mb-4">
+            <div className="flex items-center space-x-2 sm:space-x-3">
+              <div className="p-1.5 sm:p-2 bg-purple-100 dark:bg-purple-900 rounded-lg">
+                <Activity className="h-4 w-4 sm:h-6 sm:w-6 text-purple-600 dark:text-purple-400" />
               </div>
               <div>
-                <p className="metric-label">Memory</p>
-                <p className={`metric-value ${getStatusColor(currentData.memory_percent)}`}>
+                <p className="metric-label text-xs sm:text-sm">Memory</p>
+                <p className={`metric-value text-xl sm:text-3xl ${getStatusColor(currentData.memory_percent)}`}>
                   {currentData.memory_percent !== null && currentData.memory_percent !== undefined && !isNaN(currentData.memory_percent)
                     ? `${currentData.memory_percent.toFixed(1)}%`
                     : 'N/A'
@@ -199,15 +199,15 @@ const Dashboard = ({ unifiedClient }) => {
         </div>
 
         {/* Disk Usage */}
-        <div className="metric-card">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center space-x-3">
-              <div className="p-2 bg-green-100 dark:bg-green-900 rounded-lg">
-                <HardDrive className="h-6 w-6 text-green-600 dark:text-green-400" />
+        <div className="metric-card p-4 sm:p-6">
+          <div className="flex items-center justify-between mb-3 sm:mb-4">
+            <div className="flex items-center space-x-2 sm:space-x-3">
+              <div className="p-1.5 sm:p-2 bg-green-100 dark:bg-green-900 rounded-lg">
+                <HardDrive className="h-4 w-4 sm:h-6 sm:w-6 text-green-600 dark:text-green-400" />
               </div>
               <div>
-                <p className="metric-label">Disk Space</p>
-                <p className={`metric-value ${getStatusColor(currentData.disk_percent)}`}>
+                <p className="metric-label text-xs sm:text-sm">Disk Space</p>
+                <p className={`metric-value text-xl sm:text-3xl ${getStatusColor(currentData.disk_percent)}`}>
                   {currentData.disk_percent !== null && currentData.disk_percent !== undefined && !isNaN(currentData.disk_percent) 
                     ? `${currentData.disk_percent.toFixed(1)}%` 
                     : 'N/A'
@@ -225,15 +225,15 @@ const Dashboard = ({ unifiedClient }) => {
         </div>
 
         {/* Temperature */}
-        <div className="metric-card">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center space-x-3">
-              <div className="p-2 bg-red-100 dark:bg-red-900 rounded-lg">
-                <Thermometer className="h-6 w-6 text-red-600 dark:text-red-400" />
+        <div className="metric-card p-4 sm:p-6">
+          <div className="flex items-center justify-between mb-3 sm:mb-4">
+            <div className="flex items-center space-x-2 sm:space-x-3">
+              <div className="p-1.5 sm:p-2 bg-red-100 dark:bg-red-900 rounded-lg">
+                <Thermometer className="h-4 w-4 sm:h-6 sm:w-6 text-red-600 dark:text-red-400" />
               </div>
               <div>
-                <p className="metric-label">Temperature</p>
-                <p className={`metric-value ${(currentData.temperature || 0) > 70 ? 'text-red-600' : (currentData.temperature || 0) > 60 ? 'text-yellow-600' : 'text-green-600'}`}>
+                <p className="metric-label text-xs sm:text-sm">Temperature</p>
+                <p className={`metric-value text-xl sm:text-3xl ${(currentData.temperature || 0) > 70 ? 'text-red-600' : (currentData.temperature || 0) > 60 ? 'text-yellow-600' : 'text-green-600'}`}>
                   {currentData.temperature !== null && currentData.temperature !== undefined && !isNaN(currentData.temperature)
                     ? `${currentData.temperature.toFixed(1)}°C`
                     : 'N/A'
@@ -256,14 +256,14 @@ const Dashboard = ({ unifiedClient }) => {
         </div>
 
         {/* Uptime */}
-        <div className="metric-card">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center space-x-3">
-              <div className="p-2 bg-indigo-100 dark:bg-indigo-900 rounded-lg">
-                <Clock className="h-6 w-6 text-indigo-600 dark:text-indigo-400" />
+        <div className="metric-card p-4 sm:p-6">
+          <div className="flex items-center justify-between mb-3 sm:mb-4">
+            <div className="flex items-center space-x-2 sm:space-x-3">
+              <div className="p-1.5 sm:p-2 bg-indigo-100 dark:bg-indigo-900 rounded-lg">
+                <Clock className="h-4 w-4 sm:h-6 sm:w-6 text-indigo-600 dark:text-indigo-400" />
               </div>
               <div>
-                <p className="metric-label">Uptime</p>
+                <p className="metric-label text-xs sm:text-sm">Uptime</p>
                 <p className="metric-value text-indigo-600 dark:text-indigo-400">
                   {currentData.system?.uptime || currentData.uptime || 'Unknown'}
                 </p>
@@ -276,14 +276,14 @@ const Dashboard = ({ unifiedClient }) => {
         </div>
 
         {/* Network Activity */}
-        <div className="metric-card">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center space-x-3">
-              <div className="p-2 bg-cyan-100 dark:bg-cyan-900 rounded-lg">
-                <Wifi className="h-6 w-6 text-cyan-600 dark:text-cyan-400" />
+        <div className="metric-card p-4 sm:p-6">
+          <div className="flex items-center justify-between mb-3 sm:mb-4">
+            <div className="flex items-center space-x-2 sm:space-x-3">
+              <div className="p-1.5 sm:p-2 bg-cyan-100 dark:bg-cyan-900 rounded-lg">
+                <Wifi className="h-4 w-4 sm:h-6 sm:w-6 text-cyan-600 dark:text-cyan-400" />
               </div>
               <div>
-                <p className="metric-label">Network</p>
+                <p className="metric-label text-xs sm:text-sm">Network</p>
                 <p className="text-lg font-semibold text-gray-900 dark:text-white">
                   Active
                 </p>

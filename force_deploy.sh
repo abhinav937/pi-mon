@@ -5,14 +5,28 @@
 # Don't use set -e during cleanup as we expect some commands to fail
 # set -e  # Exit on any error
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-PURPLE='\033[0;35m'
-CYAN='\033[0;36m'
-NC='\033[0m' # No Color
+# Function to setup colors after argument parsing
+setup_colors() {
+    # Colors for output - auto-detect terminal support
+    if [[ -t 1 ]] && [[ "${TERM:-}" != "dumb" ]] && [[ "${NO_COLOR:-}" == "" ]] && [[ "$NO_COLOR_FLAG" == false ]]; then
+        RED='\033[0;31m'
+        GREEN='\033[0;32m'
+        YELLOW='\033[1;33m'
+        BLUE='\033[0;34m'
+        PURPLE='\033[0;35m'
+        CYAN='\033[0;36m'
+        NC='\033[0m' # No Color
+    else
+        # No color support or disabled
+        RED=''
+        GREEN=''
+        YELLOW=''
+        BLUE=''
+        PURPLE=''
+        CYAN=''
+        NC=''
+    fi
+}
 
 # Configuration
 PROJECT_NAME="pi-mon"
@@ -77,6 +91,7 @@ SKIP_HEALTH_CHECK=false
 PULL_IMAGES=true
 CREATE_VENV=true
 FORCE_NUCLEAR=false
+NO_COLOR_FLAG=false
 
 # Function to show help
 show_help() {
@@ -111,6 +126,7 @@ show_help() {
     echo ""
     echo -e "${CYAN}OUTPUT OPTIONS:${NC}"
     echo "  -l, --logs               Show service logs after deployment"
+    echo "      --no-color           Disable colored output (fix terminal display issues)"
     echo "  -h, --help               Show this help message and exit"
     echo ""
     echo -e "${CYAN}EXAMPLES:${NC}"
@@ -122,6 +138,7 @@ show_help() {
     echo "  $0 -y -q -F              # Quick frontend-only deployment"
     echo "  $0 -d -v -l              # Verbose development mode with logs"
     echo "  $0 --nuclear --yes       # Nuclear cleanup and deploy"
+    echo "  $0 -y --no-color         # Deploy without colors (fix display issues)"
     echo ""
     echo -e "${CYAN}MODES:${NC}"
     echo -e "  ${YELLOW}Development (--dev):${NC}"
@@ -143,10 +160,9 @@ show_help() {
     echo "  • Frontend (React + Nginx) - Port 80"
     echo ""
     echo -e "${CYAN}POST-DEPLOYMENT:${NC}"
-    NETWORK_IP=$(get_network_ip)
-    echo "  Frontend:     http://localhost   or   http://$NETWORK_IP"
-    echo "  Backend API:  http://localhost:5001   or   http://$NETWORK_IP:5001"
-    echo "  Health Check: http://localhost:5001/health   or   http://$NETWORK_IP:5001/health"
+    echo "  Frontend:     http://localhost   or   http://<Pi-IP>"
+    echo "  Backend API:  http://localhost:5001   or   http://<Pi-IP>:5001"
+    echo "  Health Check: http://localhost:5001/health   or   http://<Pi-IP>:5001/health"
     echo ""
     echo -e "${CYAN}QUICK REFERENCE (Shortcuts):${NC}"
     echo "  -y = --yes           -q = --quick         -v = --verbose"
@@ -220,6 +236,10 @@ parse_arguments() {
                 FORCE_NUCLEAR=true
                 shift
                 ;;
+            --no-color)
+                NO_COLOR_FLAG=true
+                shift
+                ;;
             *)
                 echo -e "${RED}❌ Unknown option: $1${NC}"
                 echo "Use --help for usage information."
@@ -247,14 +267,29 @@ log_verbose() {
     fi
 }
 
+# Function to ensure clean output
+echo_clean() {
+    echo -e "$1"
+    # Flush output to prevent terminal display issues
+    if command -v sync &> /dev/null; then
+        sync
+    fi
+    sleep 0.1
+}
+
 # Parse command line arguments first
 parse_arguments "$@"
+
+# Setup colors after arguments are parsed
+setup_colors
 
 # Setup Docker Compose command based on mode
 setup_compose_command
 
+echo ""
 echo -e "${BLUE}🥧 Pi Monitor - Force Deployment${NC}"
 echo "=================================="
+echo ""
 
 # Show mode information
 if [[ "$DEV_MODE" == true ]]; then

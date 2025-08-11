@@ -24,7 +24,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the simple server and config
 COPY simple_server.py .
-COPY config.py .
+COPY ../config.py .
 
 # Expose port
 EXPOSE 5001

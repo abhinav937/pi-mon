@@ -41,7 +41,7 @@ echo "  Frontend Port: $FRONTEND_PORT"
 
 # Build and deploy backend
 echo -e "${BLUE}🏗️  Building backend...${NC}"
-docker build -t pi-monitor-backend -f backend/Dockerfile .
+docker build -t pi-monitor-backend -f backend/Dockerfile backend
 
 # Stop existing containers
 echo -e "${BLUE}🔄 Stopping existing containers...${NC}"
@@ -71,19 +71,27 @@ else
     exit 1
 fi
 
-# Build and deploy frontend
-echo -e "${BLUE}🏗️  Building frontend...${NC}"
+# Build and deploy frontend natively
+echo -e "${BLUE}🏗️  Building frontend natively...${NC}"
+# Install Apache and required modules if not present
+if ! command -v apache2 &> /dev/null; then
+    echo -e "${YELLOW}📦 Installing Apache...${NC}"
+    sudo apt update
+    sudo apt install -y apache2
+fi
+sudo a2enmod proxy proxy_http proxy_wstunnel rewrite headers deflate
+# Build React app
 cd frontend
-docker build -t pi-monitor-frontend .
+npm install
+npm run build
 cd ..
-
-# Start frontend
-echo -e "${BLUE}🚀 Starting frontend...${NC}"
-docker run -d \
-    --name pi-monitor-frontend \
-    --restart unless-stopped \
-    -p $FRONTEND_PORT:80 \
-    pi-monitor-frontend
+# Copy build to Apache root
+sudo cp -r frontend/build/* /var/www/html/
+sudo chown -R www-data:www-data /var/www/html/
+# Copy Apache config
+sudo cp frontend/apache.conf /etc/apache2/sites-available/000-default.conf
+# Restart Apache
+sudo systemctl restart apache2
 
 # Wait for frontend to be ready
 echo -e "${BLUE}⏳ Waiting for frontend to start...${NC}"
@@ -95,24 +103,24 @@ if curl -s http://localhost:$FRONTEND_PORT > /dev/null; then
     echo -e "${GREEN}✅ Frontend is responding${NC}"
 else
     echo -e "${RED}❌ Frontend not responding${NC}"
-    echo "Frontend logs:"
-    docker logs pi-monitor-frontend --tail 10
+    echo "Apache logs:"
+    sudo tail -n 10 /var/log/apache2/error.log
     exit 1
 fi
 
-# Show status
+# Show status (only backend container now)
 echo -e "${BLUE}📊 Container status:${NC}"
-docker ps -f name=pi-monitor
+docker ps -f name=pi-monitor-backend
 
 echo ""
 echo -e "${GREEN}🎉 Deployment completed successfully!${NC}"
 echo -e "${BLUE}🌐 Access URLs:${NC}"
 echo "  Backend: http://localhost:$BACKEND_PORT"
-echo "  Frontend: http://localhost:$FRONTEND_PORT"
+echo "  Frontend: http://localhost:$FRONTEND_PORT (native via Apache)"
 echo "  Health: http://localhost:$BACKEND_PORT/health"
 
 echo -e "${BLUE}💡 Useful commands:${NC}"
 echo "  View logs: docker logs pi-monitor-backend"
-echo "  Stop all: docker stop pi-monitor-backend pi-monitor-frontend"
-echo "  Start all: docker start pi-monitor-backend pi-monitor-frontend"
-echo "  Restart: docker restart pi-monitor-backend pi-monitor-frontend"
+echo "  Apache logs: sudo tail -f /var/log/apache2/error.log"
+echo "  Stop backend: docker stop pi-monitor-backend"
+echo "  Restart Apache: sudo systemctl restart apache2"

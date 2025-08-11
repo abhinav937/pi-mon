@@ -1586,7 +1586,7 @@ def run_server(port=None):
     print("Starting metrics collection...")
     metrics_collector.start_collection()
     
-    server_address = ('', port)
+    server_address = ('0.0.0.0', port)
     httpd = HTTPServer(server_address, SimplePiMonitorHandler)
     
     print("=" * 60)

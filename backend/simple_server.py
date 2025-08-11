@@ -26,8 +26,10 @@ JWT_SECRET = "pi-monitor-secret-key-2024"
 JWT_EXPIRATION = 24 * 60 * 60  # 24 hours
 
 class SimplePiMonitorHandler(BaseHTTPRequestHandler):
+    # Class variable to persist tokens between requests
+    auth_tokens = {}
+    
     def __init__(self, *args, **kwargs):
-        self.auth_tokens = {}  # Simple in-memory token storage
         super().__init__(*args, **kwargs)
     
     def do_GET(self):
@@ -79,6 +81,14 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                 response = {"error": "Unauthorized"}
             else:
                 response = self.get_services_status()
+        elif path == '/api/power':
+            # Power management endpoint
+            if not self.check_auth():
+                self.send_response(401)
+                self.end_headers()
+                response = {"error": "Unauthorized"}
+            else:
+                response = self.get_power_status()
         else:
             # 404 for unknown paths
             self.send_response(404)
@@ -148,13 +158,13 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
             return False
         
         token = auth_header.split(' ')[1]
-        return token in self.auth_tokens
+        return token in SimplePiMonitorHandler.auth_tokens
     
     def handle_auth(self):
         """Handle authentication and return token"""
         # Simple demo authentication - always succeeds
         token = self.generate_token()
-        self.auth_tokens[token] = {
+        SimplePiMonitorHandler.auth_tokens[token] = {
             'user': 'pi-monitor',
             'expires': time.time() + JWT_EXPIRATION
         }
@@ -214,6 +224,23 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
         except Exception as e:
             return {
                 "error": f"Failed to get system stats: {str(e)}",
+                "timestamp": time.strftime('%Y-%m-%d %H:%M:%S')
+            }
+    
+    def get_power_status(self):
+        """Get power status and available actions"""
+        try:
+            return {
+                "timestamp": time.strftime('%Y-%m-%d %H:%M:%S'),
+                "status": "ready",
+                "actions": ["restart", "shutdown", "reboot"],
+                "current_power": "on",
+                "battery": None,  # Pi doesn't have battery
+                "uptime": time.time() - psutil.boot_time()
+            }
+        except Exception as e:
+            return {
+                "error": f"Failed to get power status: {str(e)}",
                 "timestamp": time.strftime('%Y-%m-%d %H:%M:%S')
             }
     

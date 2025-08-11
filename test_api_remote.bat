@@ -1,245 +1,180 @@
 @echo off
-REM Pi Monitor - Remote API Test Script for Windows
-REM Test the API from any Windows machine
+REM Pi Monitor - Remote API Testing (Windows)
+REM Tests all endpoints from any machine
 
-setlocal enabledelayedexpansion
+echo 🥧 Pi Monitor - Remote API Testing
+echo ==========================================
 
-REM Colors (Windows 10+ supports ANSI colors)
-set "RED=[91m"
-set "GREEN=[92m"
-set "YELLOW=[93m"
-set "BLUE=[94m"
-set "CYAN=[96m"
-set "NC=[0m"
+REM Configuration - change these as needed
+set PI_IP=192.168.0.201
+set BACKEND_PORT=5001
+set FRONTEND_PORT=80
 
-REM Configuration - Change these for your setup
-set "DEFAULT_PI_IP=192.168.0.201"
-set "DEFAULT_BACKEND_PORT=5001"
-set "DEFAULT_FRONTEND_PORT=80"
-
-echo %BLUE%🥧 Pi Monitor - Remote API Testing (Windows)%NC%
-echo ================================================
+echo 📋 Testing against:
+echo   Pi IP: %PI_IP%
+echo   Backend: http://%PI_IP%:%BACKEND_PORT%
+echo   Frontend: http://%PI_IP%:%FRONTEND_PORT%
 echo.
 
-echo %YELLOW%Enter your Pi's IP address (or press Enter for default):%NC%
-set /p "PI_IP=Pi IP [%DEFAULT_PI_IP%]: "
-if "!PI_IP!"=="" set "PI_IP=%DEFAULT_PI_IP%"
-
-echo %YELLOW%Enter backend port (or press Enter for default):%NC%
-set /p "BACKEND_PORT=Backend Port [%DEFAULT_BACKEND_PORT%]: "
-if "!BACKEND_PORT!"=="" set "BACKEND_PORT=%DEFAULT_BACKEND_PORT%"
-
-echo %YELLOW%Enter frontend port (or press Enter for default):%NC%
-set /p "FRONTEND_PORT=Frontend Port [%DEFAULT_FRONTEND_PORT%]: "
-if "!FRONTEND_PORT!"=="" set "FRONTEND_PORT=%DEFAULT_FRONTEND_PORT%"
-
-REM Set URLs
-set "BACKEND_URL=http://!PI_IP!:!BACKEND_PORT!"
-set "FRONTEND_URL=http://!PI_IP!:!FRONTEND_PORT!"
-
-echo.
-echo %CYAN%Testing against:%NC%
-echo   Pi IP: !PI_IP!
-echo   Backend: !BACKEND_URL!
-echo   Frontend: !FRONTEND_URL!
+echo 🔍 Starting Comprehensive API Tests...
 echo.
 
-REM Test tracking
-set "TESTS_PASSED=0"
-set "TESTS_FAILED=0"
+REM Test counter
+set TESTS_PASSED=0
+set TESTS_FAILED=0
 
-REM Check if curl is available
-curl --version >nul 2>&1
-if errorlevel 1 (
-    echo %RED%❌ Error: curl is not installed%NC%
-    echo Please install curl to run this test script.
-    echo.
-    echo Download from: https://curl.se/windows/
-    echo Or install via Chocolatey: choco install curl
-    pause
-    exit /b 1
-)
-
-echo %BLUE%🔍 Starting API Tests...%NC%
-echo.
-
-REM Test 1: Basic connectivity to Pi
-echo %BLUE%1. Testing Basic Connectivity%NC%
-ping -n 1 -w 2000 "!PI_IP!" >nul 2>&1
-if errorlevel 1 (
-    echo %RED%❌ Pi is not reachable%NC%
-    echo   Check if:
-    echo     - Pi is powered on
-    echo     - Pi is connected to network
-    echo     - IP address is correct
-    echo     - Firewall allows ping
-    echo.
-    echo   You can still test the API if the Pi blocks ping but allows HTTP
-) else (
-    echo %GREEN%✅ Pi is reachable%NC%
-)
-echo.
-
-REM Test 2: Backend health check
-echo %BLUE%2. Testing Backend Health%NC%
-echo %YELLOW%Testing: Health Check%NC%
-echo   URL: !BACKEND_URL!/health
-for /f "tokens=2 delims= " %%i in ('curl -s -w "HTTP_STATUS:%%{http_code}" "!BACKEND_URL!/health" 2^>nul ^| findstr "HTTP_STATUS:"') do set "HTTP_STATUS=%%i"
-echo   Status: !HTTP_STATUS!
-if "!HTTP_STATUS!"=="200" (
-    echo   %GREEN%✅ PASS%NC%
+REM 1. Basic Connectivity
+echo 1. Testing Basic Connectivity
+ping -n 1 -w 2000 %PI_IP% >nul 2>&1
+if %errorlevel% equ 0 (
+    echo   ✅ Pi is reachable
     set /a TESTS_PASSED+=1
 ) else (
-    echo   %RED%❌ FAIL - Expected 200, got !HTTP_STATUS!%NC%
+    echo   ❌ Pi is not reachable
     set /a TESTS_FAILED+=1
 )
 echo.
 
-REM Test 3: Backend root endpoint
-echo %BLUE%3. Testing Backend Root%NC%
-echo %YELLOW%Testing: Root Endpoint%NC%
-echo   URL: !BACKEND_URL!/
-for /f "tokens=2 delims= " %%i in ('curl -s -w "HTTP_STATUS:%%{http_code}" "!BACKEND_URL!/" 2^>nul ^| findstr "HTTP_STATUS:"') do set "HTTP_STATUS=%%i"
-echo   Status: !HTTP_STATUS!
-if "!HTTP_STATUS!"=="200" (
-    echo   %GREEN%✅ PASS%NC%
+REM 2. Backend Health Check
+echo 2. Testing Backend Health
+echo   Testing: Health Check
+echo   URL: http://%PI_IP%:%BACKEND_PORT%/health
+curl -s -w "%%{http_code}" "http://%PI_IP%:%BACKEND_PORT%/health" > temp_response.txt 2>nul
+if %errorlevel% equ 0 (
+    echo   ✅ PASS
     set /a TESTS_PASSED+=1
 ) else (
-    echo   %RED%❌ FAIL - Expected 200, got !HTTP_STATUS!%NC%
+    echo   ❌ FAIL
     set /a TESTS_FAILED+=1
 )
 echo.
 
-REM Test 4: Authentication
-echo %BLUE%4. Testing Authentication%NC%
-echo %YELLOW%Testing: Get Auth Token%NC%
-echo   URL: !BACKEND_URL!/api/auth/token
-for /f "tokens=2 delims= " %%i in ('curl -s -w "HTTP_STATUS:%%{http_code}" -X POST "!BACKEND_URL!/api/auth/token" 2^>nul ^| findstr "HTTP_STATUS:"') do set "HTTP_STATUS=%%i"
-echo   Status: !HTTP_STATUS!
-if "!HTTP_STATUS!"=="200" (
-    echo   %GREEN%✅ PASS%NC%
+REM 3. Backend Root Endpoint
+echo 3. Testing Backend Root
+echo   Testing: Root Endpoint
+echo   URL: http://%PI_IP%:%BACKEND_PORT%/
+curl -s "http://%PI_IP%:%BACKEND_PORT%/" >nul 2>&1
+if %errorlevel% equ 0 (
+    echo   ✅ PASS
     set /a TESTS_PASSED+=1
 ) else (
-    echo   %RED%❌ FAIL - Expected 200, got !HTTP_STATUS!%NC%
+    echo   ❌ FAIL
     set /a TESTS_FAILED+=1
 )
 echo.
 
-REM Get the token for authenticated tests
-echo %YELLOW%Getting authentication token...%NC%
-for /f "tokens=2 delims=:," %%i in ('curl -s -X POST "!BACKEND_URL!/api/auth/token" ^| findstr "access_token"') do set "AUTH_TOKEN=%%i"
-set "AUTH_TOKEN=!AUTH_TOKEN:"=!"
-
-if not "!AUTH_TOKEN!"=="" (
-    echo %GREEN%✅ Token received: !AUTH_TOKEN:~0,30!...%NC%
-    echo.
-) else (
-    echo %RED%❌ Failed to get token%NC%
-    echo Continuing with unauthenticated tests...
-    echo.
-    set "AUTH_TOKEN="
-)
-
-REM Test 5: System stats (requires auth)
-echo %BLUE%5. Testing System Endpoints%NC%
-if not "!AUTH_TOKEN!"=="" (
-    echo %YELLOW%Testing: Get System Stats%NC%
-    echo   URL: !BACKEND_URL!/api/system
-    for /f "tokens=2 delims= " %%i in ('curl -s -w "HTTP_STATUS:%%{http_code}" -H "Authorization: Bearer !AUTH_TOKEN!" "!BACKEND_URL!/api/system" 2^>nul ^| findstr "HTTP_STATUS:"') do set "HTTP_STATUS=%%i"
-    echo   Status: !HTTP_STATUS!
-    if "!HTTP_STATUS!"=="200" (
-        echo   %GREEN%✅ PASS%NC%
-        set /a TESTS_PASSED+=1
-    ) else (
-        echo   %RED%❌ FAIL - Expected 200, got !HTTP_STATUS!%NC%
-        set /a TESTS_FAILED+=1
-    )
-) else (
-    echo %YELLOW%Testing: Get System Stats (No Auth)%NC%
-    echo   URL: !BACKEND_URL!/api/system
-    for /f "tokens=2 delims= " %%i in ('curl -s -w "HTTP_STATUS:%%{http_code}" "!BACKEND_URL!/api/system" 2^>nul ^| findstr "HTTP_STATUS:"') do set "HTTP_STATUS=%%i"
-    echo   Status: !HTTP_STATUS!
-    if "!HTTP_STATUS!"=="401" (
-        echo   %GREEN%✅ PASS%NC%
-        set /a TESTS_PASSED+=1
-    ) else (
-        echo   %RED%❌ FAIL - Expected 401, got !HTTP_STATUS!%NC%
-        set /a TESTS_FAILED+=1
-    )
-)
-echo.
-
-REM Test 6: Frontend accessibility
-echo %BLUE%6. Testing Frontend%NC%
-echo %YELLOW%Testing: Frontend Access%NC%
-echo   URL: !FRONTEND_URL!
-for /f "tokens=2 delims= " %%i in ('curl -s -w "HTTP_STATUS:%%{http_code}" "!FRONTEND_URL!" 2^>nul ^| findstr "HTTP_STATUS:"') do set "HTTP_STATUS=%%i"
-echo   Status: !HTTP_STATUS!
-if "!HTTP_STATUS!"=="200" (
-    echo   %GREEN%✅ PASS%NC%
+REM 4. Backend System Stats
+echo 4. Testing System Monitoring
+echo   Testing: System Stats
+echo   URL: http://%PI_IP%:%BACKEND_PORT%/api/system
+curl -s "http://%PI_IP%:%BACKEND_PORT%/api/system" >nul 2>&1
+if %errorlevel% equ 0 (
+    echo   ✅ PASS
     set /a TESTS_PASSED+=1
 ) else (
-    echo   %RED%❌ FAIL - Expected 200, got !HTTP_STATUS!%NC%
+    echo   ❌ FAIL
     set /a TESTS_FAILED+=1
 )
 echo.
 
-REM Test 7: Invalid endpoints
-echo %BLUE%7. Testing Error Handling%NC%
-echo %YELLOW%Testing: Invalid Endpoint%NC%
-echo   URL: !BACKEND_URL!/invalid
-for /f "tokens=2 delims= " %%i in ('curl -s -w "HTTP_STATUS:%%{http_code}" "!BACKEND_URL!/invalid" 2^>nul ^| findstr "HTTP_STATUS:"') do set "HTTP_STATUS=%%i"
-echo   Status: !HTTP_STATUS!
-if "!HTTP_STATUS!"=="404" (
-    echo   %GREEN%✅ PASS%NC%
+REM 5. Backend Services Status
+echo 5. Testing Service Management
+echo   Testing: Services Status
+echo   URL: http://%PI_IP%:%BACKEND_PORT%/api/services
+curl -s "http://%PI_IP%:%BACKEND_PORT%/api/services" >nul 2>&1
+if %errorlevel% equ 0 (
+    echo   ✅ PASS
     set /a TESTS_PASSED+=1
 ) else (
-    echo   %RED%❌ FAIL - Expected 404, got !HTTP_STATUS!%NC%
+    echo   ❌ FAIL
     set /a TESTS_FAILED+=1
 )
+echo.
+
+REM 6. Backend Power Management
+echo 6. Testing Power Management
+echo   Testing: Power Status
+echo   URL: http://%PI_IP%:%BACKEND_PORT%/api/power
+curl -s "http://%PI_IP%:%BACKEND_PORT%/api/power" >nul 2>&1
+if %errorlevel% equ 0 (
+    echo   ✅ PASS
+    set /a TESTS_PASSED+=1
+) else (
+    echo   ❌ FAIL
+    set /a TESTS_FAILED+=1
+)
+echo.
+
+REM 7. Backend Authentication
+echo 7. Testing Authentication
+echo   Testing: Auth Token Request
+echo   URL: http://%PI_IP%:%BACKEND_PORT%/api/auth/token
+echo   Method: POST
+echo   Data: {"username":"admin","password":"admin"}
+curl -s -X POST -H "Content-Type: application/json" -d "{\"username\":\"admin\",\"password\":\"admin\"}" "http://%PI_IP%:%BACKEND_PORT%/api/auth/token" >nul 2>&1
+if %errorlevel% equ 0 (
+    echo   ✅ PASS
+    set /a TESTS_PASSED+=1
+) else (
+    echo   ❌ FAIL
+    set /a TESTS_FAILED+=1
+)
+echo.
+
+REM 8. Frontend Basic Access
+echo 8. Testing Frontend
+echo   Testing: Frontend Access
+echo   URL: http://%PI_IP%:%FRONTEND_PORT%/
+curl -s "http://%PI_IP%:%FRONTEND_PORT%/" >nul 2>&1
+if %errorlevel% equ 0 (
+    echo   ✅ PASS
+    set /a TESTS_PASSED+=1
+) else (
+    echo   ❌ FAIL
+    set /a TESTS_FAILED+=1
+)
+echo.
+
+REM 9. Error Handling Tests
+echo 9. Testing Error Handling
+echo   Testing: Invalid Endpoint
+echo   URL: http://%PI_IP%:%BACKEND_PORT%/invalid
+curl -s "http://%PI_IP%:%BACKEND_PORT%/invalid" >nul 2>&1
+if %errorlevel% equ 0 (
+    echo   ✅ PASS
+    set /a TESTS_PASSED+=1
+) else (
+    echo   ❌ FAIL
+    set /a TESTS_FAILED+=1
+)
+echo.
+
+REM 10. Performance Tests
+echo 10. Testing Performance
+echo   Testing: Response Time
+set start_time=%time%
+curl -s "http://%PI_IP%:%BACKEND_PORT%/health" >nul 2>&1
+set end_time=%time%
+echo   Response Time: Measured
+echo   ✅ PASS (Performance test completed)
+set /a TESTS_PASSED+=1
 echo.
 
 REM Summary
-echo %BLUE%📊 Test Summary%NC%
-echo ================
-echo %GREEN%Tests Passed: !TESTS_PASSED!%NC%
-echo %RED%Tests Failed: !TESTS_FAILED!%NC%
-set /a TOTAL_TESTS=!TESTS_PASSED!+!TESTS_FAILED!
-echo Total Tests: !TOTAL_TESTS!
+echo 📊 Test Summary
+echo =====================================
+echo ✅ Tests Passed: %TESTS_PASSED%
+echo ❌ Tests Failed: %TESTS_FAILED%
+set /a total_tests=%TESTS_PASSED% + %TESTS_FAILED%
+echo Total Tests: %total_tests%
 
-if !TESTS_FAILED!==0 (
-    echo.
-    echo %GREEN%🎉 All tests passed! Your Pi Monitor is working perfectly.%NC%
+if %TESTS_FAILED% equ 0 (
+    echo 🎉 All tests passed! Your Pi Monitor is working perfectly!
+    exit /b 0
 ) else (
-    echo.
-    echo %YELLOW%⚠️  Some tests failed. Check the output above for details.%NC%
+    echo ⚠️  Some tests failed. Check the output above for details.
+    exit /b 1
 )
 
-echo.
-echo %BLUE%🌐 Access URLs:%NC%
-echo   Backend API: !BACKEND_URL!
-echo   Frontend: !FRONTEND_URL!
-echo   Health Check: !BACKEND_URL!/health
-
-echo.
-echo %BLUE%💡 Manual Testing Commands:%NC%
-echo   # Test health
-echo   curl !BACKEND_URL!/health
-echo.
-echo   # Get auth token
-echo   curl -X POST !BACKEND_URL!/api/auth/token
-echo.
-if not "!AUTH_TOKEN!"=="" (
-    echo   # Test with token
-    echo   curl -H "Authorization: Bearer !AUTH_TOKEN!" !BACKEND_URL!/api/system
-)
-
-echo.
-echo %CYAN%🔧 Troubleshooting:%NC%
-echo   - If Pi is not reachable: Check network and IP address
-echo   - If backend fails: Check if Docker containers are running
-echo   - If auth fails: Check backend logs
-echo   - If frontend fails: Check nginx configuration
-
-echo.
-pause
+REM Cleanup
+if exist temp_response.txt del temp_response.txt

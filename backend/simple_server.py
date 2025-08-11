@@ -449,9 +449,18 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                 try:
                     # Extract log name from path
                     log_name = path.split('/')[-2]  # /api/logs/name/download
-                    log_file = f"/var/log/{log_name}"
                     
-                    if not os.path.exists(log_file):
+                    # Try to find the log file in available directories
+                    log_file = None
+                    log_dirs = ['/var/log', '/tmp', './logs', 'logs']
+                    
+                    for log_dir in log_dirs:
+                        potential_path = os.path.join(log_dir, log_name)
+                        if os.path.exists(potential_path):
+                            log_file = potential_path
+                            break
+                    
+                    if not log_file:
                         self.send_response(404)
                         self.send_header('Content-type', 'application/json')
                         self.send_header('Access-Control-Allow-Origin', '*')
@@ -495,9 +504,18 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                 try:
                     # Extract log name from path
                     log_name = path.split('/')[-2]  # /api/logs/name/clear
-                    log_file = f"/var/log/{log_name}"
                     
-                    if not os.path.exists(log_file):
+                    # Try to find the log file in available directories
+                    log_file = None
+                    log_dirs = ['/var/log', '/tmp', './logs', 'logs']
+                    
+                    for log_dir in log_dirs:
+                        potential_path = os.path.join(log_dir, log_name)
+                        if os.path.exists(potential_path):
+                            log_file = potential_path
+                            break
+                    
+                    if not log_file:
                         self.send_response(404)
                         self.send_header('Content-type', 'application/json')
                         self.send_header('Access-Control-Allow-Origin', '*')
@@ -880,25 +898,51 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 
                 try:
-                    # Get available log files
-                    log_dir = '/var/log'
+                    # Get available log files - try multiple log directories
+                    log_dirs = ['/var/log', '/tmp', './logs', 'logs']
                     available_logs = []
                     
-                    if os.path.exists(log_dir):
-                        for filename in os.listdir(log_dir):
-                            if filename.endswith('.log') or filename in ['syslog', 'messages', 'auth.log']:
-                                filepath = os.path.join(log_dir, filename)
-                                if os.path.isfile(filepath):
-                                    stat = os.stat(filepath)
-                                    available_logs.append({
-                                        'name': filename,
-                                        'size': f"{stat.st_size / 1024:.1f} KB",
-                                        'modified': datetime.fromtimestamp(stat.st_mtime).isoformat()
-                                    })
+                    for log_dir in log_dirs:
+                        if os.path.exists(log_dir):
+                            try:
+                                for filename in os.listdir(log_dir):
+                                    if filename.endswith('.log') or filename in ['syslog', 'messages', 'auth.log', 'system.log']:
+                                        filepath = os.path.join(log_dir, filename)
+                                        if os.path.isfile(filepath):
+                                            try:
+                                                stat = os.stat(filepath)
+                                                available_logs.append({
+                                                    'name': filename,
+                                                    'size': f"{stat.st_size / 1024:.1f} KB",
+                                                    'modified': datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                                                    'path': log_dir
+                                                })
+                                            except (OSError, PermissionError):
+                                                # Skip files we can't access
+                                                continue
+                            except (OSError, PermissionError):
+                                # Skip directories we can't access
+                                continue
+                    
+                    # If no logs found, create a sample log for testing
+                    if not available_logs:
+                        sample_log_path = './logs/system.log'
+                        os.makedirs('./logs', exist_ok=True)
+                        with open(sample_log_path, 'w') as f:
+                            f.write(f"{datetime.now().strftime('%b %d %H:%M:%S')} INFO: Pi Monitor started\n")
+                            f.write(f"{datetime.now().strftime('%b %d %H:%M:%S')} INFO: System monitoring active\n")
+                        
+                        stat = os.stat(sample_log_path)
+                        available_logs.append({
+                            'name': 'system.log',
+                            'size': f"{stat.st_size / 1024:.1f} KB",
+                            'modified': datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                            'path': './logs'
+                        })
                     
                     response = {
                         "logs": available_logs,
-                        "log_directory": log_dir,
+                        "log_directory": log_dirs[0] if available_logs else './logs',
                         "total_logs": len(available_logs)
                     }
                 except Exception as e:
@@ -923,8 +967,17 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                     log_name = path.split('/')[-1]
                     max_lines = int(query_params.get('lines', ['100'])[0])
                     
-                    log_file = f"/var/log/{log_name}"
-                    if not os.path.exists(log_file):
+                    # Try to find the log file in available directories
+                    log_file = None
+                    log_dirs = ['/var/log', '/tmp', './logs', 'logs']
+                    
+                    for log_dir in log_dirs:
+                        potential_path = os.path.join(log_dir, log_name)
+                        if os.path.exists(potential_path):
+                            log_file = potential_path
+                            break
+                    
+                    if not log_file:
                         self.send_response(404)
                         self.send_header('Content-type', 'application/json')
                         self.send_header('Access-Control-Allow-Origin', '*')
@@ -1263,14 +1316,20 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 
                 try:
-                    # Schedule shutdown with 5 second delay for safety
-                    threading.Timer(5, lambda: os.system('shutdown -h now')).start()
+                    # Schedule shutdown with 5 second delay for safety - cross-platform
+                    if platform.system() == 'Windows':
+                        shutdown_cmd = 'shutdown /s /t 5'
+                    else:
+                        shutdown_cmd = 'shutdown -h now'
+                    
+                    threading.Timer(5, lambda: os.system(shutdown_cmd)).start()
                     response = {
                         "success": True,
                         "message": "Shutdown scheduled in 5 seconds",
                         "action": "shutdown",
                         "delay_seconds": 5,
-                        "scheduled_time": time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time() + 5))
+                        "scheduled_time": time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time() + 5)),
+                        "platform": platform.system()
                     }
                 except Exception as e:
                     response = {"success": False, "message": f"Shutdown failed: {str(e)}"}
@@ -1297,14 +1356,20 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 
                 try:
-                    # Schedule restart with 5 second delay for safety
-                    threading.Timer(5, lambda: os.system('reboot')).start()
+                    # Schedule restart with 5 second delay for safety - cross-platform
+                    if platform.system() == 'Windows':
+                        restart_cmd = 'shutdown /r /t 5'
+                    else:
+                        restart_cmd = 'reboot'
+                    
+                    threading.Timer(5, lambda: os.system(restart_cmd)).start()
                     response = {
                         "success": True,
                         "message": "Restart scheduled in 5 seconds",
                         "action": "restart",
                         "delay_seconds": 5,
-                        "scheduled_time": time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time() + 5))
+                        "scheduled_time": time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time() + 5)),
+                        "platform": platform.system()
                     }
                 except Exception as e:
                     response = {"success": False, "message": f"Restart failed: {str(e)}"}
@@ -1331,12 +1396,18 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 
                 try:
-                    # Try to put system to sleep (may not work on all systems)
-                    os.system('systemctl suspend')
+                    # Try to put system to sleep (cross-platform)
+                    if platform.system() == 'Windows':
+                        os.system('powercfg /hibernate off')  # Disable hibernate first
+                        os.system('rundll32.exe powrprof.dll,SetSuspendState 0,1,0')  # Sleep
+                    else:
+                        os.system('systemctl suspend')
+                    
                     response = {
                         "success": True,
                         "message": "Sleep command sent",
-                        "action": "sleep"
+                        "action": "sleep",
+                        "platform": platform.system()
                     }
                 except Exception as e:
                     response = {"success": False, "message": f"Sleep failed: {str(e)}"}
@@ -1482,8 +1553,12 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
             # Get disk I/O
             disk_io = psutil.disk_io_counters()
             
+            # Get uptime
+            uptime = self._get_uptime()
+            
             return {
                 "timestamp": time.time(),
+                "uptime": uptime,
                 "cpu_percent": round(cpu_percent, 1),
                 "memory_percent": round(memory.percent, 1),
                 "disk_percent": round(disk.percent, 1),
@@ -1846,7 +1921,43 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                     "description": "Python processes active"
                 })
         except:
-            pass
+            # On Windows, try tasklist instead of pgrep
+            try:
+                result = subprocess.run(['tasklist', '/FI', 'IMAGENAME eq python.exe'], capture_output=True, text=True, shell=True)
+                if 'python.exe' in result.stdout:
+                    alternative_services.append({
+                        "name": "python",
+                        "status": "running",
+                        "active": True,
+                        "enabled": True,
+                        "description": "Python processes active (Windows)"
+                    })
+            except:
+                pass
+        
+        # Add Windows-specific services
+        if platform.system() == 'Windows':
+            try:
+                # Check for Windows services
+                result = subprocess.run(['sc', 'query', 'wuauserv'], capture_output=True, text=True, shell=True)
+                if 'RUNNING' in result.stdout:
+                    alternative_services.append({
+                        "name": "wuauserv",
+                        "status": "running",
+                        "active": True,
+                        "enabled": True,
+                        "description": "Windows Update service"
+                    })
+                else:
+                    alternative_services.append({
+                        "name": "wuauserv",
+                        "status": "stopped",
+                        "active": False,
+                        "enabled": True,
+                        "description": "Windows Update service"
+                    })
+            except:
+                pass
         
         return alternative_services
     
@@ -1889,93 +2000,123 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
     def _handle_service_action_alternative(self, service_name, action):
         """Handle service actions using alternative methods when systemctl is not available"""
         try:
-            if service_name == 'ssh':
+            if platform.system() == 'Windows':
+                # Windows service control using sc command
                 if action == 'start':
-                    # Try to start SSH using alternative method
-                    try:
-                        result = subprocess.run(['service', 'ssh', 'start'], capture_output=True, text=True)
-                        if result.returncode == 0:
-                            return {"success": True, "message": "SSH service started using service command"}
-                        else:
-                            return {"success": False, "message": f"SSH start failed: {result.stderr}"}
-                    except:
-                        return {"success": False, "message": "SSH service control not available (systemctl and service commands not found)"}
+                    result = subprocess.run(['sc', 'start', service_name], capture_output=True, text=True, shell=True)
+                    if result.returncode == 0:
+                        return {"success": True, "message": f"Service {service_name} started successfully using sc command"}
+                    else:
+                        return {"success": False, "message": f"Service {service_name} start failed: {result.stderr}"}
                 elif action == 'stop':
-                    try:
-                        result = subprocess.run(['service', 'ssh', 'stop'], capture_output=True, text=True)
-                        if result.returncode == 0:
-                            return {"success": True, "message": "SSH service stopped using service command"}
-                        else:
-                            return {"success": False, "message": f"SSH stop failed: {result.stderr}"}
-                    except:
-                        return {"success": False, "message": "SSH service control not available (systemctl and service commands not found)"}
+                    result = subprocess.run(['sc', 'stop', service_name], capture_output=True, text=True, shell=True)
+                    if result.returncode == 0:
+                        return {"success": True, "message": f"Service {service_name} stopped successfully using sc command"}
+                    else:
+                        return {"success": False, "message": f"Service {service_name} stop failed: {result.stderr}"}
                 elif action == 'restart':
-                    try:
-                        result = subprocess.run(['service', 'ssh', 'restart'], capture_output=True, text=True)
-                        if result.returncode == 0:
-                            return {"success": True, "message": "SSH service restarted using service command"}
-                        else:
-                            return {"success": False, "message": f"SSH restart failed: {result.stderr}"}
-                    except:
-                        return {"success": False, "message": "SSH service control not available (systemctl and service commands not found)"}
-            
-            elif service_name == 'nginx':
-                if action == 'start':
-                    try:
-                        result = subprocess.run(['service', 'nginx', 'start'], capture_output=True, text=True)
-                        if result.returncode == 0:
-                            return {"success": True, "message": "Nginx service started using service command"}
-                        else:
-                            return {"success": False, "message": f"Nginx start failed: {result.stderr}"}
-                    except:
-                        return {"success": False, "message": "Nginx service control not available (systemctl and service commands not found)"}
-                elif action == 'stop':
-                    try:
-                        result = subprocess.run(['service', 'nginx', 'stop'], capture_output=True, text=True)
-                        if result.returncode == 0:
-                            return {"success": True, "message": "Nginx service stopped using service command"}
-                        else:
-                            return {"success": False, "message": f"Nginx stop failed: {result.stderr}"}
-                    except:
-                        return {"success": False, "message": "Nginx service control not available (systemctl and service commands not found)"}
-                elif action == 'restart':
-                    try:
-                        result = subprocess.run(['service', 'nginx', 'restart'], capture_output=True, text=True)
-                        if result.returncode == 0:
-                            return {"success": True, "message": "Nginx service restarted using service command"}
-                        else:
-                            return {"success": False, "message": f"Nginx restart failed: {result.stderr}"}
-                    except:
-                        return {"success": False, "message": "Nginx service control not available (systemctl and service commands not found)"}
-            
-            elif service_name == 'docker':
-                if action == 'start':
-                    try:
-                        result = subprocess.run(['service', 'docker', 'start'], capture_output=True, text=True)
-                        if result.returncode == 0:
-                            return {"success": True, "message": "Docker service started using service command"}
-                        else:
-                            return {"success": False, "message": f"Docker start failed: {result.stderr}"}
-                    except:
-                        return {"success": False, "message": "Docker service control not available (systemctl and service commands not found)"}
-                elif action == 'stop':
-                    try:
-                        result = subprocess.run(['service', 'docker', 'stop'], capture_output=True, text=True)
-                        if result.returncode == 0:
-                            return {"success": True, "message": "Docker service stopped using service command"}
-                        else:
-                            return {"success": False, "message": f"Docker stop failed: {result.stderr}"}
-                    except:
-                        return {"success": False, "message": "Docker service control not available (systemctl and service commands not found)"}
-                elif action == 'restart':
-                    try:
-                        result = subprocess.run(['service', 'docker', 'restart'], capture_output=True, text=True)
-                        if result.returncode == 0:
-                            return {"success": True, "message": "Docker service restarted using service command"}
-                        else:
-                            return {"success": False, "message": f"Docker restart failed: {result.stderr}"}
-                    except:
-                        return {"success": False, "message": "Docker service control not available (systemctl and service commands not found)"}
+                    # Stop then start
+                    stop_result = subprocess.run(['sc', 'stop', service_name], capture_output=True, text=True, shell=True)
+                    time.sleep(2)  # Wait a bit
+                    start_result = subprocess.run(['sc', 'start', service_name], capture_output=True, text=True, shell=True)
+                    if start_result.returncode == 0:
+                        return {"success": True, "message": f"Service {service_name} restarted successfully using sc command"}
+                    else:
+                        return {"success": False, "message": f"Service {service_name} restart failed: {start_result.stderr}"}
+                elif action == 'status':
+                    result = subprocess.run(['sc', 'query', service_name], capture_output=True, text=True, shell=True)
+                    if 'RUNNING' in result.stdout:
+                        return {"success": True, "service": service_name, "status": "running"}
+                    else:
+                        return {"success": True, "service": service_name, "status": "stopped"}
+            else:
+                # Linux service control using service command
+                if service_name == 'ssh':
+                    if action == 'start':
+                        try:
+                            result = subprocess.run(['service', 'ssh', 'start'], capture_output=True, text=True)
+                            if result.returncode == 0:
+                                return {"success": True, "message": "SSH service started using service command"}
+                            else:
+                                return {"success": False, "message": f"SSH start failed: {result.stderr}"}
+                        except:
+                            return {"success": False, "message": "SSH service control not available (systemctl and service commands not found)"}
+                    elif action == 'stop':
+                        try:
+                            result = subprocess.run(['service', 'ssh', 'stop'], capture_output=True, text=True)
+                            if result.returncode == 0:
+                                return {"success": True, "message": "SSH service stopped using service command"}
+                            else:
+                                return {"success": False, "message": f"SSH stop failed: {result.stderr}"}
+                        except:
+                            return {"success": False, "message": "SSH service control not available (systemctl and service commands not found)"}
+                    elif action == 'restart':
+                        try:
+                            result = subprocess.run(['service', 'ssh', 'restart'], capture_output=True, text=True)
+                            if result.returncode == 0:
+                                return {"success": True, "message": "SSH service restarted using service command"}
+                            else:
+                                return {"success": False, "message": f"SSH restart failed: {result.stderr}"}
+                        except:
+                            return {"success": False, "message": "SSH service control not available (systemctl and service commands not found)"}
+                
+                elif service_name == 'nginx':
+                    if action == 'start':
+                        try:
+                            result = subprocess.run(['service', 'nginx', 'start'], capture_output=True, text=True)
+                            if result.returncode == 0:
+                                return {"success": True, "message": "Nginx service started using service command"}
+                            else:
+                                return {"success": False, "message": f"Nginx start failed: {result.stderr}"}
+                        except:
+                            return {"success": False, "message": "Nginx service control not available (systemctl and service commands not found)"}
+                    elif action == 'stop':
+                        try:
+                            result = subprocess.run(['service', 'nginx', 'stop'], capture_output=True, text=True)
+                            if result.returncode == 0:
+                                return {"success": True, "message": "Nginx service stopped using service command"}
+                            else:
+                                return {"success": False, "message": f"Nginx stop failed: {result.stderr}"}
+                        except:
+                            return {"success": False, "message": "Nginx service control not available (systemctl and service commands not found)"}
+                    elif action == 'restart':
+                        try:
+                            result = subprocess.run(['service', 'nginx', 'restart'], capture_output=True, text=True)
+                            if result.returncode == 0:
+                                return {"success": True, "message": "Nginx service restarted using service command"}
+                            else:
+                                return {"success": False, "message": f"Nginx restart failed: {result.stderr}"}
+                        except:
+                            return {"success": False, "message": "Nginx service control not available (systemctl and service commands not found)"}
+                
+                elif service_name == 'docker':
+                    if action == 'start':
+                        try:
+                            result = subprocess.run(['service', 'docker', 'start'], capture_output=True, text=True)
+                            if result.returncode == 0:
+                                return {"success": True, "message": "Docker service started using service command"}
+                            else:
+                                return {"success": False, "message": f"Docker start failed: {result.stderr}"}
+                        except:
+                            return {"success": False, "message": "Docker service control not available (systemctl and service commands not found)"}
+                    elif action == 'stop':
+                        try:
+                            result = subprocess.run(['service', 'docker', 'stop'], capture_output=True, text=True)
+                            if result.returncode == 0:
+                                return {"success": True, "message": "Docker service stopped using service command"}
+                            else:
+                                return {"success": False, "message": f"Docker stop failed: {result.stderr}"}
+                        except:
+                            return {"success": False, "message": "Docker service control not available (systemctl and service commands not found)"}
+                    elif action == 'restart':
+                        try:
+                            result = subprocess.run(['service', 'docker', 'restart'], capture_output=True, text=True)
+                            if result.returncode == 0:
+                                return {"success": True, "message": "Docker service restarted using service command"}
+                            else:
+                                return {"success": False, "message": f"Docker restart failed: {result.stderr}"}
+                        except:
+                            return {"success": False, "message": "Docker service control not available (systemctl and service commands not found)"}
             
             # Default fallback for unknown services
             return {"success": False, "message": f"Service {service_name} control not available (systemctl and service commands not found)"}
@@ -2001,16 +2142,22 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                 uptime_formatted = f"{uptime_hours}h {uptime_minutes}m"
                 
                 if action == 'shutdown':
-                    # Schedule shutdown
+                    # Schedule shutdown - cross-platform
                     if delay > 0:
-                        threading.Timer(delay, lambda: os.system('shutdown -h now')).start()
+                        if platform.system() == 'Windows':
+                            shutdown_cmd = 'shutdown /s /t 0'
+                        else:
+                            shutdown_cmd = 'shutdown -h now'
+                        
+                        threading.Timer(delay, lambda: os.system(shutdown_cmd)).start()
                         return {
                             "success": True, 
                             "message": f"Shutdown scheduled in {delay} seconds",
                             "action": "shutdown",
                             "delay_seconds": delay,
                             "scheduled_time": time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time() + delay)),
-                            "current_uptime": uptime_formatted
+                            "current_uptime": uptime_formatted,
+                            "platform": platform.system()
                         }
                     else:
                         return {
@@ -2019,19 +2166,26 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                             "action": "shutdown",
                             "warning": "No delay specified - command not executed",
                             "current_uptime": uptime_formatted,
-                            "recommendation": "Specify delay > 0 to actually execute"
+                            "recommendation": "Specify delay > 0 to actually execute",
+                            "platform": platform.system()
                         }
                 elif action == 'restart':
-                    # Schedule restart
+                    # Schedule restart - cross-platform
                     if delay > 0:
-                        threading.Timer(delay, lambda: os.system('reboot')).start()
+                        if platform.system() == 'Windows':
+                            restart_cmd = 'shutdown /r /t 0'
+                        else:
+                            restart_cmd = 'reboot'
+                        
+                        threading.Timer(delay, lambda: os.system(restart_cmd)).start()
                         return {
                             "success": True, 
                             "message": f"Restart scheduled in {delay} seconds",
                             "action": "restart",
                             "delay_seconds": delay,
                             "scheduled_time": time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time() + delay)),
-                            "current_uptime": uptime_formatted
+                            "current_uptime": uptime_formatted,
+                            "platform": platform.system()
                         }
                     else:
                         return {
@@ -2040,7 +2194,8 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                             "action": "restart",
                             "warning": "No delay specified - command not executed",
                             "current_uptime": uptime_formatted,
-                            "recommendation": "Specify delay > 0 to actually execute"
+                            "recommendation": "Specify delay > 0 to actually execute",
+                            "platform": platform.system()
                         }
                 elif action == 'status':
                     # Return current power status

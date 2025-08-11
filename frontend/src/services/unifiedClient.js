@@ -117,6 +117,15 @@ class UnifiedClient {
     }
   }
 
+  async getEnhancedSystemStats() {
+    try {
+      const response = await this.httpClient.get('/api/system/enhanced');
+      return response.data;
+    } catch (error) {
+      throw error;
+    }
+  }
+
   async checkHealth() {
     try {
       const response = await this.httpClient.get('/health');
@@ -137,7 +146,10 @@ class UnifiedClient {
 
   async controlService(serviceName, action) {
     try {
-      const response = await this.httpClient.post(`/api/services/${serviceName}/${action}`);
+      const response = await this.httpClient.post('/api/services', {
+        service_name: serviceName,
+        action: action
+      });
       return response.data;
     } catch (error) {
       throw error;
@@ -204,7 +216,7 @@ class UnifiedClient {
 
   async clearLog(logName) {
     try {
-      const response = await this.httpClient.delete(`/api/logs/${logName}`);
+      const response = await this.httpClient.post(`/api/logs/${logName}/clear`);
       return response.data;
     } catch (error) {
       throw error;
@@ -214,7 +226,33 @@ class UnifiedClient {
   // Power management methods
   async getPowerStatus() {
     try {
-      const response = await this.httpClient.get('/api/power/status');
+      const response = await this.httpClient.get('/api/power');
+      return response.data;
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  async executePowerAction(action, delay = 0) {
+    try {
+      let endpoint = '';
+      let data = { action, delay };
+      
+      switch (action) {
+        case 'shutdown':
+          endpoint = '/api/power/shutdown';
+          break;
+        case 'restart':
+          endpoint = '/api/power/restart';
+          break;
+        case 'sleep':
+          endpoint = '/api/power/sleep';
+          break;
+        default:
+          throw new Error(`Unknown power action: ${action}`);
+      }
+      
+      const response = await this.httpClient.post(endpoint, data);
       return response.data;
     } catch (error) {
       throw error;

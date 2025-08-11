@@ -12,7 +12,7 @@ const SystemStatus = ({ unifiedClient }) => {
     'systemStatus',
     async () => {
       if (!unifiedClient) return null;
-      return await unifiedClient.getSystemStats();
+      return await unifiedClient.getEnhancedSystemStats();
     },
     {
       enabled: !!unifiedClient,
@@ -328,7 +328,7 @@ const SystemStatus = ({ unifiedClient }) => {
               System Uptime
             </div>
             <div className="text-base font-semibold text-gray-900 dark:text-white">
-              {formatUptime(currentData?.uptime || 'Unknown')}
+              {formatUptime(currentData?.system?.uptime || currentData?.uptime || 'Unknown')}
             </div>
           </div>
           <div>

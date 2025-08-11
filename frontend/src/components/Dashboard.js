@@ -11,7 +11,7 @@ const Dashboard = ({ unifiedClient }) => {
     'systemStats',
     async () => {
       if (!unifiedClient) return null;
-      return await unifiedClient.getSystemStats();
+      return await unifiedClient.getEnhancedSystemStats();
     },
     {
       enabled: !!unifiedClient,
@@ -251,7 +251,7 @@ const Dashboard = ({ unifiedClient }) => {
               <div>
                 <p className="metric-label">Uptime</p>
                 <p className="metric-value text-indigo-600 dark:text-indigo-400">
-                  {currentData.uptime}
+                  {currentData.system?.uptime || currentData.uptime || 'Unknown'}
                 </p>
               </div>
             </div>

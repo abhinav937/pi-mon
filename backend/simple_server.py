@@ -96,7 +96,7 @@ SYSTEM_COMMANDS = {
     'routing_table': 'ip route',
     'dns_servers': 'cat /etc/resolv.conf',
     
-    # Raspberry Pi Specific
+    # Raspberry Pi Specific (with fallbacks)
     'cpu_temperature': 'vcgencmd measure_temp',
     'arm_clock': 'vcgencmd measure_clock arm',
     'core_clock': 'vcgencmd measure_clock core',
@@ -319,6 +319,28 @@ class EnhancedMetricsCollector:
         
         return 0.0
     
+    def _run_command_with_fallback(self, command_name, primary_command, fallback_commands=None):
+        """Run a command with fallback options for Pi-specific commands"""
+        # Try primary command first
+        result = self._run_command(primary_command)
+        
+        if result['success']:
+            return result
+        
+        # If primary failed and we have fallbacks, try them
+        if fallback_commands:
+            for fallback_cmd in fallback_commands:
+                fallback_result = self._run_command(fallback_cmd)
+                if fallback_result['success']:
+                    return fallback_result
+        
+        # If all failed, return the original error but with fallback info
+        if command_name in ['cpu_temperature', 'arm_clock', 'core_voltage', 'throttling_status']:
+            result['fallback_available'] = True
+            result['fallback_suggestion'] = 'Use alternative system commands for hardware monitoring'
+        
+        return result
+    
     def get_metrics_history(self, minutes=60):
         """Get metrics history for the last N minutes"""
         cutoff_time = time.time() - (minutes * 60)
@@ -329,9 +351,40 @@ class EnhancedMetricsCollector:
         return self.metrics_history[-1] if self.metrics_history else None
     
     def run_system_command(self, command_name):
-        """Run a specific system command by name"""
+        """Run a specific system command by name with fallbacks for Pi-specific commands"""
         if command_name in SYSTEM_COMMANDS:
-            return self._run_command(SYSTEM_COMMANDS[command_name])
+            primary_command = SYSTEM_COMMANDS[command_name]
+            
+            # Define fallback commands for Pi-specific hardware monitoring
+            fallback_commands = {
+                'cpu_temperature': [
+                    'cat /sys/class/thermal/thermal_zone0/temp',
+                    'cat /sys/class/thermal/thermal_zone1/temp',
+                    'sensors -j'
+                ],
+                'arm_clock': [
+                    'cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq',
+                    'cat /proc/cpuinfo | grep "cpu MHz"'
+                ],
+                'core_voltage': [
+                    'cat /sys/class/hwmon/hwmon*/in1_input',
+                    'cat /sys/class/hwmon/hwmon*/in2_input'
+                ],
+                'throttling_status': [
+                    'cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor',
+                    'cat /proc/cpuinfo | grep "flags"'
+                ]
+            }
+            
+            # Use fallback system for Pi-specific commands
+            if command_name in fallback_commands:
+                return self._run_command_with_fallback(
+                    command_name, 
+                    primary_command, 
+                    fallback_commands[command_name]
+                )
+            else:
+                return self._run_command(primary_command)
         else:
             return {
                 'success': False,

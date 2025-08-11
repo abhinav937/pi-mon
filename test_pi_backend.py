@@ -10,7 +10,7 @@ import time
 from datetime import datetime
 
 # Configuration - change this to your Pi's IP address
-BASE_URL = "http://localhost:5001"  # Change to your Pi's IP if testing remotely
+BASE_URL = "http://192.168.0.201:5001"  # Pi's IP address
 USERNAME = "abhinav"
 PASSWORD = "kavachi"
 

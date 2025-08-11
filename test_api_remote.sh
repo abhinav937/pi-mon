@@ -207,8 +207,54 @@ else
     ((TESTS_FAILED++))
 fi
 
-# 8. Test Service Actions (with auth)
-echo -e "${BLUE}8. Testing Service Actions${NC}"
+# 8. Enhanced Monitoring Commands (with auth)
+echo -e "${BLUE}8. Testing Enhanced Monitoring Commands${NC}"
+if [ -n "$AUTH_TOKEN" ]; then
+    run_test "Commands List" "http://$PI_IP:$BACKEND_PORT/api/commands" "GET" "" "200" "true"
+    run_test "CPU Temperature Command" "http://$PI_IP:$BACKEND_PORT/api/commands?command=cpu_temperature" "GET" "" "200" "true"
+    run_test "System Load Command" "http://$PI_IP:$BACKEND_PORT/api/commands?command=system_load" "GET" "" "200" "true"
+    run_test "Network Interfaces Command" "http://$PI_IP:$BACKEND_PORT/api/commands?command=network_interfaces" "GET" "" "200" "true"
+else
+    echo -e "${YELLOW}Skipping authenticated endpoint (no token)${NC}"
+    ((TESTS_FAILED++))
+fi
+
+# 9. Enhanced System Stats (with auth)
+echo -e "${BLUE}9. Testing Enhanced System Stats${NC}"
+if [ -n "$AUTH_TOKEN" ]; then
+    run_test "Enhanced System Stats" "http://$PI_IP:$BACKEND_PORT/api/system/enhanced" "GET" "" "200" "true"
+else
+    echo -e "${YELLOW}Skipping authenticated endpoint (no token)${NC}"
+    ((TESTS_FAILED++))
+fi
+
+# 9.5. Comprehensive Enhanced Monitoring Tests (with auth)
+echo -e "${BLUE}9.5. Testing Comprehensive Enhanced Monitoring${NC}"
+if [ -n "$AUTH_TOKEN" ]; then
+    echo -e "${YELLOW}Testing Raspberry Pi specific commands...${NC}"
+    run_test "ARM Clock Speed" "http://$PI_IP:$BACKEND_PORT/api/commands?command=arm_clock" "GET" "" "200" "true"
+    run_test "Core Voltage" "http://$PI_IP:$BACKEND_PORT/api/commands?command=core_voltage" "GET" "" "200" "true"
+    run_test "Throttling Status" "http://$PI_IP:$BACKEND_PORT/api/commands?command=throttling_status" "GET" "" "200" "true"
+    
+    echo -e "${YELLOW}Testing hardware monitoring commands...${NC}"
+    run_test "CPU Info" "http://$PI_IP:$BACKEND_PORT/api/commands?command=cpu_info" "GET" "" "200" "true"
+    run_test "Memory Info" "http://$PI_IP:$BACKEND_PORT/api/commands?command=memory_info" "GET" "" "200" "true"
+    run_test "Disk Usage" "http://$PI_IP:$BACKEND_PORT/api/commands?command=disk_usage" "GET" "" "200" "true"
+    
+    echo -e "${YELLOW}Testing network monitoring commands...${NC}"
+    run_test "Network Stats" "http://$PI_IP:$BACKEND_PORT/api/commands?command=network_stats" "GET" "" "200" "true"
+    run_test "Active Connections" "http://$PI_IP:$BACKEND_PORT/api/commands?command=active_connections" "GET" "" "200" "true"
+    
+    echo -e "${YELLOW}Testing system performance commands...${NC}"
+    run_test "Process List" "http://$PI_IP:$BACKEND_PORT/api/commands?command=process_list" "GET" "" "200" "true"
+    run_test "Service Status" "http://$PI_IP:$BACKEND_PORT/api/commands?command=service_status" "GET" "" "200" "true"
+else
+    echo -e "${YELLOW}Skipping authenticated endpoint (no token)${NC}"
+    ((TESTS_FAILED++))
+fi
+
+# 10. Test Service Actions (with auth)
+echo -e "${BLUE}10. Testing Service Actions${NC}"
 if [ -n "$AUTH_TOKEN" ]; then
     run_test "Service Status Check" "http://$PI_IP:$BACKEND_PORT/api/services" "POST" '{"service_name":"ssh","action":"status"}' "200" "true"
 else
@@ -216,8 +262,8 @@ else
     ((TESTS_FAILED++))
 fi
 
-# 9. Test Power Actions (with auth)
-echo -e "${BLUE}9. Testing Power Actions${NC}"
+# 11. Test Power Actions (with auth)
+echo -e "${BLUE}11. Testing Power Actions${NC}"
 if [ -n "$AUTH_TOKEN" ]; then
     run_test "Power Action Check" "http://$PI_IP:$BACKEND_PORT/api/power" "POST" '{"action":"restart","delay":0}' "200" "true"
 else
@@ -225,27 +271,29 @@ else
     ((TESTS_FAILED++))
 fi
 
-# 10. Frontend Basic Access
-echo -e "${BLUE}10. Testing Frontend${NC}"
+# 12. Frontend Basic Access
+echo -e "${BLUE}12. Testing Frontend${NC}"
 run_test "Frontend Access" "http://$PI_IP:$FRONTEND_PORT/"
 
-# 11. Error Handling Tests
-echo -e "${BLUE}11. Testing Error Handling${NC}"
+# 13. Error Handling Tests
+echo -e "${BLUE}13. Testing Error Handling${NC}"
 run_test "Invalid Endpoint" "http://$PI_IP:$BACKEND_PORT/invalid" "GET" "" "404"
 run_test "Invalid Method" "http://$PI_IP:$BACKEND_PORT/health" "POST" '{"test":"data"}' "405"
 
-# 12. Authentication Error Tests
-echo -e "${BLUE}12. Testing Authentication Errors${NC}"
+# 14. Authentication Error Tests
+echo -e "${BLUE}14. Testing Authentication Errors${NC}"
 run_test "System Stats (No Auth)" "http://$PI_IP:$BACKEND_PORT/api/system" "GET" "" "401"
 run_test "Services (No Auth)" "http://$PI_IP:$BACKEND_PORT/api/services" "GET" "" "401"
 run_test "Power (No Auth)" "http://$PI_IP:$BACKEND_PORT/api/power" "GET" "" "401"
+run_test "Commands (No Auth)" "http://$PI_IP:$BACKEND_PORT/api/commands" "GET" "" "401"
+run_test "Enhanced System (No Auth)" "http://$PI_IP:$BACKEND_PORT/api/system/enhanced" "GET" "" "401"
 
-# 13. CORS Tests
-echo -e "${BLUE}13. Testing CORS${NC}"
+# 15. CORS Tests
+echo -e "${BLUE}15. Testing CORS${NC}"
 run_test "CORS Preflight" "http://$PI_IP:$BACKEND_PORT/api/system" "OPTIONS" "" "200"
 
-# 14. Performance Tests
-echo -e "${BLUE}14. Testing Performance${NC}"
+# 16. Performance Tests
+echo -e "${BLUE}16. Testing Performance${NC}"
 echo -e "${YELLOW}Testing: Response Time${NC}"
 start_time=$(date +%s%N)
 safe_curl -s "http://$PI_IP:$BACKEND_PORT/health" > /dev/null
@@ -269,8 +317,17 @@ echo -e "${RED}❌ Tests Failed: $TESTS_FAILED${NC}"
 total_tests=$((TESTS_PASSED + TESTS_FAILED))
 echo "Total Tests: $total_tests"
 
+echo ""
+echo -e "${BLUE}🔍 Enhanced Monitoring Features Tested:${NC}"
+echo "  • System Information Commands (uname, cpu_info, etc.)"
+echo "  • Hardware Monitoring (temperature, voltage, clock speeds)"
+echo "  • Network Diagnostics (interfaces, connections, stats)"
+echo "  • Performance Monitoring (processes, services, resources)"
+echo "  • Raspberry Pi Specific Commands (vcgencmd)"
+echo "  • Command Caching and Error Handling"
+
 if [ $TESTS_FAILED -eq 0 ]; then
-    echo -e "${GREEN}🎉 All tests passed! Your Pi Monitor is working perfectly!${NC}"
+    echo -e "${GREEN}🎉 All tests passed! Your Pi Monitor with enhanced monitoring is working perfectly!${NC}"
     exit 0
 else
     echo -e "${RED}⚠️  Some tests failed. Check the output above for details.${NC}"

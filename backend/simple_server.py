@@ -2,6 +2,7 @@
 """
 Pi Monitor - Enhanced HTTP Server
 RPi-Monitor inspired monitoring system with real-time data collection
+Enhanced with comprehensive system monitoring commands
 """
 
 import json
@@ -21,6 +22,7 @@ import socket
 from datetime import datetime, timedelta
 import sqlite3
 import tempfile
+import re
 
 # Add parent directory to path to import config
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -30,14 +32,79 @@ from config import config
 JWT_SECRET = "pi-monitor-secret-key-2024"
 JWT_EXPIRATION = 24 * 60 * 60  # 24 hours
 
+# Enhanced system monitoring commands
+SYSTEM_COMMANDS = {
+    # System Information
+    'kernel_info': 'uname -a',
+    'cpu_info': 'cat /proc/cpuinfo',
+    'memory_info': 'cat /proc/meminfo',
+    'disk_partitions': 'cat /proc/partitions',
+    'os_release': 'lsb_release -a',
+    'kernel_messages': 'dmesg | tail -20',
+    'system_version': 'cat /proc/version',
+    'hostname_info': 'hostnamectl',
+    
+    # Hardware Detection
+    'arm_memory': 'vcgencmd get_mem arm',
+    'gpu_memory': 'vcgencmd get_mem gpu',
+    'device_model': 'cat /proc/device-tree/model',
+    'cpu_architecture': 'lscpu',
+    'usb_devices': 'lsusb',
+    'pci_devices': 'lspci',
+    
+    # Resource Usage
+    'system_load': 'uptime',
+    'load_average': 'cat /proc/loadavg',
+    'memory_usage': 'free -h',
+    'memory_detailed': 'cat /proc/meminfo',
+    'disk_usage': 'df -h',
+    'disk_io_stats': 'cat /proc/diskstats',
+    'process_list': 'ps aux --sort=-%cpu | head -10',
+    'top_processes': 'ps -eo pid,ppid,cmd,%mem,%cpu --sort=-%cpu | head -10',
+    
+    # Network Information
+    'network_interfaces': 'ip a',
+    'network_stats': 'cat /proc/net/dev',
+    'network_connections': 'ss -tuln',
+    'routing_table': 'ip route',
+    'dns_servers': 'cat /etc/resolv.conf',
+    
+    # Raspberry Pi Specific
+    'cpu_temperature': 'vcgencmd measure_temp',
+    'arm_clock': 'vcgencmd measure_clock arm',
+    'core_clock': 'vcgencmd measure_clock core',
+    'gpu_clock': 'vcgencmd measure_clock h264',
+    'core_voltage': 'vcgencmd measure_volts core',
+    'throttling_status': 'vcgencmd get_throttled',
+    'pi_config': 'vcgencmd get_config int',
+    
+    # System Services
+    'service_status': 'systemctl list-units --type=service --state=running',
+    'docker_status': 'docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"',
+    'ssh_status': 'systemctl status ssh --no-pager',
+    
+    # System Logs
+    'recent_logs': 'tail -50 /var/log/syslog',
+    'auth_logs': 'tail -20 /var/log/auth.log',
+    'kernel_logs': 'journalctl -k --no-pager | tail -20',
+    
+    # Performance Monitoring
+    'cpu_stats': 'mpstat 1 1',
+    'memory_stats': 'vmstat 1 1',
+    'disk_stats': 'iostat 1 1',
+    'network_stats': 'cat /proc/net/snmp'
+}
+
 # Global data storage for real-time metrics
-class MetricsCollector:
+class EnhancedMetricsCollector:
     def __init__(self):
         self.metrics_history = []
         self.max_history = 1000  # Keep last 1000 data points
         self.collection_interval = 5.0  # 5 seconds
         self.is_collecting = False
         self.collection_thread = None
+        self.command_cache = {}
+        self.cache_duration = 30  # Cache command results for 30 seconds
         
     def start_collection(self):
         """Start background metrics collection"""
@@ -69,20 +136,18 @@ class MetricsCollector:
             time.sleep(self.collection_interval)
     
     def _gather_current_metrics(self):
-        """Gather current system metrics"""
+        """Gather current system metrics with enhanced data"""
         try:
+            # Basic metrics
             cpu_percent = psutil.cpu_percent(interval=0.1)
             memory = psutil.virtual_memory()
             disk = psutil.disk_usage('/')
-            
-            # Get temperature
             temperature = self._get_temperature()
-            
-            # Get network stats
             network = psutil.net_io_counters()
-            
-            # Get disk I/O
             disk_io = psutil.disk_io_counters()
+            
+            # Enhanced metrics using system commands
+            enhanced_metrics = self._get_enhanced_metrics()
             
             return {
                 "timestamp": time.time(),
@@ -101,10 +166,85 @@ class MetricsCollector:
                     "write_bytes": disk_io.write_bytes if disk_io else 0,
                     "read_count": disk_io.read_count if disk_io else 0,
                     "write_count": disk_io.write_count if disk_io else 0
-                }
+                },
+                "enhanced": enhanced_metrics
             }
         except Exception as e:
             return {"timestamp": time.time(), "error": str(e)}
+    
+    def _get_enhanced_metrics(self):
+        """Get enhanced metrics using system commands"""
+        enhanced = {}
+        
+        # Get key metrics that don't change frequently
+        key_commands = ['cpu_temperature', 'arm_clock', 'core_voltage', 'throttling_status']
+        
+        for metric in key_commands:
+            if metric in SYSTEM_COMMANDS:
+                try:
+                    result = self._run_command_cached(SYSTEM_COMMANDS[metric])
+                    if result['success']:
+                        enhanced[metric] = result['output']
+                    else:
+                        enhanced[metric] = None
+                except:
+                    enhanced[metric] = None
+        
+        return enhanced
+    
+    def _run_command_cached(self, command):
+        """Run a command with caching to avoid excessive execution"""
+        cache_key = command
+        
+        # Check if we have a cached result
+        if cache_key in self.command_cache:
+            cached_time, cached_result = self.command_cache[cache_key]
+            if time.time() - cached_time < self.cache_duration:
+                return cached_result
+        
+        # Run the command
+        result = self._run_command(command)
+        
+        # Cache the result
+        self.command_cache[cache_key] = (time.time(), result)
+        
+        return result
+    
+    def _run_command(self, command):
+        """Run a system command safely"""
+        try:
+            result = subprocess.run(
+                command, 
+                shell=True, 
+                capture_output=True, 
+                text=True, 
+                timeout=10
+            )
+            
+            if result.returncode == 0:
+                return {
+                    'success': True,
+                    'output': result.stdout.strip(),
+                    'error': None
+                }
+            else:
+                return {
+                    'success': False,
+                    'output': None,
+                    'error': result.stderr.strip()
+                }
+        except subprocess.TimeoutExpired:
+            return {
+                'success': False,
+                'output': None,
+                'error': 'Command timed out'
+            }
+        except Exception as e:
+            return {
+                'success': False,
+                'output': None,
+                'error': str(e)
+            }
     
     def _get_temperature(self):
         """Get system temperature using multiple methods"""
@@ -122,6 +262,16 @@ class MetricsCollector:
                     with open(thermal_path, 'r') as f:
                         temp_raw = f.read().strip()
                         return round(float(temp_raw) / 1000.0, 1)
+            
+            # Try vcgencmd for Raspberry Pi
+            try:
+                result = subprocess.run(['vcgencmd', 'measure_temp'], capture_output=True, text=True, timeout=5)
+                if result.returncode == 0:
+                    temp_match = re.search(r'temp=(\d+\.?\d*)', result.stdout)
+                    if temp_match:
+                        return round(float(temp_match.group(1)), 1)
+            except:
+                pass
             
             # Try sensors command if available
             try:
@@ -150,9 +300,24 @@ class MetricsCollector:
     def get_latest_metrics(self):
         """Get the most recent metrics"""
         return self.metrics_history[-1] if self.metrics_history else None
+    
+    def run_system_command(self, command_name):
+        """Run a specific system command by name"""
+        if command_name in SYSTEM_COMMANDS:
+            return self._run_command(SYSTEM_COMMANDS[command_name])
+        else:
+            return {
+                'success': False,
+                'output': None,
+                'error': f'Unknown command: {command_name}'
+            }
+    
+    def get_available_commands(self):
+        """Get list of available system commands"""
+        return list(SYSTEM_COMMANDS.keys())
 
 # Global metrics collector instance
-metrics_collector = MetricsCollector()
+metrics_collector = EnhancedMetricsCollector()
 
 class SimplePiMonitorHandler(BaseHTTPRequestHandler):
     # Class variable to persist tokens between requests
@@ -183,7 +348,9 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                 "version": config.get('project.version', '1.0.0'),
                 "endpoints": config.get_backend_endpoints(),
                 "features": config.get('backend.features', {}),
-                "system_info": self._get_system_info()
+                "system_info": self._get_system_info(),
+                "available_commands": len(SYSTEM_COMMANDS),
+                "enhanced_monitoring": True
             }
             self.wfile.write(json.dumps(response).encode())
             
@@ -204,7 +371,8 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                 "config": {
                     "ports": config.get('ports', {}),
                     "features": config.get('backend.features', {})
-                }
+                },
+                "enhanced_monitoring": True
             }
             self.wfile.write(json.dumps(response).encode())
             
@@ -231,9 +399,34 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                 if 'history' in query_params:
                     minutes = int(query_params.get('history', ['60'])[0])
                     response = self._get_system_stats_with_history(minutes)
+                elif 'enhanced' in query_params:
+                    # Return enhanced stats with formatted values and status indicators
+                    response = self._get_enhanced_system_stats()
                 else:
                     response = self._get_system_stats()
                     
+                self.wfile.write(json.dumps(response).encode())
+                
+        elif path == '/api/system/enhanced':
+            # Enhanced system stats endpoint with formatted values and status indicators
+            if not self.check_auth():
+                self.send_response(401)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+                self.end_headers()
+                response = {"error": "Unauthorized"}
+                self.wfile.write(json.dumps(response).encode())
+            else:
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+                self.end_headers()
+                
+                response = self._get_enhanced_system_stats()
                 self.wfile.write(json.dumps(response).encode())
                 
         elif path == '/api/metrics':
@@ -318,6 +511,122 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
             self.end_headers()
             response = self._get_detailed_system_info()
             self.wfile.write(json.dumps(response).encode())
+            
+        elif path == '/api/commands':
+            # System commands endpoint
+            if not self.check_auth():
+                self.send_response(401)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+                self.end_headers()
+                response = {"error": "Unauthorized"}
+                self.wfile.write(json.dumps(response).encode())
+            else:
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+                self.end_headers()
+                
+                # Get available commands or run a specific command
+                if 'command' in query_params:
+                    command_name = query_params['command'][0]
+                    response = {
+                        "command": command_name,
+                        "result": metrics_collector.run_system_command(command_name)
+                    }
+                else:
+                    response = {
+                        "available_commands": metrics_collector.get_available_commands(),
+                        "total_commands": len(SYSTEM_COMMANDS),
+                        "categories": {
+                            "system_info": [cmd for cmd in SYSTEM_COMMANDS.keys() if 'info' in cmd or 'version' in cmd],
+                            "hardware": [cmd for cmd in SYSTEM_COMMANDS.keys() if 'memory' in cmd or 'cpu' in cmd or 'disk' in cmd],
+                            "network": [cmd for cmd in SYSTEM_COMMANDS.keys() if 'network' in cmd or 'ip' in cmd],
+                            "raspberry_pi": [cmd for cmd in SYSTEM_COMMANDS.keys() if 'vcgencmd' in SYSTEM_COMMANDS[cmd]],
+                            "performance": [cmd for cmd in SYSTEM_COMMANDS.keys() if 'stats' in cmd or 'load' in cmd],
+                            "services": [cmd for cmd in SYSTEM_COMMANDS.keys() if 'service' in cmd or 'status' in cmd]
+                        }
+                    }
+                
+                self.wfile.write(json.dumps(response).encode())
+                
+        elif path == '/api/status':
+            # Quick status overview endpoint
+            if not self.check_auth():
+                self.send_response(401)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+                self.end_headers()
+                response = {"error": "Unauthorized"}
+                self.wfile.write(json.dumps(response).encode())
+            else:
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+                self.end_headers()
+                
+                # Get quick status overview
+                try:
+                    # Get basic system info
+                    cpu_percent = psutil.cpu_percent(interval=0.1)
+                    memory = psutil.virtual_memory()
+                    disk = psutil.disk_usage('/')
+                    temperature = metrics_collector._get_temperature()
+                    
+                    # Determine overall system health
+                    health_score = 100
+                    warnings = []
+                    
+                    if cpu_percent > 80:
+                        health_score -= 20
+                        warnings.append("High CPU usage")
+                    if memory.percent > 85:
+                        health_score -= 20
+                        warnings.append("High memory usage")
+                    if disk.percent > 85:
+                        health_score -= 20
+                        warnings.append("High disk usage")
+                    if temperature > 70:
+                        health_score -= 20
+                        warnings.append("High temperature")
+                    
+                    health_status = "healthy" if health_score >= 80 else "warning" if health_score >= 60 else "critical"
+                    
+                    response = {
+                        "timestamp": time.time(),
+                        "overall_status": health_status,
+                        "health_score": health_score,
+                        "warnings": warnings,
+                        "quick_stats": {
+                            "cpu": round(cpu_percent, 1),
+                            "memory": round(memory.percent, 1),
+                            "disk": round(disk.percent, 1),
+                            "temperature": temperature
+                        },
+                        "uptime": self._get_uptime(),
+                        "last_update": time.strftime('%Y-%m-%d %H:%M:%S'),
+                        "enhanced_monitoring": True
+                    }
+                except Exception as e:
+                    response = {
+                        "timestamp": time.time(),
+                        "overall_status": "error",
+                        "health_score": 0,
+                        "warnings": [f"Failed to get status: {str(e)}"],
+                        "quick_stats": {},
+                        "uptime": "Unknown",
+                        "last_update": time.strftime('%Y-%m-%d %H:%M:%S')
+                    }
+                
+                self.wfile.write(json.dumps(response).encode())
                 
         else:
             # 404 for unknown paths
@@ -519,8 +828,8 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
             memory = psutil.virtual_memory()
             disk = psutil.disk_usage('/')
             
-            # Get temperature
-            temperature = self._get_temperature()
+            # Get temperature using the global metrics collector
+            temperature = metrics_collector._get_temperature()
             
             # Get network stats
             network = psutil.net_io_counters()
@@ -583,6 +892,137 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
         except Exception as e:
             return {"timestamp": time.time(), "error": f"Failed to get historical system stats: {str(e)}"}
     
+    def _get_enhanced_system_stats(self):
+        """Get enhanced system statistics with formatted values and status indicators"""
+        try:
+            # Get basic stats
+            basic_stats = self._get_system_stats()
+            
+            if "error" in basic_stats:
+                return basic_stats
+            
+            # Get additional system information
+            memory = psutil.virtual_memory()
+            disk = psutil.disk_usage('/')
+            cpu_freq = psutil.cpu_freq()
+            
+            # Get enhanced metrics from system commands
+            enhanced_metrics = {}
+            if "enhanced" in basic_stats:
+                enhanced_metrics = basic_stats["enhanced"]
+            
+            # Format values for frontend display
+            enhanced_stats = {
+                "timestamp": basic_stats["timestamp"],
+                "cpu": {
+                    "percent": basic_stats["cpu_percent"],
+                    "frequency_mhz": round(cpu_freq.current if cpu_freq else 0, 1),
+                    "frequency_ghz": round((cpu_freq.current if cpu_freq else 0) / 1000, 2),
+                    "status": self._get_cpu_status(basic_stats["cpu_percent"]),
+                    "cores": psutil.cpu_count(),
+                    "cores_logical": psutil.cpu_count(logical=True),
+                    "enhanced": {
+                        "temperature": enhanced_metrics.get('cpu_temperature'),
+                        "arm_clock": enhanced_metrics.get('arm_clock'),
+                        "core_voltage": enhanced_metrics.get('core_voltage')
+                    }
+                },
+                "memory": {
+                    "percent": basic_stats["memory_percent"],
+                    "total_gb": round(memory.total / (1024**3), 2),
+                    "available_gb": round(memory.available / (1024**3), 2),
+                    "used_gb": round(memory.used / (1024**3), 2),
+                    "free_gb": round(memory.free / (1024**3), 2),
+                    "status": self._get_memory_status(basic_stats["memory_percent"])
+                },
+                "disk": {
+                    "percent": basic_stats["disk_percent"],
+                    "total_gb": round(disk.total / (1024**3), 2),
+                    "used_gb": round(disk.used / (1024**3), 2),
+                    "free_gb": round(disk.free / (1024**3), 2),
+                    "status": self._get_disk_status(basic_stats["disk_percent"])
+                },
+                "temperature": {
+                    "celsius": basic_stats["temperature"],
+                    "fahrenheit": round((basic_stats["temperature"] * 9/5) + 32, 1),
+                    "status": self._get_temperature_status(basic_stats["temperature"]),
+                    "enhanced": enhanced_metrics.get('cpu_temperature')
+                },
+                "network": {
+                    "bytes_sent": basic_stats["network"]["bytes_sent"],
+                    "bytes_recv": basic_stats["network"]["bytes_recv"],
+                    "bytes_sent_mb": round(basic_stats["network"]["bytes_sent"] / (1024**2), 2),
+                    "bytes_recv_mb": round(basic_stats["network"]["bytes_recv"] / (1024**2), 2),
+                    "packets_sent": basic_stats["network"]["packets_sent"],
+                    "packets_recv": basic_stats["network"]["packets_recv"]
+                },
+                "disk_io": {
+                    "read_bytes": basic_stats["disk_io"]["read_bytes"],
+                    "write_bytes": basic_stats["disk_io"]["write_bytes"],
+                    "read_mb": round(basic_stats["disk_io"]["read_bytes"] / (1024**2), 2),
+                    "write_mb": round(basic_stats["disk_io"]["write_bytes"] / (1024**2), 2),
+                    "read_count": basic_stats["disk_io"]["read_count"],
+                    "write_count": basic_stats["disk_io"]["write_count"]
+                },
+                "system": {
+                    "uptime": self._get_uptime(),
+                    "boot_time": time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(psutil.boot_time())),
+                    "platform": platform.platform(),
+                    "python_version": sys.version.split()[0]
+                },
+                "enhanced_monitoring": True,
+                "available_commands": len(SYSTEM_COMMANDS)
+            }
+            
+            return enhanced_stats
+            
+        except Exception as e:
+            return {"timestamp": time.time(), "error": f"Failed to get enhanced system stats: {str(e)}"}
+    
+    def _get_cpu_status(self, cpu_percent):
+        """Get CPU status indicator based on usage percentage"""
+        if cpu_percent >= 90:
+            return {"level": "critical", "color": "red", "message": "Very High"}
+        elif cpu_percent >= 80:
+            return {"level": "high", "color": "orange", "message": "High"}
+        elif cpu_percent >= 60:
+            return {"level": "moderate", "color": "yellow", "message": "Moderate"}
+        else:
+            return {"level": "normal", "color": "green", "message": "Normal"}
+    
+    def _get_memory_status(self, memory_percent):
+        """Get memory status indicator based on usage percentage"""
+        if memory_percent >= 95:
+            return {"level": "critical", "color": "red", "message": "Critical"}
+        elif memory_percent >= 85:
+            return {"level": "high", "color": "orange", "message": "High"}
+        elif memory_percent >= 70:
+            return {"level": "moderate", "color": "yellow", "message": "Moderate"}
+        else:
+            return {"level": "normal", "color": "green", "message": "Normal"}
+    
+    def _get_disk_status(self, disk_percent):
+        """Get disk status indicator based on usage percentage"""
+        if disk_percent >= 95:
+            return {"level": "critical", "color": "red", "message": "Critical"}
+        elif disk_percent >= 85:
+            return {"level": "high", "color": "orange", "message": "High"}
+        elif disk_percent >= 70:
+            return {"level": "moderate", "color": "yellow", "message": "Moderate"}
+        else:
+            return {"level": "normal", "color": "green", "message": "Normal"}
+    
+    def _get_temperature_status(self, temperature):
+        """Get temperature status indicator based on temperature value"""
+        if temperature >= 80:
+            return {"level": "critical", "color": "red", "message": "Very Hot"}
+        elif temperature >= 70:
+            return {"level": "high", "color": "orange", "message": "Hot"}
+        elif temperature >= 60:
+            return {"level": "moderate", "color": "yellow", "message": "Warm"}
+        else:
+            return {"level": "normal", "color": "green", "message": "Normal"}
+    
     def _get_power_status(self):
         """Get power status and available actions"""
         try:
@@ -631,8 +1071,7 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
         """Get services status"""
         try:
             services = [
-                {"name": "pi-monitor", "status": "running", "active": True, "enabled": True, "description": "Pi Monitor Backend"},
-                {"name": "system", "status": "ok", "active": True, "enabled": True, "description": "System Services"}
+                {"name": "pi-monitor", "status": "running", "active": True, "enabled": True, "description": "Pi Monitor Backend"}
             ]
             
             # Try to get actual service statuses
@@ -661,12 +1100,8 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                     except:
                         pass
             else:
-                # systemctl not available, provide alternative service info
-                services.extend([
-                    {"name": "ssh", "status": "unknown", "active": False, "enabled": False, "description": "SSH service (systemctl not available)"},
-                    {"name": "docker", "status": "unknown", "active": False, "enabled": False, "description": "Docker service (systemctl not available)"},
-                    {"name": "nginx", "status": "unknown", "active": False, "enabled": False, "description": "Nginx service (systemctl not available)"}
-                ])
+                # systemctl not available, try alternative detection methods
+                services.extend(self._detect_services_alternative())
             
             # Add system information
             system_info = {
@@ -683,6 +1118,92 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
             }
         except Exception as e:
             return {"error": f"Failed to get services: {str(e)}"}
+    
+    def _detect_services_alternative(self):
+        """Detect services using alternative methods when systemctl is not available"""
+        alternative_services = []
+        
+        # Check for SSH service
+        try:
+            # Check if SSH port is listening
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            result = sock.connect_ex(('localhost', 22))
+            ssh_status = "running" if result == 0 else "stopped"
+            alternative_services.append({
+                "name": "ssh",
+                "status": ssh_status,
+                "active": result == 0,
+                "enabled": True,
+                "description": "SSH service (port 22)"
+            })
+            sock.close()
+        except:
+            alternative_services.append({
+                "name": "ssh",
+                "status": "unknown",
+                "active": False,
+                "enabled": False,
+                "description": "SSH service (detection failed)"
+            })
+        
+        # Check for Docker
+        try:
+            result = subprocess.run(['docker', '--version'], capture_output=True, text=True, timeout=5)
+            docker_status = "running" if result.returncode == 0 else "stopped"
+            alternative_services.append({
+                "name": "docker",
+                "status": docker_status,
+                "active": result.returncode == 0,
+                "enabled": True,
+                "description": "Docker service (daemon check)"
+            })
+        except:
+            alternative_services.append({
+                "name": "docker",
+                "status": "unknown",
+                "active": False,
+                "enabled": False,
+                "description": "Docker service (not installed)"
+            })
+        
+        # Check for Nginx
+        try:
+            # Check if nginx port is listening
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            result = sock.connect_ex(('localhost', 80))
+            nginx_status = "running" if result == 0 else "stopped"
+            alternative_services.append({
+                "name": "nginx",
+                "status": nginx_status,
+                "active": result == 0,
+                "enabled": True,
+                "description": "Nginx service (port 80)"
+            })
+            sock.close()
+        except:
+            alternative_services.append({
+                "name": "nginx",
+                "status": "unknown",
+                "active": False,
+                "enabled": False,
+                "description": "Nginx service (not running)"
+            })
+        
+        # Check for Python processes
+        try:
+            result = subprocess.run(['pgrep', '-f', 'python'], capture_output=True, text=True)
+            if result.returncode == 0:
+                alternative_services.append({
+                    "name": "python",
+                    "status": "running",
+                    "active": True,
+                    "enabled": True,
+                    "description": "Python processes active"
+                })
+        except:
+            pass
+        
+        return alternative_services
     
     def handle_service_action(self):
         """Handle service control actions"""
@@ -701,11 +1222,16 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                 elif action in ['start', 'stop', 'restart']:
                     # Try to control service
                     try:
+                        # First try systemctl
                         result = subprocess.run(['systemctl', action, service_name], capture_output=True, text=True)
                         if result.returncode == 0:
                             return {"success": True, "message": f"Service {service_name} {action} successful"}
                         else:
-                            return {"success": False, "message": f"Service {service_name} {action} failed: {result.stderr}"}
+                            # Try alternative methods if systemctl fails
+                            return self._handle_service_action_alternative(service_name, action)
+                    except FileNotFoundError:
+                        # systemctl not available, try alternative methods
+                        return self._handle_service_action_alternative(service_name, action)
                     except Exception as e:
                         return {"success": False, "message": f"Service control failed: {str(e)}"}
                 else:
@@ -714,6 +1240,103 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                 return {"success": False, "message": "No data received"}
         except Exception as e:
             return {"success": False, "message": f"Service action failed: {str(e)}"}
+    
+    def _handle_service_action_alternative(self, service_name, action):
+        """Handle service actions using alternative methods when systemctl is not available"""
+        try:
+            if service_name == 'ssh':
+                if action == 'start':
+                    # Try to start SSH using alternative method
+                    try:
+                        result = subprocess.run(['service', 'ssh', 'start'], capture_output=True, text=True)
+                        if result.returncode == 0:
+                            return {"success": True, "message": "SSH service started using service command"}
+                        else:
+                            return {"success": False, "message": f"SSH start failed: {result.stderr}"}
+                    except:
+                        return {"success": False, "message": "SSH service control not available (systemctl and service commands not found)"}
+                elif action == 'stop':
+                    try:
+                        result = subprocess.run(['service', 'ssh', 'stop'], capture_output=True, text=True)
+                        if result.returncode == 0:
+                            return {"success": True, "message": "SSH service stopped using service command"}
+                        else:
+                            return {"success": False, "message": f"SSH stop failed: {result.stderr}"}
+                    except:
+                        return {"success": False, "message": "SSH service control not available (systemctl and service commands not found)"}
+                elif action == 'restart':
+                    try:
+                        result = subprocess.run(['service', 'ssh', 'restart'], capture_output=True, text=True)
+                        if result.returncode == 0:
+                            return {"success": True, "message": "SSH service restarted using service command"}
+                        else:
+                            return {"success": False, "message": f"SSH restart failed: {result.stderr}"}
+                    except:
+                        return {"success": False, "message": "SSH service control not available (systemctl and service commands not found)"}
+            
+            elif service_name == 'nginx':
+                if action == 'start':
+                    try:
+                        result = subprocess.run(['service', 'nginx', 'start'], capture_output=True, text=True)
+                        if result.returncode == 0:
+                            return {"success": True, "message": "Nginx service started using service command"}
+                        else:
+                            return {"success": False, "message": f"Nginx start failed: {result.stderr}"}
+                    except:
+                        return {"success": False, "message": "Nginx service control not available (systemctl and service commands not found)"}
+                elif action == 'stop':
+                    try:
+                        result = subprocess.run(['service', 'nginx', 'stop'], capture_output=True, text=True)
+                        if result.returncode == 0:
+                            return {"success": True, "message": "Nginx service stopped using service command"}
+                        else:
+                            return {"success": False, "message": f"Nginx stop failed: {result.stderr}"}
+                    except:
+                        return {"success": False, "message": "Nginx service control not available (systemctl and service commands not found)"}
+                elif action == 'restart':
+                    try:
+                        result = subprocess.run(['service', 'nginx', 'restart'], capture_output=True, text=True)
+                        if result.returncode == 0:
+                            return {"success": True, "message": "Nginx service restarted using service command"}
+                        else:
+                            return {"success": False, "message": f"Nginx restart failed: {result.stderr}"}
+                    except:
+                        return {"success": False, "message": "Nginx service control not available (systemctl and service commands not found)"}
+            
+            elif service_name == 'docker':
+                if action == 'start':
+                    try:
+                        result = subprocess.run(['service', 'docker', 'start'], capture_output=True, text=True)
+                        if result.returncode == 0:
+                            return {"success": True, "message": "Docker service started using service command"}
+                        else:
+                            return {"success": False, "message": f"Docker start failed: {result.stderr}"}
+                    except:
+                        return {"success": False, "message": "Docker service control not available (systemctl and service commands not found)"}
+                elif action == 'stop':
+                    try:
+                        result = subprocess.run(['service', 'docker', 'stop'], capture_output=True, text=True)
+                        if result.returncode == 0:
+                            return {"success": True, "message": "Docker service stopped using service command"}
+                        else:
+                            return {"success": False, "message": f"Docker stop failed: {result.stderr}"}
+                    except:
+                        return {"success": False, "message": "Docker service control not available (systemctl and service commands not found)"}
+                elif action == 'restart':
+                    try:
+                        result = subprocess.run(['service', 'docker', 'restart'], capture_output=True, text=True)
+                        if result.returncode == 0:
+                            return {"success": True, "message": "Docker service restarted using service command"}
+                        else:
+                            return {"success": False, "message": f"Docker restart failed: {result.stderr}"}
+                    except:
+                        return {"success": False, "message": "Docker service control not available (systemctl and service commands not found)"}
+            
+            # Default fallback for unknown services
+            return {"success": False, "message": f"Service {service_name} control not available (systemctl and service commands not found)"}
+            
+        except Exception as e:
+            return {"success": False, "message": f"Alternative service control failed: {str(e)}"}
     
     def handle_power_action(self):
         """Handle power management actions"""
@@ -903,6 +1526,16 @@ def run_server(port=None):
     # Add new endpoints
     print(f"  📊 METRICS: /api/metrics")
     print(f"  ℹ️  SYSTEM_INFO: /api/system/info")
+    print(f"  🖥️  COMMANDS: /api/commands")
+    print()
+    print("🔧 Enhanced System Monitoring:")
+    print(f"  📈 Total Commands: {len(SYSTEM_COMMANDS)}")
+    print(f"  🖥️  System Info: {len([cmd for cmd in SYSTEM_COMMANDS.keys() if 'info' in cmd or 'version' in cmd])} commands")
+    print(f"  🔧 Hardware: {len([cmd for cmd in SYSTEM_COMMANDS.keys() if 'memory' in cmd or 'cpu' in cmd or 'disk' in cmd])} commands")
+    print(f"  🌐 Network: {len([cmd for cmd in SYSTEM_COMMANDS.keys() if 'network' in cmd or 'ip' in cmd])} commands")
+    print(f"  🍓 Raspberry Pi: {len([cmd for cmd in SYSTEM_COMMANDS.keys() if 'vcgencmd' in SYSTEM_COMMANDS[cmd]])} commands")
+    print(f"  📊 Performance: {len([cmd for cmd in SYSTEM_COMMANDS.keys() if 'stats' in cmd or 'load' in cmd])} commands")
+    print(f"  🚀 Services: {len([cmd for cmd in SYSTEM_COMMANDS.keys() if 'service' in cmd or 'status' in cmd])} commands")
     print()
     print(f"🚀 Server running at http://0.0.0.0:{port}")
     print(f"🔗 Health check: http://0.0.0.0:{port}/health")

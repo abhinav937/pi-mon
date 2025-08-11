@@ -10,6 +10,15 @@ A **dead simple** Raspberry Pi monitoring system that replaces complex FastAPI s
 - **Minimal dependencies** - Only psutil for system monitoring
 - **Simple deployment** - One script to rule them all
 
+## 🚀 Enhanced Features (RPi-Monitor Inspired)
+
+- **Real-time Metrics Collection** - Continuous data collection every 5 seconds
+- **Historical Data Storage** - Up to 1000 data points with smart aggregation
+- **Enhanced System Monitoring** - Temperature, disk I/O, network statistics
+- **Advanced Charts** - Time-range selectable historical charts
+- **Detailed System Information** - CPU details, memory breakdown, network interfaces
+- **Live Dashboard Updates** - Real-time metrics without page refresh
+
 ## 🚀 Quick Start
 
 ### 1. Check Configuration
@@ -82,8 +91,12 @@ All settings are in `config.json`:
 | `/health` | GET | Health check | No |
 | `/api/auth/token` | POST | Get auth token | No |
 | `/api/system` | GET | System stats | Yes |
+| `/api/system` | GET | System stats with history | Yes |
+| `/api/metrics` | GET | Historical metrics data | Yes |
+| `/api/system/info` | GET | Detailed system information | No |
 | `/api/services` | GET | Services status | Yes |
 | `/api/services` | POST | Control services | Yes |
+| `/api/power` | GET | Power status | Yes |
 | `/api/power` | POST | Power actions | Yes |
 
 ## 🐳 Docker Commands

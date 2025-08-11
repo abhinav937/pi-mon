@@ -11,7 +11,7 @@ import {
   Legend,
   Filler,
 } from 'chart.js';
-import { TrendingUp, BarChart3, Activity } from 'lucide-react';
+import { TrendingUp, BarChart3, Activity, HardDrive, Database } from 'lucide-react';
 
 // Register Chart.js components
 ChartJS.register(

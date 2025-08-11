@@ -29,7 +29,7 @@ COPY tailwind.config.js ./
 RUN npm run build
 
 # Production stage
-FROM nginx:alpine
+FROM httpd:alpine
 
 # Add ARM64 support labels
 LABEL architecture="arm64"
@@ -39,10 +39,10 @@ LABEL description="Pi Monitor Frontend - React Dashboard"
 RUN apk add --no-cache wget curl
 
 # Copy built app from builder stage
-COPY --from=builder /app/build /usr/share/nginx/html
+COPY --from=builder /app/build /usr/local/apache2/htdocs
 
 # Copy custom nginx configuration
-COPY nginx.conf /etc/nginx/nginx.conf
+COPY httpd.conf /usr/local/apache2/conf/httpd.conf
 
 # Copy startup script
 COPY startup.sh /startup.sh

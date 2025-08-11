@@ -15,10 +15,10 @@ BACKEND_PORT="5001"
 
 echo "🎯 Using backend at: $BACKEND_IP:$BACKEND_PORT"
 
-# Update nginx configuration with the backend address
-echo "🔧 Updating nginx configuration..."
-sed -i "s/server localhost:5001;/server $BACKEND_IP:$BACKEND_PORT;/" /etc/nginx/nginx.conf
-echo "✅ Nginx config updated with backend: $BACKEND_IP:$BACKEND_PORT"
+# Update apache configuration with the backend address
+echo "🔧 Updating apache configuration..."
+sed -i "s/BACKEND_UPSTREAM/$BACKEND_IP:$BACKEND_PORT/g" /usr/local/apache2/conf/httpd.conf
+echo "✅ Apache config updated with backend: $BACKEND_IP:$BACKEND_PORT"
 
 # Wait for backend to be ready
 echo "⏳ Waiting for backend to be ready..."
@@ -30,7 +30,7 @@ until curl -f "http://$BACKEND_IP:$BACKEND_PORT/health" > /dev/null 2>&1; do
 done
 
 echo "✅ Backend is ready!"
-echo "🚀 Starting nginx..."
+echo "🚀 Starting apache..."
 
-# Start nginx
-exec nginx -g "daemon off;"
+# Start apache
+exec httpd -DFOREGROUND

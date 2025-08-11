@@ -433,7 +433,168 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                 "enhanced_monitoring": True
             }
             self.wfile.write(json.dumps(response).encode())
-            
+                
+        elif path.startswith('/api/logs/') and '/download' in path:
+            # Log download endpoint
+            if not self.check_auth():
+                self.send_response(401)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+                self.end_headers()
+                response = {"error": "Unauthorized"}
+                self.wfile.write(json.dumps(response).encode())
+            else:
+                try:
+                    # Extract log name from path
+                    log_name = path.split('/')[-2]  # /api/logs/name/download
+                    log_file = f"/var/log/{log_name}"
+                    
+                    if not os.path.exists(log_file):
+                        self.send_response(404)
+                        self.send_header('Content-type', 'application/json')
+                        self.send_header('Access-Control-Allow-Origin', '*')
+                        self.end_headers()
+                        response = {"error": f"Log file {log_name} not found"}
+                        self.wfile.write(json.dumps(response).encode())
+                        return
+                    
+                    # Read log content
+                    with open(log_file, 'r', encoding='utf-8', errors='ignore') as f:
+                        content = f.read()
+                    
+                    self.send_response(200)
+                    self.send_header('Content-type', 'text/plain')
+                    self.send_header('Content-Disposition', f'attachment; filename="{log_name}"')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.end_headers()
+                    
+                    self.wfile.write(content.encode())
+                    
+                except Exception as e:
+                    self.send_response(500)
+                    self.send_header('Content-type', 'application/json')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.end_headers()
+                    response = {"error": f"Failed to download log: {str(e)}"}
+                    self.wfile.write(json.dumps(response).encode())
+                
+        elif path.startswith('/api/logs/') and path.endswith('/clear'):
+            # Log clear endpoint
+            if not self.check_auth():
+                self.send_response(401)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+                self.end_headers()
+                response = {"error": "Unauthorized"}
+                self.wfile.write(json.dumps(response).encode())
+            else:
+                try:
+                    # Extract log name from path
+                    log_name = path.split('/')[-2]  # /api/logs/name/clear
+                    log_file = f"/var/log/{log_name}"
+                    
+                    if not os.path.exists(log_file):
+                        self.send_response(404)
+                        self.send_header('Content-type', 'application/json')
+                        self.send_header('Access-Control-Allow-Origin', '*')
+                        self.end_headers()
+                        response = {"error": f"Log file {log_name} not found"}
+                        self.wfile.write(json.dumps(response).encode())
+                        return
+                    
+                    # Clear log file (truncate to 0 bytes)
+                    with open(log_file, 'w') as f:
+                        pass  # This truncates the file
+                    
+                    self.send_response(200)
+                    self.send_header('Content-type', 'application/json')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+                    self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+                    self.end_headers()
+                    
+                    response = {
+                        "success": True,
+                        "message": f"Log {log_name} cleared successfully",
+                        "log_name": log_name,
+                        "timestamp": time.strftime('%Y-%m-%d %H:%M:%S')
+                    }
+                    
+                    self.wfile.write(json.dumps(response).encode())
+                    
+                except Exception as e:
+                    self.send_response(500)
+                    self.send_header('Content-type', 'application/json')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.end_headers()
+                    response = {"error": f"Failed to clear log: {str(e)}"}
+                    self.wfile.write(json.dumps(response).encode())
+                
+        elif path.startswith('/api/services/'):
+            # Service control endpoint
+            if not self.check_auth():
+                self.send_response(401)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+                self.end_headers()
+                response = {"error": "Unauthorized"}
+                self.wfile.write(json.dumps(response).encode())
+            else:
+                try:
+                    # Extract service name and action from path
+                    path_parts = path.split('/')
+                    if len(path_parts) >= 4:
+                        service_name = path_parts[3]
+                        action = path_parts[4] if len(path_parts) > 4 else 'status'
+                        
+                        # Handle service actions
+                        if action == 'start':
+                            result = os.system(f'systemctl start {service_name}')
+                            if result == 0:
+                                response = {"success": True, "message": f"Service {service_name} started successfully"}
+                            else:
+                                response = {"success": False, "message": f"Failed to start service {service_name}"}
+                        elif action == 'stop':
+                            result = os.system(f'systemctl stop {service_name}')
+                            if result == 0:
+                                response = {"success": True, "message": f"Service {service_name} stopped successfully"}
+                            else:
+                                response = {"success": False, "message": f"Failed to stop service {service_name}"}
+                        elif action == 'restart':
+                            result = os.system(f'systemctl restart {service_name}')
+                            if result == 0:
+                                response = {"success": True, "message": f"Service {service_name} restarted successfully"}
+                            else:
+                                response = {"success": False, "message": f"Failed to restart service {service_name}"}
+                        elif action == 'status':
+                            result = os.system(f'systemctl is-active {service_name}')
+                            if result == 0:
+                                response = {"success": True, "service": service_name, "status": "active"}
+                            else:
+                                response = {"success": True, "service": service_name, "status": "inactive"}
+                        else:
+                            response = {"success": False, "message": f"Unknown action: {action}"}
+                    else:
+                        response = {"success": False, "message": "Invalid service path"}
+                        
+                except Exception as e:
+                    response = {"success": False, "message": f"Service action failed: {str(e)}"}
+                
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+                self.end_headers()
+                
+                self.wfile.write(json.dumps(response).encode())
+                
         elif path == '/health':
             # Health check
             self.send_response(200)
@@ -539,6 +700,36 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                 }
                 self.wfile.write(json.dumps(response).encode())
                 
+        elif path == '/api/metrics/history':
+            # Metrics history endpoint for historical data
+            if not self.check_auth():
+                self.send_response(401)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+                self.end_headers()
+                response = {"error": "Unauthorized"}
+                self.wfile.write(json.dumps(response).encode())
+            else:
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+                self.end_headers()
+                
+                minutes = int(query_params.get('minutes', ['60'])[0])
+                response = {
+                    "metrics": metrics_collector.get_metrics_history(minutes),
+                    "collection_status": {
+                        "active": metrics_collector.is_collecting,
+                        "collection_interval": metrics_collector.collection_interval,
+                        "total_points": len(metrics_collector.metrics_history)
+                    }
+                }
+                self.wfile.write(json.dumps(response).encode())
+                
         elif path == '/api/services':
             # Services endpoint
             if not self.check_auth():
@@ -591,7 +782,281 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
             self.end_headers()
             response = self._get_detailed_system_info()
             self.wfile.write(json.dumps(response).encode())
-            
+                
+        elif path == '/api/network':
+            # Network information endpoint
+            if not self.check_auth():
+                self.send_response(401)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+                self.end_headers()
+                response = {"error": "Unauthorized"}
+                self.wfile.write(json.dumps(response).encode())
+            else:
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+                self.end_headers()
+                
+                try:
+                    # Get network interface information
+                    network_info = {}
+                    for interface, addrs in psutil.net_if_addrs().items():
+                        network_info[interface] = {
+                            'addresses': [addr.address for addr in addrs if addr.family == socket.AF_INET],
+                            'mac': [addr.address for addr in addrs if addr.family == socket.AF_LINK]
+                        }
+                    
+                    response = {
+                        "interfaces": network_info,
+                        "default_gateway": self._run_command_with_fallback('gateway', 'ip route | grep default | head -1', ['route -n | grep "^0.0.0.0" | head -1']),
+                        "dns_servers": self._run_command_with_fallback('dns', 'cat /etc/resolv.conf | grep nameserver', ['cat /etc/resolv.conf']),
+                        "timestamp": time.strftime('%Y-%m-%d %H:%M:%S')
+                    }
+                except Exception as e:
+                    response = {"error": f"Failed to get network info: {str(e)}"}
+                
+                self.wfile.write(json.dumps(response).encode())
+                
+        elif path == '/api/network/stats':
+            # Network statistics endpoint
+            if not self.check_auth():
+                self.send_response(401)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+                self.end_headers()
+                response = {"error": "Unauthorized"}
+                self.wfile.write(json.dumps(response).encode())
+            else:
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+                self.end_headers()
+                
+                try:
+                    # Get network I/O statistics
+                    net_io = psutil.net_io_counters()
+                    response = {
+                        "bytes_sent": net_io.bytes_sent,
+                        "bytes_recv": net_io.bytes_recv,
+                        "packets_sent": net_io.packets_sent,
+                        "packets_recv": net_io.packets_recv,
+                        "errin": net_io.errin,
+                        "errout": net_io.errout,
+                        "dropin": net_io.dropin,
+                        "dropout": net_io.dropout,
+                        "timestamp": time.strftime('%Y-%m-%d %H:%M:%S')
+                    }
+                except Exception as e:
+                    response = {"error": f"Failed to get network stats: {str(e)}"}
+                
+                self.wfile.write(json.dumps(response).encode())
+                
+        elif path == '/api/logs':
+            # Available logs endpoint
+            if not self.check_auth():
+                self.send_response(401)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+                self.end_headers()
+                response = {"error": "Unauthorized"}
+                self.wfile.write(json.dumps(response).encode())
+            else:
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+                self.end_headers()
+                
+                try:
+                    # Get available log files
+                    log_dir = '/var/log'
+                    available_logs = []
+                    
+                    if os.path.exists(log_dir):
+                        for filename in os.listdir(log_dir):
+                            if filename.endswith('.log') or filename in ['syslog', 'messages', 'auth.log']:
+                                filepath = os.path.join(log_dir, filename)
+                                if os.path.isfile(filepath):
+                                    stat = os.stat(filepath)
+                                    available_logs.append({
+                                        'name': filename,
+                                        'size': f"{stat.st_size / 1024:.1f} KB",
+                                        'modified': datetime.fromtimestamp(stat.st_mtime).isoformat()
+                                    })
+                    
+                    response = {
+                        "logs": available_logs,
+                        "log_directory": log_dir,
+                        "total_logs": len(available_logs)
+                    }
+                except Exception as e:
+                    response = {"error": f"Failed to get available logs: {str(e)}"}
+                
+                self.wfile.write(json.dumps(response).encode())
+                
+        elif path.startswith('/api/logs/') and '/download' not in path:
+            # Log content endpoint
+            if not self.check_auth():
+                self.send_response(401)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+                self.end_headers()
+                response = {"error": "Unauthorized"}
+                self.wfile.write(json.dumps(response).encode())
+            else:
+                try:
+                    # Extract log name from path
+                    log_name = path.split('/')[-1]
+                    max_lines = int(query_params.get('lines', ['100'])[0])
+                    
+                    log_file = f"/var/log/{log_name}"
+                    if not os.path.exists(log_file):
+                        self.send_response(404)
+                        self.send_header('Content-type', 'application/json')
+                        self.send_header('Access-Control-Allow-Origin', '*')
+                        self.end_headers()
+                        response = {"error": f"Log file {log_name} not found"}
+                        self.wfile.write(json.dumps(response).encode())
+                        return
+                    
+                    # Read log content
+                    with open(log_file, 'r', encoding='utf-8', errors='ignore') as f:
+                        lines = f.readlines()
+                        recent_lines = lines[-max_lines:] if len(lines) > max_lines else lines
+                        
+                        # Parse log entries
+                        entries = []
+                        for line in recent_lines:
+                            # Simple log parsing (can be enhanced)
+                            entry = {
+                                'message': line.strip(),
+                                'timestamp': None,
+                                'level': 'info',
+                                'source': log_name
+                            }
+                            
+                            # Try to extract timestamp and level
+                            if ' ' in line:
+                                parts = line.split(' ', 2)
+                                if len(parts) >= 2:
+                                    try:
+                                        # Try to parse timestamp
+                                        timestamp_str = f"{parts[0]} {parts[1]}"
+                                        datetime.strptime(timestamp_str, '%b %d %H:%M:%S')
+                                        entry['timestamp'] = timestamp_str
+                                        entry['message'] = parts[2] if len(parts) > 2 else line.strip()
+                                    except ValueError:
+                                        pass
+                                    
+                                    # Try to detect log level
+                                    if any(level in line.lower() for level in ['error', 'err', 'fail', 'critical']):
+                                        entry['level'] = 'error'
+                                    elif any(level in line.lower() for level in ['warn', 'warning']):
+                                        entry['level'] = 'warning'
+                                    elif any(level in line.lower() for level in ['debug']):
+                                        entry['level'] = 'debug'
+                            
+                            entries.append(entry)
+                    
+                    self.send_response(200)
+                    self.send_header('Content-type', 'application/json')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+                    self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+                    self.end_headers()
+                    
+                    response = {
+                        "log_name": log_name,
+                        "entries": entries,
+                        "total_entries": len(entries),
+                        "max_lines": max_lines,
+                        "size": f"{os.path.getsize(log_file) / 1024:.1f} KB"
+                    }
+                    
+                    self.wfile.write(json.dumps(response).encode())
+                    
+                except Exception as e:
+                    self.send_response(500)
+                    self.send_header('Content-type', 'application/json')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.end_headers()
+                    response = {"error": f"Failed to read log: {str(e)}"}
+                    self.wfile.write(json.dumps(response).encode())
+                
+        elif path == '/api/power/status':
+            # Power status endpoint
+            if not self.check_auth():
+                self.send_response(401)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+                self.end_headers()
+                response = {"error": "Unauthorized"}
+                self.wfile.write(json.dumps(response).encode())
+            else:
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+                self.end_headers()
+                
+                try:
+                    response = self._get_power_status()
+                except Exception as e:
+                    response = {"error": f"Failed to get power status: {str(e)}"}
+                
+                self.wfile.write(json.dumps(response).encode())
+                
+        elif path == '/api/refresh':
+            # Refresh endpoint
+            if not self.check_auth():
+                self.send_response(401)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+                self.end_headers()
+                response = {"error": "Unauthorized"}
+                self.wfile.write(json.dumps(response).encode())
+            else:
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+                self.end_headers()
+                
+                try:
+                    # Force refresh of metrics
+                    if hasattr(metrics_collector, 'refresh'):
+                        metrics_collector.refresh()
+                    
+                    response = {
+                        "message": "System data refreshed successfully",
+                        "timestamp": time.strftime('%Y-%m-%d %H:%M:%S'),
+                        "status": "success"
+                    }
+                except Exception as e:
+                    response = {"error": f"Failed to refresh: {str(e)}"}
+                
+                self.wfile.write(json.dumps(response).encode())
+                
         elif path == '/api/commands':
             # System commands endpoint
             if not self.check_auth():
@@ -776,6 +1241,106 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                 self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
                 self.end_headers()
                 response = self.handle_power_action()
+                self.wfile.write(json.dumps(response).encode())
+                
+        elif path == '/api/power/shutdown':
+            # Shutdown endpoint
+            if not self.check_auth():
+                self.send_response(401)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+                self.end_headers()
+                response = {"error": "Unauthorized"}
+                self.wfile.write(json.dumps(response).encode())
+            else:
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+                self.end_headers()
+                
+                try:
+                    # Schedule shutdown with 5 second delay for safety
+                    threading.Timer(5, lambda: os.system('shutdown -h now')).start()
+                    response = {
+                        "success": True,
+                        "message": "Shutdown scheduled in 5 seconds",
+                        "action": "shutdown",
+                        "delay_seconds": 5,
+                        "scheduled_time": time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time() + 5))
+                    }
+                except Exception as e:
+                    response = {"success": False, "message": f"Shutdown failed: {str(e)}"}
+                
+                self.wfile.write(json.dumps(response).encode())
+                
+        elif path == '/api/power/restart':
+            # Restart endpoint
+            if not self.check_auth():
+                self.send_response(401)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+                self.end_headers()
+                response = {"error": "Unauthorized"}
+                self.wfile.write(json.dumps(response).encode())
+            else:
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+                self.end_headers()
+                
+                try:
+                    # Schedule restart with 5 second delay for safety
+                    threading.Timer(5, lambda: os.system('reboot')).start()
+                    response = {
+                        "success": True,
+                        "message": "Restart scheduled in 5 seconds",
+                        "action": "restart",
+                        "delay_seconds": 5,
+                        "scheduled_time": time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time() + 5))
+                    }
+                except Exception as e:
+                    response = {"success": False, "message": f"Restart failed: {str(e)}"}
+                
+                self.wfile.write(json.dumps(response).encode())
+                
+        elif path == '/api/power/sleep':
+            # Sleep endpoint
+            if not self.check_auth():
+                self.send_response(401)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+                self.end_headers()
+                response = {"error": "Unauthorized"}
+                self.wfile.write(json.dumps(response).encode())
+            else:
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+                self.end_headers()
+                
+                try:
+                    # Try to put system to sleep (may not work on all systems)
+                    os.system('systemctl suspend')
+                    response = {
+                        "success": True,
+                        "message": "Sleep command sent",
+                        "action": "sleep"
+                    }
+                except Exception as e:
+                    response = {"success": False, "message": f"Sleep failed: {str(e)}"}
+                
                 self.wfile.write(json.dumps(response).encode())
                 
         elif path == '/health':

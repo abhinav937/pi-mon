@@ -19,6 +19,44 @@ class UnifiedClient {
       baseURL: this.serverUrl,
       timeout: 10000
     });
+    
+    // Add request interceptor to include auth token
+    this.httpClient.interceptors.request.use(
+      (config) => {
+        if (this.authToken) {
+          config.headers.Authorization = `Bearer ${this.authToken}`;
+        }
+        return config;
+      },
+      (error) => {
+        return Promise.reject(error);
+      }
+    );
+    
+    // Add response interceptor to handle auth errors
+    this.httpClient.interceptors.response.use(
+      (response) => response,
+      async (error) => {
+        if (error.response?.status === 401) {
+          // Token expired or invalid, try to re-authenticate
+          try {
+            await this.authenticate();
+            // Retry the original request
+            const originalRequest = error.config;
+            if (this.authToken) {
+              originalRequest.headers.Authorization = `Bearer ${this.authToken}`;
+            }
+            return this.httpClient(originalRequest);
+          } catch (authError) {
+            // Re-authentication failed
+            this.setConnectionState(CONNECTION_STATES.ERROR);
+            this.onError(authError);
+          }
+        }
+        return Promise.reject(error);
+      }
+    );
+    
     this.initializeConnection();
   }
 

@@ -9,7 +9,9 @@ const CONNECTION_STATES = {
 
 class UnifiedClient {
   constructor(options = {}) {
-    this.serverUrl = options.serverUrl || `http://${window.location.hostname}:5001`;
+    // Use domain-based URL if available, otherwise fall back to localhost
+    const domainUrl = process.env.REACT_APP_API_BASE_URL || `https://${window.location.hostname}`;
+    this.serverUrl = options.serverUrl || domainUrl;
     this.onConnectionChange = options.onConnectionChange || (() => {});
     this.onDataUpdate = options.onDataUpdate || (() => {});
     this.onError = options.onError || (() => {});

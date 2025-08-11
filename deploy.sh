@@ -41,8 +41,7 @@ echo "  Frontend Port: $FRONTEND_PORT"
 
 # Build and deploy backend
 echo -e "${BLUE}🏗️  Building backend...${NC}"
-cd backend
-docker build -t pi-monitor-backend .
+docker build -t pi-monitor-backend -f backend/Dockerfile .
 cd ..
 
 # Stop existing containers

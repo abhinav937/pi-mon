@@ -163,12 +163,13 @@ const Dashboard = ({ unifiedClient }) => {
                 </p>
               </div>
             </div>
-            <div className="progress-bar">
-              <div
-                className={`progress-bar-fill ${getProgressBarColor(currentData.cpu_percent)}`}
-                style={{ width: `${Math.min(currentData.cpu_percent || 0, 100)}%` }}
-              />
-            </div>
+          </div>
+          <div className="progress-bar">
+            <div
+              className={`progress-bar-fill ${getProgressBarColor(currentData.cpu_percent)}`}
+              style={{ width: `${Math.min(currentData.cpu_percent || 0, 100)}%` }}
+            />
+          </div>
         </div>
 
         {/* Memory Usage */}
@@ -188,12 +189,13 @@ const Dashboard = ({ unifiedClient }) => {
                 </p>
               </div>
             </div>
-            <div className="progress-bar">
-              <div
-                className={`progress-bar-fill ${getProgressBarColor(currentData.memory_percent)}`}
-                style={{ width: `${Math.min(currentData.memory_percent || 0, 100)}%` }}
-              />
-            </div>
+          </div>
+          <div className="progress-bar">
+            <div
+              className={`progress-bar-fill ${getProgressBarColor(currentData.memory_percent)}`}
+              style={{ width: `${Math.min(currentData.memory_percent || 0, 100)}%` }}
+            />
+          </div>
         </div>
 
         {/* Disk Usage */}

@@ -6,6 +6,7 @@ Handles system shutdown, restart, and power-related operations
 
 import asyncio
 import os
+import platform
 import subprocess
 from datetime import datetime, timedelta
 from typing import Dict, Optional
@@ -19,23 +20,34 @@ class PowerManager:
     
     def __init__(self):
         self.pending_actions = {}
+        self.os_type = platform.system().lower()
+        self.is_windows = self.os_type == 'windows'
+        self.is_linux = self.os_type == 'linux'
         self._check_privileges()
     
     def _check_privileges(self):
         """Check if we have necessary privileges for power operations"""
-        try:
-            # Check if we can run systemctl commands
-            result = subprocess.run(
-                ['sudo', '-n', 'systemctl', '--version'], 
-                capture_output=True, 
-                text=True, 
-                timeout=5
-            )
-            self.has_systemctl = (result.returncode == 0)
-            logger.info("Power management initialized", has_systemctl=self.has_systemctl)
-        except Exception as e:
+        if self.is_windows:
+            # Windows doesn't need systemctl, but check for shutdown command
             self.has_systemctl = False
-            logger.warning("systemctl not available or no sudo privileges", error=str(e))
+            self.has_power_commands = True  # Windows has built-in shutdown/restart
+            logger.info("Power management initialized for Windows", os_type=self.os_type)
+        else:
+            try:
+                # Check if we can run systemctl commands (Linux)
+                result = subprocess.run(
+                    ['sudo', '-n', 'systemctl', '--version'], 
+                    capture_output=True, 
+                    text=True, 
+                    timeout=5
+                )
+                self.has_systemctl = (result.returncode == 0)
+                self.has_power_commands = self.has_systemctl
+                logger.info("Power management initialized for Linux", has_systemctl=self.has_systemctl)
+            except Exception as e:
+                self.has_systemctl = False
+                self.has_power_commands = False
+                logger.warning("systemctl not available or no sudo privileges", error=str(e))
     
     async def execute_action(self, action: str, delay: int = 0) -> str:
         """
@@ -56,12 +68,26 @@ class PowerManager:
         elif delay > 3600:  # Max 1 hour delay
             delay = 3600
         
-        logger.info("Power action requested", action=action, delay=delay)
+        logger.info("Power action requested", action=action, delay=delay, os_type=self.os_type)
+        
+        # For development/non-Pi environments, simulate the action
+        if self.is_windows or not self.has_power_commands:
+            return await self._simulate_action(action, delay)
         
         if delay > 0:
             return await self._schedule_action(action, delay)
         else:
             return await self._execute_immediate_action(action)
+    
+    async def _simulate_action(self, action: str, delay: int) -> str:
+        """Simulate power action for development/non-Pi environments"""
+        logger.info(f"Simulating {action} action for development environment", 
+                   action=action, delay=delay, os_type=self.os_type)
+        
+        if delay > 0:
+            return f"[SIMULATION] {action.capitalize()} would be scheduled in {delay} seconds (not executed on {self.os_type})"
+        else:
+            return f"[SIMULATION] {action.capitalize()} would be executed now (not executed on {self.os_type})"
     
     async def _schedule_action(self, action: str, delay: int) -> str:
         """Schedule a delayed power action"""
@@ -229,7 +255,12 @@ class PowerManager:
     async def get_system_power_info(self) -> Dict:
         """Get system power-related information"""
         info = {
+            "os_type": self.os_type,
+            "is_windows": self.is_windows,
+            "is_linux": self.is_linux,
             "has_systemctl": self.has_systemctl,
+            "has_power_commands": self.has_power_commands,
+            "simulation_mode": self.is_windows or not self.has_power_commands,
             "pending_actions_count": len(self.pending_actions),
             "supported_actions": ["shutdown", "restart"]
         }

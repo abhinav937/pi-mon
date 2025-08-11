@@ -1,14 +1,17 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
 import { Play, Square, RotateCcw, RefreshCw, Settings, CheckCircle, AlertCircle, XCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
 
-const ServiceManagement = ({ unifiedClient }) => {
-  const [selectedService, setSelectedService] = useState(null);
+function ServiceManagement({ unifiedClient }) {
+  const [services, setServices] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [actionLoading, setActionLoading] = useState({});
   const queryClient = useQueryClient();
 
   // Query for services
-  const { data: services, isLoading, error, refetch } = useQuery(
+  const { data: servicesData, isLoading, error: queryError, refetch } = useQuery(
     'services',
     async () => {
       if (!unifiedClient) return [];
@@ -221,7 +224,7 @@ const ServiceManagement = ({ unifiedClient }) => {
       </div>
 
       {/* Services List */}
-      {error ? (
+      {queryError ? (
         <div className="metric-card bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800">
           <div className="text-center">
             <AlertCircle className="h-8 w-8 text-red-600 dark:text-red-400 mx-auto mb-4" />
@@ -229,7 +232,7 @@ const ServiceManagement = ({ unifiedClient }) => {
               Failed to Load Services
             </h3>
             <p className="text-red-600 dark:text-red-400 mb-4">
-              {error.message || 'Unable to fetch services from the server'}
+              {queryError.message || 'Unable to fetch services from the server'}
             </p>
             <button
               onClick={() => refetch()}

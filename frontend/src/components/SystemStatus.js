@@ -8,7 +8,7 @@ const SystemStatus = ({ unifiedClient }) => {
   const [refreshing, setRefreshing] = useState(false);
 
   // Query for system stats
-  const { data: systemStats, isLoading, error, refetch } = useQuery(
+  const { data: systemStats, isLoading, refetch } = useQuery(
     'systemStatus',
     async () => {
       if (!unifiedClient) return null;

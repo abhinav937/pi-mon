@@ -25,12 +25,12 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements and install Python dependencies
-COPY backend/requirements.txt .
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the server and config files
-COPY backend/simple_server.py .
-COPY config.py .
+COPY simple_server.py .
+COPY ../config.py .
 
 # Create a simple startup script
 RUN echo '#!/bin/bash\npython simple_server.py' > start.sh && chmod +x start.sh

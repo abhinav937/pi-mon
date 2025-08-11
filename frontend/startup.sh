@@ -11,43 +11,63 @@ echo "  - Current container: $(hostname)"
 # Try to find backend using common Docker network patterns
 echo "🔍 Trying to connect to backend..."
 
-# List of possible backend addresses to try
-BACKEND_ADDRESSES=(
-    "pi-monitor-backend:5001"
-    "localhost:5001"
-    "127.0.0.1:5001"
-    "172.20.0.2:5001"
-    "172.20.0.3:5001"
-    "172.20.0.4:5001"
-    "172.20.0.5:5001"
-)
-
+# Try each address until one works (sh-compatible syntax)
 BACKEND_IP=""
 BACKEND_PORT="5001"
 
-# Try each address until one works
-for address in "${BACKEND_ADDRESSES[@]}"; do
-    echo "🔍 Trying: $address"
-    if curl -f "http://$address/health" > /dev/null 2>&1; then
-        echo "✅ Backend found at: $address"
-        # Extract IP and port
-        if [[ $address == *":"* ]]; then
-            BACKEND_IP=$(echo $address | cut -d: -f1)
-            BACKEND_PORT=$(echo $address | cut -d: -f2)
-        else
-            BACKEND_IP=$address
-        fi
-        break
-    else
-        echo "❌ Failed to connect to: $address"
-    fi
-done
-
-# If no address worked, default to localhost
-if [ -z "$BACKEND_IP" ]; then
-    echo "⚠️  No backend found, defaulting to localhost"
-    BACKEND_IP="localhost"
+# Try pi-monitor-backend:5001
+echo "🔍 Trying: pi-monitor-backend:5001"
+if curl -f "http://pi-monitor-backend:5001/health" > /dev/null 2>&1; then
+    echo "✅ Backend found at: pi-monitor-backend:5001"
+    BACKEND_IP="pi-monitor-backend"
     BACKEND_PORT="5001"
+else
+    echo "❌ Failed to connect to: pi-monitor-backend:5001"
+    
+    # Try localhost:5001
+    echo "🔍 Trying: localhost:5001"
+    if curl -f "http://localhost:5001/health" > /dev/null 2>&1; then
+        echo "✅ Backend found at: localhost:5001"
+        BACKEND_IP="localhost"
+        BACKEND_PORT="5001"
+    else
+        echo "❌ Failed to connect to: localhost:5001"
+        
+        # Try 127.0.0.1:5001
+        echo "🔍 Trying: 127.0.0.1:5001"
+        if curl -f "http://127.0.0.1:5001/health" > /dev/null 2>&1; then
+            echo "✅ Backend found at: 127.0.0.1:5001"
+            BACKEND_IP="127.0.0.1"
+            BACKEND_PORT="5001"
+        else
+            echo "❌ Failed to connect to: 127.0.0.1:5001"
+            
+            # Try 172.20.0.2:5001
+            echo "🔍 Trying: 172.20.0.2:5001"
+            if curl -f "http://172.20.0.2:5001/health" > /dev/null 2>&1; then
+                echo "✅ Backend found at: 172.20.0.2:5001"
+                BACKEND_IP="172.20.0.2"
+                BACKEND_PORT="5001"
+            else
+                echo "❌ Failed to connect to: 172.20.0.2:5001"
+                
+                # Try 172.20.0.3:5001
+                echo "🔍 Trying: 172.20.0.3:5001"
+                if curl -f "http://172.20.0.3:5001/health" > /dev/null 2>&1; then
+                    echo "✅ Backend found at: 172.20.0.3:5001"
+                    BACKEND_IP="172.20.0.3"
+                    BACKEND_PORT="5001"
+                else
+                    echo "❌ Failed to connect to: 172.20.0.3:5001"
+                    
+                    # Default to localhost
+                    echo "⚠️  No backend found, defaulting to localhost"
+                    BACKEND_IP="localhost"
+                    BACKEND_PORT="5001"
+                fi
+            fi
+        fi
+    fi
 fi
 
 echo "🎯 Using backend at: $BACKEND_IP:$BACKEND_PORT"

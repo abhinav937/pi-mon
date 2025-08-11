@@ -8,6 +8,16 @@ echo "🔍 Network debugging info:"
 echo "  - Container name: pi-monitor-backend"
 echo "  - Current container: $(hostname)"
 
+# Show network interfaces and routing
+echo "🔍 Network interfaces:"
+ip addr show 2>/dev/null || ifconfig 2>/dev/null || echo "No network tools available"
+
+echo "🔍 Routing table:"
+ip route show 2>/dev/null || route -n 2>/dev/null || echo "No routing tools available"
+
+echo "🔍 DNS resolution test:"
+nslookup pi-monitor-backend 2>/dev/null || echo "nslookup not available"
+
 # Try to find backend using common Docker network patterns
 echo "🔍 Trying to connect to backend..."
 
@@ -15,55 +25,69 @@ echo "🔍 Trying to connect to backend..."
 BACKEND_IP=""
 BACKEND_PORT="5001"
 
+# Function to test connection with timeout
+test_connection() {
+    local address=$1
+    local timeout=5
+    echo "🔍 Testing: $address (timeout: ${timeout}s)"
+    
+    # Use timeout command if available, otherwise use curl's built-in timeout
+    if command -v timeout >/dev/null 2>&1; then
+        timeout $timeout curl -f "http://$address/health" > /dev/null 2>&1
+    else
+        curl -f --connect-timeout $timeout --max-time $timeout "http://$address/health" > /dev/null 2>&1
+    fi
+    
+    if [ $? -eq 0 ]; then
+        echo "✅ Backend found at: $address"
+        return 0
+    else
+        echo "❌ Failed to connect to: $address"
+        return 1
+    fi
+}
+
 # Try pi-monitor-backend:5001
-echo "🔍 Trying: pi-monitor-backend:5001"
-if curl -f "http://pi-monitor-backend:5001/health" > /dev/null 2>&1; then
-    echo "✅ Backend found at: pi-monitor-backend:5001"
+if test_connection "pi-monitor-backend:5001"; then
     BACKEND_IP="pi-monitor-backend"
     BACKEND_PORT="5001"
 else
-    echo "❌ Failed to connect to: pi-monitor-backend:5001"
-    
     # Try localhost:5001
-    echo "🔍 Trying: localhost:5001"
-    if curl -f "http://localhost:5001/health" > /dev/null 2>&1; then
-        echo "✅ Backend found at: localhost:5001"
+    if test_connection "localhost:5001"; then
         BACKEND_IP="localhost"
         BACKEND_PORT="5001"
     else
-        echo "❌ Failed to connect to: localhost:5001"
-        
         # Try 127.0.0.1:5001
-        echo "🔍 Trying: 127.0.0.1:5001"
-        if curl -f "http://127.0.0.1:5001/health" > /dev/null 2>&1; then
-            echo "✅ Backend found at: 127.0.0.1:5001"
+        if test_connection "127.0.0.1:5001"; then
             BACKEND_IP="127.0.0.1"
             BACKEND_PORT="5001"
         else
-            echo "❌ Failed to connect to: 127.0.0.1:5001"
-            
             # Try 172.20.0.2:5001
-            echo "🔍 Trying: 172.20.0.2:5001"
-            if curl -f "http://172.20.0.2:5001/health" > /dev/null 2>&1; then
-                echo "✅ Backend found at: 172.20.0.2:5001"
+            if test_connection "172.20.0.2:5001"; then
                 BACKEND_IP="172.20.0.2"
                 BACKEND_PORT="5001"
             else
-                echo "❌ Failed to connect to: 172.20.0.2:5001"
-                
                 # Try 172.20.0.3:5001
-                echo "🔍 Trying: 172.20.0.3:5001"
-                if curl -f "http://172.20.0.3:5001/health" > /dev/null 2>&1; then
-                    echo "✅ Backend found at: 172.20.0.3:5001"
+                if test_connection "172.20.0.3:5001"; then
                     BACKEND_IP="172.20.0.3"
                     BACKEND_PORT="5001"
                 else
-                    echo "❌ Failed to connect to: 172.20.0.3:5001"
-                    
-                    # Default to localhost
-                    echo "⚠️  No backend found, defaulting to localhost"
-                    BACKEND_IP="localhost"
-                    BACKEND_PORT="5001"
+                    # Try 172.20.0.4:5001
+                    if test_connection "172.20.0.4:5001"; then
+                        BACKEND_IP="172.20.0.4"
+                        BACKEND_PORT="5001"
+                    else
+                        # Try 172.20.0.5:5001
+                        if test_connection "172.20.0.5:5001"; then
+                            BACKEND_IP="172.20.0.5"
+                            BACKEND_PORT="5001"
+                        else
+                            # Default to localhost
+                            echo "⚠️  No backend found, defaulting to localhost"
+                            BACKEND_IP="localhost"
+                            BACKEND_PORT="5001"
+                        fi
+                    fi
                 fi
             fi
         fi
@@ -78,10 +102,9 @@ sed -i "s/server localhost:5001;/server $BACKEND_IP:$BACKEND_PORT;/" /etc/nginx/
 echo "✅ Nginx config updated with backend: $BACKEND_IP:$BACKEND_PORT"
 
 # Wait for backend to be ready
-until curl -f "http://$BACKEND_IP:$BACKEND_PORT/health" > /dev/null 2>&1; do
+echo "⏳ Waiting for backend to be ready..."
+until test_connection "$BACKEND_IP:$BACKEND_PORT"; do
   echo "⏳ Backend not ready, waiting..."
-  echo "🔍 Testing connection to $BACKEND_IP:$BACKEND_PORT..."
-  curl -v "http://$BACKEND_IP:$BACKEND_PORT/health" || echo "Connection failed"
   sleep 3
 done
 

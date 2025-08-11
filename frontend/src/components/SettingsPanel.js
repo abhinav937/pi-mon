@@ -38,7 +38,7 @@ const SettingsPanel = ({ isDarkMode, setIsDarkMode, onClose }) => {
   };
 
   const handleReset = () => {
-    if (confirm('Are you sure you want to reset all settings to default values?')) {
+    if (window.confirm('Are you sure you want to reset all settings to default values?')) {
       const defaultSettings = {
         refreshInterval: 5000,
         notifications: true,

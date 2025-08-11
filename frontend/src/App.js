@@ -3,6 +3,14 @@ import { QueryClient, QueryClientProvider } from 'react-query';
 import { Toaster } from 'react-hot-toast';
 import { AlertCircle, Wifi, WifiOff, Sun, Moon, Settings, RefreshCw } from 'lucide-react';
 
+import { UnifiedClient } from './services/unifiedClient';
+import ErrorBoundary from './components/ErrorBoundary';
+import LoadingSpinner from './components/LoadingSpinner';
+import ConnectionStatus from './components/ConnectionStatus';
+
+// Tailwind CSS imports
+import './index.css';
+
 // Lazy load components for better performance
 const Dashboard = lazy(() => import('./components/Dashboard'));
 const SystemStatus = lazy(() => import('./components/SystemStatus'));
@@ -12,14 +20,6 @@ const ServiceManagement = lazy(() => import('./components/ServiceManagement'));
 const NetworkMonitor = lazy(() => import('./components/NetworkMonitor'));
 const LogViewer = lazy(() => import('./components/LogViewer'));
 const SettingsPanel = lazy(() => import('./components/SettingsPanel'));
-
-import { UnifiedClient } from './services/unifiedClient';
-import ErrorBoundary from './components/ErrorBoundary';
-import LoadingSpinner from './components/LoadingSpinner';
-import ConnectionStatus from './components/ConnectionStatus';
-
-// Tailwind CSS imports
-import './index.css';
 
 // Create a QueryClient instance with better error handling
 const queryClient = new QueryClient({

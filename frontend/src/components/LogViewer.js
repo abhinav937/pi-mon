@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useQuery } from 'react-query';
 import { FileText, Search, Filter, Download, RefreshCw, AlertTriangle, Info, XCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
+import LoadingSpinner from './LoadingSpinner';
 
 const LogViewer = ({ unifiedClient }) => {
   const [searchTerm, setSearchTerm] = useState('');
@@ -118,7 +119,7 @@ const LogViewer = ({ unifiedClient }) => {
   };
 
   const clearLog = async () => {
-    if (!confirm('Are you sure you want to clear this log? This action cannot be undone.')) {
+    if (!window.confirm('Are you sure you want to clear this log? This action cannot be undone.')) {
       return;
     }
     

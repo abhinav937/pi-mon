@@ -54,6 +54,8 @@
       "health": "/health",
       "auth": "/api/auth/token",
       "system": "/api/system",
+      "metrics": "/api/metrics",
+      "system_info": "/api/system/info",
       "services": "/api/services",
       "power": "/api/power"
     },
@@ -62,7 +64,12 @@
       "service_management": true,
       "power_management": true,
       "authentication": true,
-      "cors": true
+      "cors": true,
+      "real_time_metrics": true,
+      "historical_data": true,
+      "temperature_monitoring": true,
+      "disk_io_monitoring": true,
+      "network_monitoring": true
     }
   },
   "frontend": {

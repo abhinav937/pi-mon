@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery } from 'react-query';
-import { Cpu, HardDrive, Thermometer, Activity, Clock, Wifi } from 'lucide-react';
+import { Cpu, HardDrive, Thermometer, Activity, Clock, Wifi, TrendingUp, Database, Zap } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 const Dashboard = ({ unifiedClient }) => {
@@ -19,6 +19,22 @@ const Dashboard = ({ unifiedClient }) => {
       onError: (err) => {
         toast.error('Failed to fetch system statistics');
         console.error('System stats error:', err);
+      },
+    }
+  );
+
+  // Query for historical metrics
+  const { data: metricsHistory } = useQuery(
+    'metricsHistory',
+    async () => {
+      if (!unifiedClient) return null;
+      return await unifiedClient.getMetricsHistory(60); // Last 60 minutes
+    },
+    {
+      enabled: !!unifiedClient,
+      refetchInterval: 30000, // Refetch every 30 seconds
+      onError: (err) => {
+        console.error('Metrics history error:', err);
       },
     }
   );
@@ -276,6 +292,95 @@ const Dashboard = ({ unifiedClient }) => {
           </div>
         </div>
       </div>
+
+      {/* Metrics Overview */}
+      {metricsHistory && metricsHistory.metrics && metricsHistory.metrics.length > 0 && (
+        <div className="metric-card">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+              <TrendingUp className="inline h-5 w-5 mr-2" />
+              Real-time Metrics Overview
+            </h3>
+            <div className="flex items-center space-x-2 text-sm text-gray-500 dark:text-gray-400">
+              <Database className="h-4 w-4" />
+              <span>{metricsHistory.collection_status?.total_points || 0} data points</span>
+            </div>
+          </div>
+          
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+            <div className="text-center p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+              <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">
+                {metricsHistory.collection_status?.active ? '🟢' : '🔴'}
+              </div>
+              <div className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                Collection Status
+              </div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">
+                {metricsHistory.collection_status?.active ? 'Active' : 'Inactive'}
+              </div>
+            </div>
+            
+            <div className="text-center p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+              <div className="text-2xl font-bold text-green-600 dark:text-green-400">
+                {metricsHistory.collection_status?.interval || 5}s
+              </div>
+              <div className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                Update Interval
+              </div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">
+                Real-time updates
+              </div>
+            </div>
+            
+            <div className="text-center p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+              <div className="text-2xl font-bold text-purple-600 dark:text-purple-400">
+                {metricsHistory.metrics.length}
+              </div>
+              <div className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                Recent Data Points
+              </div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">
+                Last 60 minutes
+              </div>
+            </div>
+          </div>
+          
+          {metricsHistory.metrics.length > 1 && (
+            <div className="space-y-3">
+              <h4 className="text-md font-medium text-gray-700 dark:text-gray-300">
+                <Zap className="inline h-4 w-4 mr-2" />
+                Performance Trends
+              </h4>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                <div className="text-center">
+                  <div className="font-medium text-gray-900 dark:text-white">
+                    {metricsHistory.metrics[metricsHistory.metrics.length - 1]?.cpu_percent?.toFixed(1) || 0}%
+                  </div>
+                  <div className="text-gray-500 dark:text-gray-400">Current CPU</div>
+                </div>
+                <div className="text-center">
+                  <div className="font-medium text-gray-900 dark:text-white">
+                    {metricsHistory.metrics[metricsHistory.metrics.length - 1]?.memory_percent?.toFixed(1) || 0}%
+                  </div>
+                  <div className="text-gray-500 dark:text-gray-400">Current Memory</div>
+                </div>
+                <div className="text-center">
+                  <div className="font-medium text-gray-900 dark:text-white">
+                    {metricsHistory.metrics[metricsHistory.metrics.length - 1]?.temperature?.toFixed(1) || 0}°C
+                  </div>
+                  <div className="text-gray-500 dark:text-gray-400">Current Temp</div>
+                </div>
+                <div className="text-center">
+                  <div className="font-medium text-gray-900 dark:text-white">
+                    {metricsHistory.metrics[metricsHistory.metrics.length - 1]?.disk_percent?.toFixed(1) || 0}%
+                  </div>
+                  <div className="text-gray-500 dark:text-gray-400">Current Disk</div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* System Status Summary */}
       <div className="metric-card">

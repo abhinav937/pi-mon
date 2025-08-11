@@ -267,6 +267,21 @@ class UnifiedClient {
   }
 
   /**
+   * Get metrics history
+   * @param {number} minutes - Number of minutes to look back
+   * @returns {Promise<Object>} Metrics history data
+   */
+  async getMetricsHistory(minutes = 60) {
+    try {
+      const response = await this.httpClient.get(`/api/metrics?minutes=${minutes}`);
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching metrics history:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Get services list
    * @returns {Promise<Array>} Services list
    */

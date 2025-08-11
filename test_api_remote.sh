@@ -76,13 +76,23 @@ run_test() {
             response_body=$(safe_curl -s -X POST -H "Content-Type: application/json" -d "$data" "$url" 2>/dev/null || echo "")
             status_code=$(safe_curl -s -o /dev/null -w "%{http_code}" -X POST -H "Content-Type: application/json" -d "$data" "$url" 2>/dev/null || echo "000")
         fi
-    else
+    elif [ "$method" = "OPTIONS" ]; then
+        # Handle OPTIONS requests (CORS preflight)
         if [ "$use_auth" = "true" ] && [ -n "$AUTH_TOKEN" ]; then
-            response_body=$(safe_curl -s -H "Authorization: Bearer $AUTH_TOKEN" "$url" 2>/dev/null || echo "")
-            status_code=$(safe_curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $AUTH_TOKEN" "$url" 2>/dev/null || echo "000")
+            response_body=$(safe_curl -s -X OPTIONS -H "Authorization: Bearer $AUTH_TOKEN" "$url" 2>/dev/null || echo "")
+            status_code=$(safe_curl -s -o /dev/null -w "%{http_code}" -X OPTIONS -H "Authorization: Bearer $AUTH_TOKEN" "$url" 2>/dev/null || echo "000")
         else
-            response_body=$(safe_curl -s "$url" 2>/dev/null || echo "")
-            status_code=$(safe_curl -s -o /dev/null -w "%{http_code}" "$url" 2>/dev/null || echo "000")
+            response_body=$(safe_curl -s -X OPTIONS "$url" 2>/dev/null || echo "")
+            status_code=$(safe_curl -s -o /dev/null -w "%{http_code}" -X OPTIONS "$url" 2>/dev/null || echo "000")
+        fi
+    else
+        # Handle GET and other methods
+        if [ "$use_auth" = "true" ] && [ -n "$AUTH_TOKEN" ]; then
+            response_body=$(safe_curl -s -X "$method" -H "Authorization: Bearer $AUTH_TOKEN" "$url" 2>/dev/null || echo "")
+            status_code=$(safe_curl -s -o /dev/null -w "%{http_code}" -X "$method" -H "Authorization: Bearer $AUTH_TOKEN" "$url" 2>/dev/null || echo "000")
+        else
+            response_body=$(safe_curl -s -X "$method" "$url" 2>/dev/null || echo "")
+            status_code=$(safe_curl -s -o /dev/null -w "%{http_code}" -X "$method" "$url" 2>/dev/null || echo "000")
         fi
     fi
     

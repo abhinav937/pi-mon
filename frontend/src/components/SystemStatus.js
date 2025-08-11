@@ -24,6 +24,25 @@ const SystemStatus = ({ unifiedClient }) => {
     }
   );
 
+  // Query for detailed system information
+  const { data: detailedInfo } = useQuery(
+    'detailedSystemInfo',
+    async () => {
+      if (!unifiedClient) return null;
+      try {
+        const response = await fetch(`${unifiedClient.serverUrl}/api/system/info`);
+        return await response.json();
+      } catch (error) {
+        console.error('Failed to fetch detailed system info:', error);
+        return null;
+      }
+    },
+    {
+      enabled: !!unifiedClient,
+      refetchInterval: 30000, // Refresh every 30 seconds
+    }
+  );
+
   // Listen for real-time updates
   useEffect(() => {
     if (!unifiedClient) return;
@@ -336,6 +355,98 @@ const SystemStatus = ({ unifiedClient }) => {
           </div>
         </div>
       </div>
+
+      {/* Detailed System Information */}
+      {detailedInfo && (
+        <div className="metric-card">
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+            Detailed System Information
+          </h3>
+          
+          {/* CPU Information */}
+          {detailedInfo.cpu_info && (
+            <div className="mb-6">
+              <h4 className="text-md font-medium text-gray-700 dark:text-gray-300 mb-3">CPU Details</h4>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="text-center p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                  <div className="text-lg font-bold text-blue-600 dark:text-blue-400">
+                    {detailedInfo.cpu_info.current_freq || 0} MHz
+                  </div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">Current Frequency</div>
+                </div>
+                <div className="text-center p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                  <div className="text-lg font-bold text-green-600 dark:text-green-400">
+                    {detailedInfo.cpu_info.model || 'Unknown'}
+                  </div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">CPU Model</div>
+                </div>
+                <div className="text-center p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                  <div className="text-lg font-bold text-purple-600 dark:text-purple-400">
+                    {detailedInfo.cpu_info.max_freq || 0} MHz
+                  </div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">Max Frequency</div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Memory Information */}
+          {detailedInfo.memory_info && (
+            <div className="mb-6">
+              <h4 className="text-md font-medium text-gray-700 dark:text-gray-300 mb-3">Memory Details</h4>
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div className="text-center p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                  <div className="text-lg font-bold text-blue-600 dark:text-blue-400">
+                    {detailedInfo.memory_info.total} GB
+                  </div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">Total RAM</div>
+                </div>
+                <div className="text-center p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                  <div className="text-lg font-bold text-green-600 dark:text-green-400">
+                    {detailedInfo.memory_info.available} GB
+                  </div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">Available</div>
+                </div>
+                <div className="text-center p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                  <div className="text-lg font-bold text-red-600 dark:text-red-400">
+                    {detailedInfo.memory_info.used} GB
+                  </div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">Used</div>
+                </div>
+                <div className="text-center p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                  <div className="text-lg font-bold text-purple-600 dark:text-purple-400">
+                    {detailedInfo.memory_info.percent}%
+                  </div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">Usage</div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Network Interfaces */}
+          {detailedInfo.network_interfaces && (
+            <div className="mb-6">
+              <h4 className="text-md font-medium text-gray-700 dark:text-gray-300 mb-3">Network Interfaces</h4>
+              <div className="space-y-3">
+                {Object.entries(detailedInfo.network_interfaces).map(([iface, config]) => (
+                  <div key={iface} className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                    <div className="font-medium text-gray-900 dark:text-white mb-2">{iface}</div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-sm">
+                      {config.addrs.map((addr, idx) => (
+                        <div key={idx} className="text-gray-600 dark:text-gray-400">
+                          <div>IP: {addr.addr}</div>
+                          <div>Netmask: {addr.netmask}</div>
+                          {addr.broadcast && <div>Broadcast: {addr.broadcast}</div>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };

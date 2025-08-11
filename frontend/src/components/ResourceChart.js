@@ -31,8 +31,11 @@ const ResourceChart = ({ unifiedClient }) => {
     cpu: { labels: [], data: [] },
     memory: { labels: [], data: [] },
     temperature: { labels: [], data: [] },
+    disk: { labels: [], data: [] },
+    network: { labels: [], data: [] },
   });
-  const maxDataPoints = 50;
+  const maxDataPoints = 100; // Increased for better visualization
+  const [timeRange, setTimeRange] = useState(60); // 60 minutes default
 
   // Listen for real-time updates
   useEffect(() => {
@@ -65,6 +68,12 @@ const ResourceChart = ({ unifiedClient }) => {
             newData.temperature.data = [...prevData.temperature.data, systemData.temperature].slice(-maxDataPoints);
           }
           
+          // Update Disk data
+          if (systemData.disk_percent !== undefined) {
+            newData.disk.labels = [...prevData.disk.labels, timestamp].slice(-maxDataPoints);
+            newData.disk.data = [...prevData.disk.data, systemData.disk_percent].slice(-maxDataPoints);
+          }
+          
           return newData;
         });
       }
@@ -75,6 +84,47 @@ const ResourceChart = ({ unifiedClient }) => {
       unifiedClient.onDataUpdate = originalOnDataUpdate;
     };
   }, [unifiedClient]);
+
+  // Fetch historical metrics data
+  useEffect(() => {
+    if (!unifiedClient) return;
+
+    const fetchHistoricalData = async () => {
+      try {
+        const response = await unifiedClient.getMetricsHistory(timeRange);
+        if (response && response.metrics) {
+          const metrics = response.metrics;
+          
+          setChartData(prevData => {
+            const newData = { ...prevData };
+            
+            // Process historical data
+            const labels = metrics.map(m => new Date(m.timestamp * 1000).toLocaleTimeString());
+            const cpuData = metrics.map(m => m.cpu_percent || 0);
+            const memoryData = metrics.map(m => m.memory_percent || 0);
+            const temperatureData = metrics.map(m => m.temperature || 0);
+            const diskData = metrics.map(m => m.disk_percent || 0);
+            
+            newData.cpu = { labels, data: cpuData };
+            newData.memory = { labels, data: memoryData };
+            newData.temperature = { labels, data: temperatureData };
+            newData.disk = { labels, data: diskData };
+            
+            return newData;
+          });
+        }
+      } catch (error) {
+        console.error('Failed to fetch historical metrics:', error);
+      }
+    };
+
+    fetchHistoricalData();
+    
+    // Set up interval to refresh historical data
+    const interval = setInterval(fetchHistoricalData, 30000); // Every 30 seconds
+    
+    return () => clearInterval(interval);
+  }, [unifiedClient, timeRange]);
 
   const getChartConfig = (metric) => {
     const isDarkMode = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
@@ -95,6 +145,11 @@ const ResourceChart = ({ unifiedClient }) => {
         border: 'rgb(239, 68, 68)',
         point: 'rgb(239, 68, 68)',
       },
+      disk: {
+        background: 'rgba(34, 197, 94, 0.1)',
+        border: 'rgb(34, 197, 94)',
+        point: 'rgb(34, 197, 94)',
+      },
     };
 
     return {
@@ -104,7 +159,8 @@ const ResourceChart = ({ unifiedClient }) => {
           {
             label: metric === 'cpu' ? 'CPU Usage (%)' : 
                    metric === 'memory' ? 'Memory Usage (%)' : 
-                   'Temperature (°C)',
+                   metric === 'temperature' ? 'Temperature (°C)' :
+                   'Disk Usage (%)',
             data: chartData[metric].data,
             borderColor: colors[metric].border,
             backgroundColor: colors[metric].background,
@@ -174,7 +230,8 @@ const ResourceChart = ({ unifiedClient }) => {
             display: true,
             title: {
               display: true,
-              text: metric === 'temperature' ? 'Temperature (°C)' : 'Usage (%)',
+              text: metric === 'temperature' ? 'Temperature (°C)' : 
+                  metric === 'disk' ? 'Disk Usage (%)' : 'Usage (%)',
               color: isDarkMode ? '#9ca3af' : '#6b7280',
             },
             min: 0,
@@ -204,6 +261,7 @@ const ResourceChart = ({ unifiedClient }) => {
     { id: 'cpu', name: 'CPU Usage', icon: Activity, color: 'text-blue-600' },
     { id: 'memory', name: 'Memory Usage', icon: BarChart3, color: 'text-purple-600' },
     { id: 'temperature', name: 'Temperature', icon: TrendingUp, color: 'text-red-600' },
+    { id: 'disk', name: 'Disk Usage', icon: HardDrive, color: 'text-green-600' },
   ];
 
   const chartConfig = getChartConfig(selectedMetric);
@@ -240,6 +298,32 @@ const ResourceChart = ({ unifiedClient }) => {
             </button>
           );
         })}
+      </div>
+
+      {/* Time Range Selector */}
+      <div className="flex items-center justify-between bg-gray-50 dark:bg-gray-800 p-4 rounded-lg">
+        <div className="flex items-center space-x-4">
+          <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Time Range:</span>
+          <div className="flex space-x-2">
+            {[15, 30, 60, 120].map((minutes) => (
+              <button
+                key={minutes}
+                onClick={() => setTimeRange(minutes)}
+                className={`px-3 py-1 text-sm rounded-md transition-colors duration-200 ${
+                  timeRange === minutes
+                    ? 'bg-blue-500 text-white'
+                    : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600'
+                }`}
+              >
+                {minutes}m
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="text-sm text-gray-500 dark:text-gray-400">
+          <Database className="inline h-4 w-4 mr-1" />
+          Historical data from backend
+        </div>
       </div>
 
       {/* Chart Container */}

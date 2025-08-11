@@ -368,10 +368,25 @@ if [[ ! -f "$COMPOSE_FILE" ]]; then
     exit 1
 fi
 
-# Step 3: Simple port cleanup
+# Step 3: Enhanced port and service cleanup
 if [[ "$QUICK_MODE" == false ]]; then
     echo ""
     echo -e "${BLUE}🧹 Cleaning up conflicting services and ports...${NC}"
+    
+    # First stop existing Docker containers
+    echo -e "${YELLOW}  🐳 Stopping existing Docker containers...${NC}"
+    
+    # Stop pi-monitor containers specifically
+    if docker ps -q --filter "name=pi-monitor" | grep -q .; then
+        echo "    Stopping pi-monitor containers..."
+        docker kill $(docker ps -q --filter "name=pi-monitor") 2>/dev/null || true
+    fi
+    
+    # Remove pi-monitor containers
+    if docker ps -aq --filter "name=pi-monitor" | grep -q .; then
+        echo "    Removing pi-monitor containers..."
+        docker rm -f $(docker ps -aq --filter "name=pi-monitor") 2>/dev/null || true
+    fi
     
     # Stop common system services that conflict
     echo -e "${YELLOW}  🛑 Stopping system services...${NC}"
@@ -379,51 +394,96 @@ if [[ "$QUICK_MODE" == false ]]; then
         if systemctl is-active --quiet "$service" 2>/dev/null; then
             echo "    Stopping $service..."
             sudo systemctl stop "$service" 2>/dev/null || true
+            # Also disable it temporarily to prevent auto-restart
+            sudo systemctl stop "$service.socket" 2>/dev/null || true
         fi
     done
     
-    # Kill Python processes
-    echo -e "${YELLOW}  🐍 Stopping Python processes...${NC}"
-    pkill -f "uvicorn\|gunicorn\|main_server" 2>/dev/null || true
+    # Kill processes by name (more reliable)
+    echo -e "${YELLOW}  💀 Killing conflicting processes...${NC}"
+    sudo pkill -f "mosquitto" 2>/dev/null || true
+    sudo pkill -f "redis-server" 2>/dev/null || true
+    sudo pkill -f "uvicorn\|gunicorn\|main_server" 2>/dev/null || true
     
-    # Simple port cleanup
-    echo -e "${YELLOW}  🔌 Freeing up ports...${NC}"
+    # Force kill processes using specific ports
+    echo -e "${YELLOW}  🔌 Freeing up ports forcefully...${NC}"
     for port in 6379 1883 5000 5001 80 9001 3000; do
+        echo "    Freeing port $port..."
         sudo fuser -k ${port}/tcp 2>/dev/null || true
+        # Wait a moment for processes to die
+        sleep 0.5
+        # Double-check and force kill if needed
+        if sudo netstat -tulpn 2>/dev/null | grep -q ":$port "; then
+            echo "    Force killing remaining processes on port $port..."
+            sudo lsof -ti:$port | xargs -r sudo kill -9 2>/dev/null || true
+        fi
     done
     
-    sleep 3
+    # Give processes time to fully terminate
+    sleep 5
     echo -e "${GREEN}    ✅ Cleanup completed${NC}"
 else
     log_verbose "Skipping service checks (quick mode)"
 fi
 
-# Step 4: Quick port check
+# Step 4: Enhanced port verification
 if [[ "$QUICK_MODE" == false ]]; then
     echo ""
-    echo -e "${BLUE}🔍 Checking if key ports are free...${NC}"
+    echo -e "${BLUE}🔍 Verifying ports are free...${NC}"
     
-    # Check critical ports - if still busy, show simple message
+    # Check critical ports with detailed information
     busy_ports=""
     for port in 6379 1883 5001 80; do
         if check_port "$port"; then
             busy_ports="$busy_ports $port"
+            echo -e "${RED}    ❌ Port $port still in use:${NC}"
+            find_port_user "$port" | sed 's/^/      /'
+        else
+            echo -e "${GREEN}    ✅ Port $port is free${NC}"
         fi
     done
     
     if [[ -n "$busy_ports" ]]; then
-        echo -e "${YELLOW}⚠️  Ports still in use:$busy_ports${NC}"
-        echo -e "${YELLOW}   This might cause deployment issues, but continuing anyway...${NC}"
+        echo ""
+        echo -e "${RED}⚠️  Critical ports still in use:$busy_ports${NC}"
+        echo -e "${YELLOW}   This WILL cause deployment failures!${NC}"
+        echo ""
+        echo -e "${CYAN}🔧 To fix this, run these commands:${NC}"
+        for port in $busy_ports; do
+            case $port in
+                1883)
+                    echo "    sudo systemctl stop mosquitto"
+                    echo "    sudo pkill -f mosquitto"
+                    echo "    sudo fuser -k 1883/tcp"
+                    ;;
+                6379)
+                    echo "    sudo systemctl stop redis-server"
+                    echo "    sudo pkill -f redis-server"
+                    echo "    sudo fuser -k 6379/tcp"
+                    ;;
+                80)
+                    echo "    sudo systemctl stop nginx apache2"
+                    echo "    sudo fuser -k 80/tcp"
+                    ;;
+                5001|5000)
+                    echo "    sudo pkill -f 'uvicorn\|gunicorn\|main_server'"
+                    echo "    sudo fuser -k $port/tcp"
+                    ;;
+            esac
+        done
+        echo ""
+        
         if [[ "$SKIP_CONFIRMATION" == false ]]; then
-            read -p "Continue? (y/N): " -n 1 -r
+            read -p "Continue anyway? (y/N): " -n 1 -r
             echo
             if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-                echo "Deployment cancelled."
+                echo "Deployment cancelled. Fix the port conflicts and try again."
                 exit 1
             fi
+            echo -e "${YELLOW}⚠️  Proceeding despite port conflicts - expect errors!${NC}"
         fi
     else
-        echo -e "${GREEN}✅ All critical ports are free${NC}"
+        echo -e "${GREEN}✅ All critical ports are free and ready${NC}"
     fi
 fi
 
@@ -448,11 +508,24 @@ if [[ "$SKIP_CLEANUP" == false ]]; then
         echo -e "${YELLOW}  🛑 Stopping pi-mon services...${NC}"
         $COMPOSE_CMD down --remove-orphans -v 2>/dev/null || true
         
+        # Additional cleanup for stubborn containers
+        echo -e "${YELLOW}  🧹 Cleaning up containers and images...${NC}"
+        
+        # Force remove any remaining pi-monitor containers
+        if docker ps -aq --filter "name=pi-monitor" | grep -q .; then
+            echo "    Force removing remaining pi-monitor containers..."
+            docker rm -f $(docker ps -aq --filter "name=pi-monitor") 2>/dev/null || true
+        fi
+        
         echo -e "${YELLOW}  🗑️  Removing old images...${NC}"
         docker images --filter "reference=*pi-monitor*" -q | xargs -r docker rmi -f 2>/dev/null || true
         
+        # Clean up any dangling images and networks
         echo -e "${YELLOW}  🧽 Quick system cleanup...${NC}"
         docker system prune -f 2>/dev/null || true
+        
+        # Remove any pi-monitor networks
+        docker network ls --filter "name=pi-monitor" -q | xargs -r docker network rm 2>/dev/null || true
         
         echo -e "${GREEN}✅ Docker cleanup done${NC}"
     fi

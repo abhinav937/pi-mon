@@ -8,8 +8,7 @@ services:
       dockerfile: ./backend/Dockerfile
     container_name: pi-monitor-backend
     restart: unless-stopped
-    ports:
-      - "5001:5001"
+    network_mode: host
     environment:
       - PORT=5001
     healthcheck:
@@ -18,11 +17,6 @@ services:
       timeout: 5s
       retries: 5
       start_period: 15s
-    networks:
-      pi-monitor-network:
-        aliases:
-          - backend
-          - backend-service
     logging:
       driver: "json-file"
       options:
@@ -36,8 +30,7 @@ services:
       dockerfile: Dockerfile
     container_name: pi-monitor-frontend
     restart: unless-stopped
-    ports:
-      - "80:80"
+    network_mode: host
     environment:
       - REACT_APP_SERVER_URL=dynamic
     depends_on:
@@ -49,22 +42,10 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
-    networks:
-      pi-monitor-network:
-        aliases:
-          - frontend
-          - frontend-service
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
-
-networks:
-  pi-monitor-network:
-    driver: bridge
-    ipam:
-      config:
-        - subnet: 172.20.0.0/16
 
 volumes: {}

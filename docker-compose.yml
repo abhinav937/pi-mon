@@ -1,45 +1,7 @@
 version: '3.8'
 
 services:
-  # Redis - Caching and session storage
-  redis:
-    image: redis:7-alpine
-    container_name: pi-monitor-redis
-    restart: unless-stopped
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-pimonitor123}
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 30s
-      timeout: 3s
-      retries: 3
-    networks:
-      - pi-monitor-network
-
-  # Mosquitto MQTT Broker
-  mosquitto:
-    image: eclipse-mosquitto:2
-    container_name: pi-monitor-mosquitto
-    restart: unless-stopped
-    ports:
-      - "1883:1883"
-      - "9001:9001"
-    volumes:
-      - mosquitto_data:/mosquitto/data
-      - mosquitto_logs:/mosquitto/log
-      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
-    healthcheck:
-      test: ["CMD", "mosquitto_pub", "-h", "localhost", "-t", "test", "-m", "health_check", "-u", "${MQTT_USERNAME:-pimonitor}", "-P", "${MQTT_PASSWORD:-pimonitor123}"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-    networks:
-      - pi-monitor-network
-
-  # Backend FastAPI Application
+  # Backend Simple HTTP Server
   backend:
     build:
       context: ./backend
@@ -49,30 +11,13 @@ services:
     ports:
       - "5001:5001"
     environment:
-      - JWT_SECRET=${JWT_SECRET:-your-super-secret-jwt-key-change-in-production}
-      - JWT_ALGORITHM=${JWT_ALGORITHM:-HS256}
-      - JWT_EXPIRATION_HOURS=${JWT_EXPIRATION_HOURS:-24}
-      - MQTT_BROKER=mosquitto
-      - MQTT_PORT=1883
-      - MQTT_USERNAME=${MQTT_USERNAME:-pimonitor}
-      - MQTT_PASSWORD=${MQTT_PASSWORD:-pimonitor123}
-      - REDIS_URL=redis://redis:6379
-      - REDIS_PASSWORD=${REDIS_PASSWORD:-pimonitor123}
-      - BACKEND_PORT=5001
-      - PYTHONPATH=/app
-    volumes:
-      - ./backend/logs:/app/logs
-    depends_on:
-      redis:
-        condition: service_healthy
-      mosquitto:
-        condition: service_healthy
+      - PORT=5001
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
+      start_period: 10s
     networks:
       - pi-monitor-network
     logging:
@@ -98,7 +43,7 @@ services:
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80/"]
       interval: 30s
-      timeout: 3s
+      timeout: 10s
       retries: 3
     networks:
       - pi-monitor-network
@@ -108,45 +53,8 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # Optional: Pi Agent (runs system monitoring and publishes to MQTT)
-  # Uncomment if you want to run the Pi monitoring agent in a container
-  # Note: This requires privileged access to monitor the host system
-  # pi-agent:
-  #   build:
-  #     context: ./backend
-  #     dockerfile: Dockerfile
-  #   container_name: pi-monitor-agent
-  #   restart: unless-stopped
-  #   command: ["python", "agent.py"]
-  #   environment:
-  #     - MQTT_BROKER=mosquitto
-  #     - MQTT_PORT=1883
-  #     - MQTT_USERNAME=${MQTT_USERNAME:-pimonitor}
-  #     - MQTT_PASSWORD=${MQTT_PASSWORD:-pimonitor123}
-  #     - PUBLISH_INTERVAL=${PUBLISH_INTERVAL:-5.0}
-  #     - DEVICE_NAME=${DEVICE_NAME:-raspberry-pi}
-  #   privileged: true
-  #   volumes:
-  #     - /proc:/host/proc:ro
-  #     - /sys:/host/sys:ro
-  #     - /:/host/root:ro
-  #   depends_on:
-  #     mosquitto:
-  #       condition: service_healthy
-  #   networks:
-  #     - pi-monitor-network
-
-volumes:
-  redis_data:
-    driver: local
-  mosquitto_data:
-    driver: local
-  mosquitto_logs:
-    driver: local
-
 networks:
   pi-monitor-network:
     driver: bridge
-    ipam:
-      config:
-        - subnet: 172.20.0.0/16
+
+volumes: {}

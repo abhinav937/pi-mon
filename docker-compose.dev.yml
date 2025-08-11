@@ -1,71 +1,65 @@
-# Pi Monitor - Development Mode Override
-# This file extends docker-compose.yml for development use
-
 version: '3.8'
 
 services:
-  # Backend with development settings
+  # Backend Simple HTTP Server (Development)
   backend:
-    environment:
-      - NODE_ENV=development
-      - DEBUG=true
-      - LOG_LEVEL=debug
-      - RELOAD=true
-    volumes:
-      # Mount source code for live editing
-      - ./backend:/app:rw
-      # Keep node_modules in container
-      - /app/node_modules
-    command: uvicorn main_server:combined_app --host 0.0.0.0 --port 5001 --reload --log-level debug
-    # Disable health check in dev mode for faster startup
-    healthcheck:
-      disable: true
-
-  # Frontend with development settings
-  frontend:
-    environment:
-      - NODE_ENV=development
-      - REACT_APP_ENV=development
-      - CHOKIDAR_USEPOLLING=true
-      - FAST_REFRESH=true
-      - GENERATE_SOURCEMAP=true
-    volumes:
-      # Mount source code for live editing
-      - ./frontend/src:/app/src:rw
-      - ./frontend/public:/app/public:rw
-      # Keep node_modules in container
-      - /app/node_modules
-    # Disable health check in dev mode for faster startup
-    healthcheck:
-      disable: true
-    # Expose additional port for development server
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: pi-monitor-backend-dev
+    restart: unless-stopped
     ports:
-      - "80:80"
-      - "3000:3000"  # React dev server (if using)
-
-  # Redis with development settings
-  redis:
-    # Use simpler password in dev
-    command: redis-server --appendonly yes --requirepass devpassword
-    
-  # Mosquitto with less restrictive settings for dev
-  mosquitto:
+      - "5001:5001"
+    environment:
+      - PORT=5001
     volumes:
-      - mosquitto_data:/mosquitto/data
-      - mosquitto_logs:/mosquitto/log
-      - ./mosquitto/mosquitto.dev.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./backend:/app
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - pi-monitor-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
-# Development-specific volumes
-volumes:
-  mosquitto_data:
-    driver: local
-  mosquitto_logs:
-    driver: local
+  # Frontend React Application (Development)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: pi-monitor-frontend-dev
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_SERVER_URL=http://localhost:5001
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - pi-monitor-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
-# Development network with custom subnet for easier debugging
 networks:
   pi-monitor-network:
     driver: bridge
-    ipam:
-      config:
-        - subnet: 172.21.0.0/16
+
+volumes: {}

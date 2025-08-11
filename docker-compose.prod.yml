@@ -1,155 +1,60 @@
-# Pi Monitor - Production Mode Override
-# This file extends docker-compose.yml for production use
-
 version: '3.8'
 
 services:
-  # Backend with production optimizations
+  # Backend Simple HTTP Server (Production)
   backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: pi-monitor-backend-prod
+    restart: unless-stopped
+    ports:
+      - "5001:5001"
     environment:
-      - NODE_ENV=production
-      - DEBUG=false
-      - LOG_LEVEL=info
-      - WORKERS=2  # Multiple workers for production
-    # Production command with multiple workers
-    command: uvicorn main_server:combined_app --host 0.0.0.0 --port 5001 --workers 2 --log-level info
-    # Stricter resource limits in production
-    deploy:
-      resources:
-        limits:
-          memory: 512M
-          cpus: '1.0'
-        reservations:
-          memory: 256M
-          cpus: '0.5'
-    # Production restart policy
-    restart: always
-    # More frequent health checks
+      - PORT=5001
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-    # Production logging
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - pi-monitor-network
     logging:
       driver: "json-file"
       options:
-        max-size: "5m"
-        max-file: "5"
-        compress: "true"
+        max-size: "10m"
+        max-file: "3"
 
-  # Frontend with production optimizations
+  # Frontend React Application with Nginx (Production)
   frontend:
-    environment:
-      - NODE_ENV=production
-      - REACT_APP_ENV=production
-      - GENERATE_SOURCEMAP=false
-    # Production build with optimizations
     build:
       context: ./frontend
       dockerfile: Dockerfile
-      args:
-        - NODE_ENV=production
-        - BUILD_MODE=production
-    # Resource limits
-    deploy:
-      resources:
-        limits:
-          memory: 256M
-          cpus: '0.5'
-        reservations:
-          memory: 128M
-          cpus: '0.25'
-    restart: always
-    # More frequent health checks
+    container_name: pi-monitor-frontend-prod
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    environment:
+      - REACT_APP_SERVER_URL=dynamic
+    depends_on:
+      backend:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80/"]
-      interval: 15s
-      timeout: 3s
-      retries: 5
-    # Production logging
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - pi-monitor-network
     logging:
       driver: "json-file"
       options:
-        max-size: "5m"
-        max-file: "5"
-        compress: "true"
+        max-size: "10m"
+        max-file: "3"
 
-  # Redis with production settings
-  redis:
-    # Stronger password and persistence settings
-    command: redis-server --appendonly yes --save 900 1 --save 300 10 --save 60 10000 --requirepass ${REDIS_PASSWORD:-prodpassword123}
-    # Resource limits
-    deploy:
-      resources:
-        limits:
-          memory: 256M
-          cpus: '0.5'
-    restart: always
-    # Production volumes with backup considerations
-    volumes:
-      - redis_data:/data:rw
-      - ./backups/redis:/backup:rw
-    # Production logging
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "5m"
-        max-file: "5"
-        compress: "true"
-
-  # Mosquitto with production security
-  mosquitto:
-    volumes:
-      - mosquitto_data:/mosquitto/data
-      - mosquitto_logs:/mosquitto/log
-      - ./mosquitto/mosquitto.prod.conf:/mosquitto/config/mosquitto.conf:ro
-      - ./mosquitto/passwd:/mosquitto/config/passwd:ro  # Production password file
-    deploy:
-      resources:
-        limits:
-          memory: 128M
-          cpus: '0.25'
-    restart: always
-    # Production logging
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "5m"
-        max-file: "5"
-        compress: "true"
-
-# Production logging configuration handled inline for each service
-
-# Production volumes with backup strategy
-volumes:
-  redis_data:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: /opt/pi-monitor/data/redis
-  mosquitto_data:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: /opt/pi-monitor/data/mosquitto
-  mosquitto_logs:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: /opt/pi-monitor/logs/mosquitto
-
-# Production network with security considerations
 networks:
   pi-monitor-network:
     driver: bridge
-    ipam:
-      config:
-        - subnet: 172.20.0.0/16
-    # Enable encryption for production (if supported)
-    driver_opts:
-      encrypted: "true"
+
+volumes: {}

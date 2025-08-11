@@ -37,27 +37,34 @@ class SystemMonitor:
         """Get CPU usage percentage"""
         try:
             # Use psutil with a short interval for responsiveness
-            return psutil.cpu_percent(interval=interval)
+            cpu_percent = psutil.cpu_percent(interval=interval)
+            logger.debug("CPU percentage retrieved", cpu_percent=cpu_percent)
+            return cpu_percent
         except Exception as e:
-            logger.warning("Error getting CPU percentage", error=str(e))
+            logger.error("Error getting CPU percentage", error=str(e))
             return 0.0
     
     async def get_memory_stats(self) -> float:
         """Get memory usage percentage"""
         try:
             memory = psutil.virtual_memory()
+            logger.debug("Memory stats retrieved", percent=memory.percent, 
+                        total=memory.total, used=memory.used, available=memory.available)
             return memory.percent
         except Exception as e:
-            logger.warning("Error getting memory stats", error=str(e))
+            logger.error("Error getting memory stats", error=str(e))
             return 0.0
     
     async def get_disk_usage(self, path: str = "/") -> float:
         """Get disk usage percentage"""
         try:
             disk = psutil.disk_usage(path)
-            return (disk.used / disk.total) * 100
+            percent = (disk.used / disk.total) * 100
+            logger.debug("Disk usage retrieved", path=path, percent=percent,
+                        total=disk.total, used=disk.used, free=disk.free)
+            return percent
         except Exception as e:
-            logger.warning("Error getting disk usage", error=str(e), path=path)
+            logger.error("Error getting disk usage", error=str(e), path=path)
             return 0.0
     
     async def get_temperature(self) -> float:
@@ -76,15 +83,21 @@ class SystemMonitor:
                 # Parse "temp=XX.X'C" format
                 if 'temp=' in temp_str:
                     temp_value = temp_str.split('=')[1].replace("'C", "")
-                    return float(temp_value)
+                    temp = float(temp_value)
+                    logger.debug("Temperature retrieved via vcgencmd", temperature=temp)
+                    return temp
+            else:
+                logger.debug("vcgencmd failed", returncode=result.returncode, stderr=stderr.decode())
             
             # Fallback: try thermal zone
             with open('/sys/class/thermal/thermal_zone0/temp', 'r') as f:
                 temp_millicelsius = int(f.read().strip())
-                return temp_millicelsius / 1000.0
+                temp = temp_millicelsius / 1000.0
+                logger.debug("Temperature retrieved via thermal zone", temperature=temp)
+                return temp
                 
         except Exception as e:
-            logger.warning("Error getting temperature", error=str(e))
+            logger.debug("Primary temperature methods failed", error=str(e))
             # Try alternate methods
             try:
                 # Try psutil sensors (may work on some systems)
@@ -92,9 +105,14 @@ class SystemMonitor:
                 if temps:
                     for name, entries in temps.items():
                         if entries:
-                            return entries[0].current
+                            temp = entries[0].current
+                            logger.debug("Temperature retrieved via psutil sensors", 
+                                       sensor=name, temperature=temp)
+                            return temp
+                logger.debug("No psutil temperature sensors found")
                 return 0.0
-            except:
+            except Exception as e2:
+                logger.warning("All temperature methods failed", error=str(e), psutil_error=str(e2))
                 return 0.0
     
     async def get_uptime(self) -> str:
@@ -153,6 +171,8 @@ class SystemMonitor:
     
     async def get_system_stats(self) -> SystemStats:
         """Get comprehensive system statistics"""
+        logger.debug("Starting system stats collection")
+        
         try:
             # Gather all metrics concurrently for better performance
             cpu_task = asyncio.create_task(self.get_cpu_percent(interval=0.1))
@@ -169,6 +189,21 @@ class SystemMonitor:
             temperature = await temp_task
             uptime = await uptime_task
             network = await network_task
+            
+            # Check for anomalies
+            zero_count = sum([
+                1 for val in [cpu_percent, memory_percent, disk_percent, temperature] 
+                if val == 0.0
+            ])
+            
+            if zero_count >= 3:
+                logger.warning("Multiple system metrics returning zero - possible monitoring issue",
+                             cpu=cpu_percent, memory=memory_percent, disk=disk_percent, 
+                             temperature=temperature, zero_count=zero_count)
+            else:
+                logger.info("System stats collected successfully", 
+                           cpu=cpu_percent, memory=memory_percent, disk=disk_percent, 
+                           temperature=temperature, uptime=uptime)
             
             return SystemStats(
                 timestamp=datetime.utcnow().isoformat(),

@@ -200,6 +200,43 @@ fi
 sudo mkdir -p /var/log/journal
 sudo systemd-tmpfiles --create --prefix /var/log/journal
 
+# Configure sudo permissions for pi-monitor service (for future deployment)
+echo -e "${BLUE}🔐 Pre-configuring sudo permissions for pi-monitor service...${NC}"
+SERVICE_USER="pimonitor"
+
+# Create the sudoers configuration (will be used when service is deployed)
+cat > /tmp/pi-monitor-sudoers << EOF
+# Pi Monitor Service Permissions
+# Allow pimonitor user to run specific system commands without password
+
+# Service management commands
+$SERVICE_USER ALL=(ALL) NOPASSWD: /bin/systemctl status *
+$SERVICE_USER ALL=(ALL) NOPASSWD: /bin/systemctl start *
+$SERVICE_USER ALL=(ALL) NOPASSWD: /bin/systemctl stop *
+$SERVICE_USER ALL=(ALL) NOPASSWD: /bin/systemctl restart *
+$SERVICE_USER ALL=(ALL) NOPASSWD: /bin/systemctl reload *
+$SERVICE_USER ALL=(ALL) NOPASSWD: /bin/systemctl enable *
+$SERVICE_USER ALL=(ALL) NOPASSWD: /bin/systemctl disable *
+$SERVICE_USER ALL=(ALL) NOPASSWD: /bin/systemctl is-enabled *
+$SERVICE_USER ALL=(ALL) NOPASSWD: /bin/systemctl is-active *
+$SERVICE_USER ALL=(ALL) NOPASSWD: /bin/systemctl list-units *
+$SERVICE_USER ALL=(ALL) NOPASSWD: /bin/systemctl --failed *
+
+# Power management commands
+$SERVICE_USER ALL=(ALL) NOPASSWD: /bin/systemctl poweroff
+$SERVICE_USER ALL=(ALL) NOPASSWD: /bin/systemctl reboot
+$SERVICE_USER ALL=(ALL) NOPASSWD: /sbin/shutdown
+$SERVICE_USER ALL=(ALL) NOPASSWD: /sbin/reboot
+
+# Network and system info commands (read-only)
+$SERVICE_USER ALL=(ALL) NOPASSWD: /bin/cat /proc/cpuinfo
+$SERVICE_USER ALL=(ALL) NOPASSWD: /bin/cat /sys/class/thermal/thermal_zone*/temp
+$SERVICE_USER ALL=(ALL) NOPASSWD: /usr/bin/vcgencmd *
+EOF
+
+# We'll install this during backend deployment, for now just prepare it
+echo -e "${GREEN}✅ Sudo permissions configuration prepared${NC}"
+
 # Final system check
 echo -e "${BLUE}🔍 Running system check...${NC}"
 echo "Docker version: $(docker --version 2>/dev/null || echo 'Not available')"
@@ -207,6 +244,14 @@ echo "Docker Compose version: $(docker-compose --version 2>/dev/null || echo 'No
 echo "Python version: $(python3 --version)"
 echo "Redis status: $(systemctl is-active redis-server 2>/dev/null || echo 'Not running')"
 echo "Mosquitto status: $(systemctl is-active mosquitto 2>/dev/null || echo 'Not running')"
+
+# Copy diagnostic scripts to backend directory
+echo -e "${BLUE}📋 Setting up diagnostic tools...${NC}"
+cp backend/test_system_monitoring.py backend/test_system_monitoring.py.bak 2>/dev/null || true
+cp backend/diagnose_pi_monitor.py backend/diagnose_pi_monitor.py.bak 2>/dev/null || true
+chmod +x backend/test_system_monitoring.py 2>/dev/null || true
+chmod +x backend/diagnose_pi_monitor.py 2>/dev/null || true
+echo -e "${GREEN}✅ Diagnostic tools ready${NC}"
 
 echo ""
 echo -e "${GREEN}🎉 Pi Monitor System Setup Complete!${NC}"
@@ -216,6 +261,11 @@ echo "1. Log out and back in (or run 'newgrp docker') to use Docker without sudo
 echo "2. Run backend deployment: 'cd backend && sudo ./deploy_backend.sh'"
 echo "3. Run frontend deployment: 'cd frontend && ./deploy_frontend.sh'"
 echo "4. Or run full stack with Docker: 'docker-compose up -d'"
+echo ""
+echo -e "${BLUE}If you experience API issues after deployment:${NC}"
+echo "• Run diagnostics: 'cd backend && python3 diagnose_pi_monitor.py'"
+echo "• Test monitoring: 'cd backend && python3 test_system_monitoring.py'"
+echo "• Check service logs: 'sudo journalctl -u pi-monitor -f'"
 echo ""
 echo -e "${BLUE}Testing:${NC}"
 echo "• Test Redis: redis-cli -a pimonitor123 ping"

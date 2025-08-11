@@ -196,6 +196,54 @@ else
     systemctl status pi-monitor-agent.service --no-pager --lines=5
 fi
 
+# Configure sudo permissions for pi-monitor service
+echo -e "${BLUE}🔐 Configuring sudo permissions...${NC}"
+if [ -f "/tmp/pi-monitor-sudoers" ]; then
+    # Install the sudoers file prepared by setup.sh
+    sudo cp /tmp/pi-monitor-sudoers /etc/sudoers.d/pi-monitor
+    sudo chmod 440 /etc/sudoers.d/pi-monitor
+    
+    # Validate sudoers syntax
+    if sudo visudo -c -f /etc/sudoers.d/pi-monitor; then
+        echo -e "${GREEN}✅ Sudo permissions configured successfully${NC}"
+        rm -f /tmp/pi-monitor-sudoers
+    else
+        echo -e "${RED}❌ Invalid sudoers configuration${NC}"
+        rm -f /etc/sudoers.d/pi-monitor /tmp/pi-monitor-sudoers
+    fi
+else
+    # Create sudoers configuration directly
+    cat > /etc/sudoers.d/pi-monitor << EOF
+# Pi Monitor Service Permissions
+$SERVICE_USER ALL=(ALL) NOPASSWD: /bin/systemctl status *
+$SERVICE_USER ALL=(ALL) NOPASSWD: /bin/systemctl start *
+$SERVICE_USER ALL=(ALL) NOPASSWD: /bin/systemctl stop *
+$SERVICE_USER ALL=(ALL) NOPASSWD: /bin/systemctl restart *
+$SERVICE_USER ALL=(ALL) NOPASSWD: /bin/systemctl reload *
+$SERVICE_USER ALL=(ALL) NOPASSWD: /bin/systemctl enable *
+$SERVICE_USER ALL=(ALL) NOPASSWD: /bin/systemctl disable *
+$SERVICE_USER ALL=(ALL) NOPASSWD: /bin/systemctl is-enabled *
+$SERVICE_USER ALL=(ALL) NOPASSWD: /bin/systemctl is-active *
+$SERVICE_USER ALL=(ALL) NOPASSWD: /bin/systemctl list-units *
+$SERVICE_USER ALL=(ALL) NOPASSWD: /bin/systemctl --failed *
+$SERVICE_USER ALL=(ALL) NOPASSWD: /bin/systemctl poweroff
+$SERVICE_USER ALL=(ALL) NOPASSWD: /bin/systemctl reboot
+$SERVICE_USER ALL=(ALL) NOPASSWD: /sbin/shutdown
+$SERVICE_USER ALL=(ALL) NOPASSWD: /sbin/reboot
+$SERVICE_USER ALL=(ALL) NOPASSWD: /bin/cat /proc/cpuinfo
+$SERVICE_USER ALL=(ALL) NOPASSWD: /bin/cat /sys/class/thermal/thermal_zone*/temp
+$SERVICE_USER ALL=(ALL) NOPASSWD: /usr/bin/vcgencmd *
+EOF
+    chmod 440 /etc/sudoers.d/pi-monitor
+    
+    if visudo -c -f /etc/sudoers.d/pi-monitor; then
+        echo -e "${GREEN}✅ Sudo permissions configured${NC}"
+    else
+        echo -e "${RED}❌ Invalid sudoers configuration${NC}"
+        rm -f /etc/sudoers.d/pi-monitor
+    fi
+fi
+
 # Create log rotation
 echo -e "${BLUE}📋 Setting up log rotation...${NC}"
 cat > /etc/logrotate.d/pi-monitor << EOF

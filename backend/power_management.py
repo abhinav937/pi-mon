@@ -34,20 +34,43 @@ class PowerManager:
             logger.info("Power management initialized for Windows", os_type=self.os_type)
         else:
             try:
-                # Check if we can run systemctl commands (Linux)
+                # First check if systemctl is available (without sudo)
                 result = subprocess.run(
-                    ['sudo', '-n', 'systemctl', '--version'], 
+                    ['systemctl', '--version'], 
                     capture_output=True, 
                     text=True, 
                     timeout=5
                 )
-                self.has_systemctl = (result.returncode == 0)
-                self.has_power_commands = self.has_systemctl
-                logger.info("Power management initialized for Linux", has_systemctl=self.has_systemctl)
+                if result.returncode == 0:
+                    self.has_systemctl = True
+                    # Check if we can run sudo commands (for power operations)
+                    try:
+                        sudo_result = subprocess.run(
+                            ['sudo', '-n', 'systemctl', '--version'], 
+                            capture_output=True, 
+                            text=True, 
+                            timeout=5
+                        )
+                        self.has_sudo_privileges = (sudo_result.returncode == 0)
+                        self.has_power_commands = self.has_sudo_privileges
+                    except Exception:
+                        self.has_sudo_privileges = False
+                        self.has_power_commands = False
+                    
+                    logger.info("Power management initialized for Linux", 
+                              has_systemctl=self.has_systemctl, 
+                              has_sudo=self.has_sudo_privileges,
+                              can_execute_power_commands=self.has_power_commands)
+                else:
+                    self.has_systemctl = False
+                    self.has_power_commands = False
+                    self.has_sudo_privileges = False
+                    logger.warning("systemctl not available")
             except Exception as e:
                 self.has_systemctl = False
                 self.has_power_commands = False
-                logger.warning("systemctl not available or no sudo privileges", error=str(e))
+                self.has_sudo_privileges = False
+                logger.warning("systemctl not available", error=str(e))
     
     async def execute_action(self, action: str, delay: int = 0) -> str:
         """
@@ -70,7 +93,7 @@ class PowerManager:
         
         logger.info("Power action requested", action=action, delay=delay, os_type=self.os_type)
         
-        # For development/non-Pi environments, simulate the action
+        # For development/non-Pi environments or without sudo, simulate the action
         if self.is_windows or not self.has_power_commands:
             return await self._simulate_action(action, delay)
         
@@ -81,13 +104,15 @@ class PowerManager:
     
     async def _simulate_action(self, action: str, delay: int) -> str:
         """Simulate power action for development/non-Pi environments"""
-        logger.info(f"Simulating {action} action for development environment", 
-                   action=action, delay=delay, os_type=self.os_type)
+        reason = "insufficient privileges" if self.is_linux and not self.has_power_commands else self.os_type
+        logger.info(f"Simulating {action} action", 
+                   action=action, delay=delay, os_type=self.os_type, 
+                   has_sudo=getattr(self, 'has_sudo_privileges', False))
         
         if delay > 0:
-            return f"[SIMULATION] {action.capitalize()} would be scheduled in {delay} seconds (not executed on {self.os_type})"
+            return f"[SIMULATION] {action.capitalize()} would be scheduled in {delay} seconds (reason: {reason})"
         else:
-            return f"[SIMULATION] {action.capitalize()} would be executed now (not executed on {self.os_type})"
+            return f"[SIMULATION] {action.capitalize()} would be executed now (reason: {reason})"
     
     async def _schedule_action(self, action: str, delay: int) -> str:
         """Schedule a delayed power action"""
@@ -260,6 +285,7 @@ class PowerManager:
             "is_linux": self.is_linux,
             "has_systemctl": self.has_systemctl,
             "has_power_commands": self.has_power_commands,
+            "has_sudo_privileges": getattr(self, 'has_sudo_privileges', False),
             "simulation_mode": self.is_windows or not self.has_power_commands,
             "pending_actions_count": len(self.pending_actions),
             "supported_actions": ["shutdown", "restart"]

@@ -57,19 +57,42 @@ class ServiceManager:
         else:
             # Linux uses systemctl
             try:
+                # First check if systemctl is available (without sudo)
                 result = subprocess.run(
-                    ['sudo', '-n', 'systemctl', '--version'], 
+                    ['systemctl', '--version'], 
                     capture_output=True, 
                     text=True, 
                     timeout=5
                 )
-                self.has_systemctl = (result.returncode == 0)
-                self.has_service_commands = self.has_systemctl
-                logger.info("Service management initialized for Linux", has_systemctl=self.has_systemctl)
+                if result.returncode == 0:
+                    self.has_systemctl = True
+                    # Check if we can run sudo commands (for service control)
+                    try:
+                        sudo_result = subprocess.run(
+                            ['sudo', '-n', 'systemctl', '--version'], 
+                            capture_output=True, 
+                            text=True, 
+                            timeout=5
+                        )
+                        self.has_sudo_privileges = (sudo_result.returncode == 0)
+                    except Exception:
+                        self.has_sudo_privileges = False
+                    
+                    # We can always read service status without sudo
+                    self.has_service_commands = True
+                    logger.info("Service management initialized for Linux", 
+                              has_systemctl=self.has_systemctl, 
+                              has_sudo=self.has_sudo_privileges)
+                else:
+                    self.has_systemctl = False
+                    self.has_service_commands = False
+                    self.has_sudo_privileges = False
+                    logger.warning("systemctl not available")
             except Exception as e:
                 self.has_systemctl = False
                 self.has_service_commands = False
-                logger.warning("systemctl not available or no sudo privileges", error=str(e))
+                self.has_sudo_privileges = False
+                logger.warning("systemctl not available", error=str(e))
     
     async def get_service_status(self, service_name: str) -> Dict:
         """Get detailed status of a specific service"""
@@ -275,6 +298,13 @@ class ServiceManager:
         if not self.has_service_commands:
             logger.warning("Service commands not available", os_type=self.os_type)
             return f"[SIMULATION] Service {service_name} {action} would be executed (not available on {self.os_type})"
+        
+        # Check if action requires sudo privileges
+        control_actions = ['start', 'stop', 'restart', 'reload', 'enable', 'disable']
+        if action in control_actions and not getattr(self, 'has_sudo_privileges', False):
+            logger.warning("Service control action requires sudo privileges", 
+                         service=service_name, action=action)
+            return f"[INSUFFICIENT PRIVILEGES] Service {service_name} {action} requires sudo privileges"
         
         try:
             if self.is_windows:

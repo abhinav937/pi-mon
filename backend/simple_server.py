@@ -2395,19 +2395,25 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
             else:
                 # Linux/Raspberry Pi permission checking
                 current_user = os.getenv('USER', 'unknown')
+                print(f"Checking shutdown permissions for user: {current_user}")
                 
                 # Check if running as root
-                if os.geteuid() == 0:
-                    return {
-                        'can_shutdown': True,
-                        'method': 'root',
-                        'reason': 'Running as root user',
-                        'suggestions': []
-                    }
+                try:
+                    if os.geteuid() == 0:
+                        print("Running as root user - shutdown allowed")
+                        return {
+                            'can_shutdown': True,
+                            'method': 'root',
+                            'reason': 'Running as root user',
+                            'suggestions': []
+                        }
+                except AttributeError:
+                    print("geteuid not available on this platform")
                 
                 # Check if user can use sudo without password for shutdown commands
                 sudo_check = self._check_sudo_permissions()
                 if sudo_check['can_sudo']:
+                    print(f"User {current_user} can use sudo for shutdown")
                     return {
                         'can_shutdown': True,
                         'method': 'sudo',
@@ -2419,6 +2425,7 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                 try:
                     result = subprocess.run(['groups'], capture_output=True, text=True, timeout=5)
                     if result.returncode == 0 and 'sudo' in result.stdout:
+                        print(f"User {current_user} in sudo group but may need password")
                         return {
                             'can_shutdown': False,
                             'method': 'sudo_group',
@@ -2429,12 +2436,13 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                                 'Add specific shutdown commands to sudoers'
                             ]
                         }
-                except:
-                    pass
+                except Exception as e:
+                    print(f"Error checking groups: {str(e)}")
                 
                 # Check if shutdown commands are available in PATH
                 shutdown_available = self._check_command_availability(['shutdown', 'poweroff', 'halt'])
                 if shutdown_available:
+                    print(f"Shutdown commands available but user {current_user} lacks permissions")
                     return {
                         'can_shutdown': False,
                         'method': 'commands_available',
@@ -2446,6 +2454,7 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                         ]
                     }
                 else:
+                    print(f"Shutdown commands not available for user {current_user}")
                     return {
                         'can_shutdown': False,
                         'method': 'no_commands',
@@ -2458,6 +2467,7 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                     }
                     
         except Exception as e:
+            print(f"Error checking shutdown permissions: {str(e)}")
             return {
                 'can_shutdown': False,
                 'method': 'error',
@@ -2474,19 +2484,25 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
             else:
                 # Linux/Raspberry Pi permission checking
                 current_user = os.getenv('USER', 'unknown')
+                print(f"Checking restart permissions for user: {current_user}")
                 
                 # Check if running as root
-                if os.geteuid() == 0:
-                    return {
-                        'can_restart': True,
-                        'method': 'root',
-                        'reason': 'Running as root user',
-                        'suggestions': []
-                    }
+                try:
+                    if os.geteuid() == 0:
+                        print("Running as root user - restart allowed")
+                        return {
+                            'can_restart': True,
+                            'method': 'root',
+                            'reason': 'Running as root user',
+                            'suggestions': []
+                        }
+                except AttributeError:
+                    print("geteuid not available on this platform")
                 
                 # Check if user can use sudo without password for restart commands
                 sudo_check = self._check_sudo_permissions()
                 if sudo_check['can_sudo']:
+                    print(f"User {current_user} can use sudo for restart")
                     return {
                         'can_restart': True,
                         'method': 'sudo',
@@ -2498,6 +2514,7 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                 try:
                     result = subprocess.run(['groups'], capture_output=True, text=True, timeout=5)
                     if result.returncode == 0 and 'sudo' in result.stdout:
+                        print(f"User {current_user} in sudo group but may need password")
                         return {
                             'can_restart': False,
                             'method': 'sudo_group',
@@ -2508,12 +2525,13 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                                 'Add specific restart commands to sudoers'
                             ]
                         }
-                except:
-                    pass
+                except Exception as e:
+                    print(f"Error checking groups: {str(e)}")
                 
                 # Check if restart commands are available in PATH
                 restart_available = self._check_command_availability(['reboot', 'shutdown', 'systemctl'])
                 if restart_available:
+                    print(f"Restart commands available but user {current_user} lacks permissions")
                     return {
                         'can_restart': False,
                         'method': 'commands_available',
@@ -2525,6 +2543,7 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                         ]
                     }
                 else:
+                    print(f"Restart commands not available for user {current_user}")
                     return {
                         'can_restart': False,
                         'method': 'no_commands',
@@ -2537,6 +2556,7 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                     }
                     
         except Exception as e:
+            print(f"Error checking restart permissions: {str(e)}")
             return {
                 'can_restart': False,
                 'method': 'error',
@@ -2547,6 +2567,8 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
     def _check_sudo_permissions(self):
         """Check if current user can use sudo without password for shutdown/restart commands"""
         try:
+            print("Testing sudo permissions for shutdown/restart commands...")
+            
             # Test if user can run shutdown command with sudo without password
             test_commands = [
                 ['sudo', '-n', 'shutdown', '--help'],
@@ -2556,16 +2578,26 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
             
             for cmd in test_commands:
                 try:
+                    print(f"Testing sudo command: {' '.join(cmd)}")
                     result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
                     if result.returncode == 0:
+                        print(f"Sudo command successful: {' '.join(cmd)}")
                         return {
                             'can_sudo': True,
                             'command': ' '.join(cmd),
                             'reason': 'Sudo command executed successfully without password'
                         }
-                except:
+                    else:
+                        print(f"Sudo command failed: {' '.join(cmd)} - return code: {result.returncode}")
+                        if result.stderr:
+                            print(f"Error output: {result.stderr.strip()}")
+                except subprocess.TimeoutExpired:
+                    print(f"Sudo command timed out: {' '.join(cmd)}")
+                except Exception as e:
+                    print(f"Exception testing sudo command {' '.join(cmd)}: {str(e)}")
                     continue
             
+            print("No sudo commands worked without password")
             return {
                 'can_sudo': False,
                 'command': None,
@@ -2573,6 +2605,7 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
             }
             
         except Exception as e:
+            print(f"Error testing sudo: {str(e)}")
             return {
                 'can_sudo': False,
                 'command': None,
@@ -2582,13 +2615,22 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
     def _check_command_availability(self, commands):
         """Check if specified commands are available in PATH"""
         available_commands = []
+        print(f"Checking command availability for: {commands}")
+        
         for cmd in commands:
             try:
                 result = subprocess.run(['which', cmd], capture_output=True, text=True, timeout=5)
                 if result.returncode == 0:
                     available_commands.append(cmd)
-            except:
-                pass
+                    print(f"  ✅ {cmd}: {result.stdout.strip()}")
+                else:
+                    print(f"  ❌ {cmd}: Not found in PATH")
+            except subprocess.TimeoutExpired:
+                print(f"  ⏰ {cmd}: Timeout checking availability")
+            except Exception as e:
+                print(f"  💥 {cmd}: Error checking availability - {str(e)}")
+        
+        print(f"Available commands: {available_commands}")
         return available_commands
     
     def _execute_shutdown(self):
@@ -2642,12 +2684,16 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                     shutdown_commands = potential_commands
                     print("No shutdown commands detected in PATH, trying all potential commands")
                 
+                # Try each command with proper error handling
                 for cmd in shutdown_commands:
                     try:
+                        print(f"Attempting shutdown with: {' '.join(cmd)}")
+                        
                         # For shutdown commands, don't capture output as they don't return normally
                         # Just execute the command and assume success if no exception
                         result = subprocess.run(cmd, timeout=15)
                         # If we get here, the command executed (though it may not have completed)
+                        print(f"Shutdown command executed successfully: {' '.join(cmd)}")
                         return {
                             'success': True,
                             'message': f'Shutdown initiated successfully with: {" ".join(cmd)}',
@@ -2655,16 +2701,24 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                         }
                     except subprocess.TimeoutExpired:
                         # Command timed out, but this is expected for shutdown commands
+                        print(f"Shutdown command timed out (expected): {' '.join(cmd)}")
                         return {
                             'success': True,
                             'message': f'Shutdown command timed out (expected for shutdown): {" ".join(cmd)}',
                             'command_used': ' '.join(cmd)
                         }
+                    except FileNotFoundError:
+                        print(f"Command not found: {' '.join(cmd)}")
+                        continue
+                    except PermissionError:
+                        print(f"Permission denied for: {' '.join(cmd)}")
+                        continue
                     except Exception as e:
                         print(f"Error executing shutdown command {' '.join(cmd)}: {str(e)}")
                         continue
                 
                 # If all commands failed, provide detailed error information
+                print("All shutdown commands failed")
                 return {
                     'success': False,
                     'error': 'All shutdown commands failed - check system logs for details',
@@ -2678,6 +2732,7 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                 }
                 
         except Exception as e:
+            print(f"Shutdown execution error: {str(e)}")
             return {
                 'success': False,
                 'error': f'Shutdown execution error: {str(e)}',
@@ -2733,12 +2788,16 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                     restart_commands = potential_commands
                     print("No restart commands detected in PATH, trying all potential commands")
                 
+                # Try each command with proper error handling
                 for cmd in restart_commands:
                     try:
+                        print(f"Attempting restart with: {' '.join(cmd)}")
+                        
                         # For restart commands, don't capture output as they don't return normally
                         # Just execute the command and assume success if no exception
                         result = subprocess.run(cmd, timeout=15)
                         # If we get here, the command executed (though it may not have completed)
+                        print(f"Restart command executed successfully: {' '.join(cmd)}")
                         return {
                             'success': True,
                             'message': f'Restart initiated successfully with: {" ".join(cmd)}',
@@ -2746,16 +2805,24 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                         }
                     except subprocess.TimeoutExpired:
                         # Command timed out, but this is expected for restart commands
+                        print(f"Restart command timed out (expected): {' '.join(cmd)}")
                         return {
                             'success': True,
                             'message': f'Restart command timed out (expected for restart): {" ".join(cmd)}',
                             'command_used': ' '.join(cmd)
                         }
+                    except FileNotFoundError:
+                        print(f"Command not found: {' '.join(cmd)}")
+                        continue
+                    except PermissionError:
+                        print(f"Permission denied for: {' '.join(cmd)}")
+                        continue
                     except Exception as e:
                         print(f"Error executing restart command {' '.join(cmd)}: {str(e)}")
                         continue
                 
                 # If all commands failed, provide detailed error information
+                print("All restart commands failed")
                 return {
                     'success': False,
                     'error': 'All restart commands failed - check system logs for details',
@@ -2769,6 +2836,7 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                 }
                 
         except Exception as e:
+            print(f"Restart execution error: {str(e)}")
             return {
                 'success': False,
                 'error': f'Restart execution error: {str(e)}',

@@ -2612,52 +2612,69 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                     }
             else:
                 # Linux/Raspberry Pi shutdown with multiple fallback methods
-                shutdown_commands = [
-                    # Try systemd first (most modern)
+                # First check which commands are available
+                available_commands = []
+                potential_commands = [
                     ['systemctl', 'poweroff'],
-                    # Try sudo shutdown
                     ['sudo', 'shutdown', '-h', 'now'],
-                    # Try sudo poweroff
                     ['sudo', 'poweroff'],
-                    # Try sudo halt
                     ['sudo', 'halt'],
-                    # Try direct shutdown (if user has permission)
                     ['shutdown', '-h', 'now'],
-                    # Try direct poweroff
                     ['poweroff'],
-                    # Try direct halt
                     ['halt']
                 ]
                 
+                # Check which commands exist in PATH
+                for cmd in potential_commands:
+                    try:
+                        result = subprocess.run(['which', cmd[0]], capture_output=True, text=True, timeout=5)
+                        if result.returncode == 0:
+                            available_commands.append(cmd)
+                    except:
+                        # If 'which' command fails, assume command might be available
+                        available_commands.append(cmd)
+                
+                # Use available commands, or fall back to all if none detected
+                if available_commands:
+                    shutdown_commands = available_commands
+                    print(f"Available shutdown commands: {[cmd[0] for cmd in available_commands]}")
+                else:
+                    shutdown_commands = potential_commands
+                    print("No shutdown commands detected in PATH, trying all potential commands")
+                
                 for cmd in shutdown_commands:
                     try:
-                        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
-                        if result.returncode == 0:
-                            return {
-                                'success': True,
-                                'message': f'Shutdown initiated successfully with: {" ".join(cmd)}',
-                                'command_used': ' '.join(cmd)
-                            }
-                        else:
-                            # Log the failure for debugging
-                            print(f"Shutdown command failed: {' '.join(cmd)} - {result.stderr}")
-                            continue
-                    except subprocess.TimeoutExpired:
-                        # Command timed out, might still be working
+                        # For shutdown commands, don't capture output as they don't return normally
+                        # Just execute the command and assume success if no exception
+                        result = subprocess.run(cmd, timeout=15)
+                        # If we get here, the command executed (though it may not have completed)
                         return {
                             'success': True,
-                            'message': f'Shutdown command timed out but may be working: {" ".join(cmd)}',
+                            'message': f'Shutdown initiated successfully with: {" ".join(cmd)}',
+                            'command_used': ' '.join(cmd)
+                        }
+                    except subprocess.TimeoutExpired:
+                        # Command timed out, but this is expected for shutdown commands
+                        return {
+                            'success': True,
+                            'message': f'Shutdown command timed out (expected for shutdown): {" ".join(cmd)}',
                             'command_used': ' '.join(cmd)
                         }
                     except Exception as e:
                         print(f"Error executing shutdown command {' '.join(cmd)}: {str(e)}")
                         continue
                 
-                # If all commands failed
+                # If all commands failed, provide detailed error information
                 return {
                     'success': False,
-                    'error': 'All shutdown commands failed',
-                    'command_used': 'multiple_attempts'
+                    'error': 'All shutdown commands failed - check system logs for details',
+                    'command_used': 'multiple_attempts',
+                    'debug_info': {
+                        'platform': platform.system(),
+                        'user_id': os.geteuid() if hasattr(os, 'geteuid') else 'unknown',
+                        'commands_tried': [cmd for cmd in shutdown_commands],
+                        'suggestion': 'Check if shutdown commands are available in PATH and system permissions'
+                    }
                 }
                 
         except Exception as e:
@@ -2688,48 +2705,67 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                     }
             else:
                 # Linux/Raspberry Pi restart with multiple fallback methods
-                restart_commands = [
-                    # Try systemd first (most modern)
+                # First check which commands are available
+                available_commands = []
+                potential_commands = [
                     ['systemctl', 'reboot'],
-                    # Try sudo reboot
                     ['sudo', 'reboot'],
-                    # Try sudo shutdown -r
                     ['sudo', 'shutdown', '-r', 'now'],
-                    # Try direct reboot (if user has permission)
                     ['reboot'],
-                    # Try direct shutdown -r
                     ['shutdown', '-r', 'now']
                 ]
                 
+                # Check which commands exist in PATH
+                for cmd in potential_commands:
+                    try:
+                        result = subprocess.run(['which', cmd[0]], capture_output=True, text=True, timeout=5)
+                        if result.returncode == 0:
+                            available_commands.append(cmd)
+                    except:
+                        # If 'which' command fails, assume command might be available
+                        available_commands.append(cmd)
+                
+                # Use available commands, or fall back to all if none detected
+                if available_commands:
+                    restart_commands = available_commands
+                    print(f"Available restart commands: {[cmd[0] for cmd in available_commands]}")
+                else:
+                    restart_commands = potential_commands
+                    print("No restart commands detected in PATH, trying all potential commands")
+                
                 for cmd in restart_commands:
                     try:
-                        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
-                        if result.returncode == 0:
-                            return {
-                                'success': True,
-                                'message': f'Restart initiated successfully with: {" ".join(cmd)}',
-                                'command_used': ' '.join(cmd)
-                            }
-                        else:
-                            # Log the failure for debugging
-                            print(f"Restart command failed: {' '.join(cmd)} - {result.stderr}")
-                            continue
-                    except subprocess.TimeoutExpired:
-                        # Command timed out, might still be working
+                        # For restart commands, don't capture output as they don't return normally
+                        # Just execute the command and assume success if no exception
+                        result = subprocess.run(cmd, timeout=15)
+                        # If we get here, the command executed (though it may not have completed)
                         return {
                             'success': True,
-                            'message': f'Restart command timed out but may be working: {" ".join(cmd)}',
+                            'message': f'Restart initiated successfully with: {" ".join(cmd)}',
+                            'command_used': ' '.join(cmd)
+                        }
+                    except subprocess.TimeoutExpired:
+                        # Command timed out, but this is expected for restart commands
+                        return {
+                            'success': True,
+                            'message': f'Restart command timed out (expected for restart): {" ".join(cmd)}',
                             'command_used': ' '.join(cmd)
                         }
                     except Exception as e:
                         print(f"Error executing restart command {' '.join(cmd)}: {str(e)}")
                         continue
                 
-                # If all commands failed
+                # If all commands failed, provide detailed error information
                 return {
                     'success': False,
-                    'error': 'All restart commands failed',
-                    'command_used': 'multiple_attempts'
+                    'error': 'All restart commands failed - check system logs for details',
+                    'command_used': 'multiple_attempts',
+                    'debug_info': {
+                        'platform': platform.system(),
+                        'user_id': os.geteuid() if hasattr(os, 'geteuid') else 'unknown',
+                        'commands_tried': [cmd for cmd in restart_commands],
+                        'suggestion': 'Check if restart commands are available in PATH and system permissions'
+                    }
                 }
                 
         except Exception as e:

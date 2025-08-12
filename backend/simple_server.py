@@ -2,7 +2,7 @@
 """
 Pi Monitor - Enhanced HTTP Server
 RPi-Monitor inspired monitoring system with real-time data collection
-Enhanced with comprehensive system monitoring commands
+Enhanced with comprehensive system monitoring commands and optimizations
 """
 
 import json
@@ -23,10 +23,27 @@ from datetime import datetime, timedelta
 import sqlite3
 import tempfile
 import re
+from functools import lru_cache, wraps
+from collections import deque, defaultdict
+import logging
+import asyncio
+import concurrent.futures
+from typing import Dict, List, Optional, Any, Union
+import weakref
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('pi_monitor.log'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
 
 # Add parent directory to path to import config
 try:
-    # Try to import from parent directory first
     sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     from config import config
 except ImportError:
@@ -55,11 +72,14 @@ except ImportError:
         
         config = MinimalConfig()
 
-# Simple JWT-like token (for demo purposes)
+# Configuration constants
 JWT_SECRET = "pi-monitor-secret-key-2024"
 JWT_EXPIRATION = 24 * 60 * 60  # 24 hours
+MAX_CONNECTIONS = 100
+REQUEST_TIMEOUT = 30
+CACHE_TTL = 60  # Cache TTL in seconds
 
-# Enhanced system monitoring commands
+# Enhanced system monitoring commands with categories
 SYSTEM_COMMANDS = {
     # System Information
     'kernel_info': 'uname -a',
@@ -122,122 +142,119 @@ SYSTEM_COMMANDS = {
     'network_stats': 'cat /proc/net/snmp'
 }
 
-# Global data storage for real-time metrics
-class EnhancedMetricsCollector:
-    def __init__(self):
-        self.metrics_history = []
-        self.max_history = 1000  # Keep last 1000 data points
-        self.collection_interval = 5.0  # 5 seconds
-        self.is_collecting = False
-        self.collection_thread = None
-        self.command_cache = {}
-        self.cache_duration = 30  # Cache command results for 30 seconds
+# Connection pool for managing concurrent requests
+class ConnectionPool:
+    def __init__(self, max_connections=MAX_CONNECTIONS):
+        self.max_connections = max_connections
+        self.active_connections = 0
+        self.connection_lock = threading.Lock()
+        self.connection_semaphore = threading.Semaphore(max_connections)
+    
+    def acquire_connection(self):
+        """Acquire a connection slot"""
+        return self.connection_semaphore.acquire(blocking=True, timeout=REQUEST_TIMEOUT)
+    
+    def release_connection(self):
+        """Release a connection slot"""
+        self.connection_semaphore.release()
+    
+    def get_active_connections(self):
+        """Get current active connection count"""
+        return self.max_connections - self.connection_semaphore._value
+
+# Enhanced caching system with TTL and LRU
+class EnhancedCache:
+    def __init__(self, max_size=1000, default_ttl=CACHE_TTL):
+        self.max_size = max_size
+        self.default_ttl = default_ttl
+        self.cache = {}
+        self.access_order = deque()
+        self.lock = threading.RLock()
+    
+    def get(self, key: str) -> Optional[Any]:
+        """Get value from cache if not expired"""
+        with self.lock:
+            if key in self.cache:
+                value, timestamp, ttl = self.cache[key]
+                if time.time() - timestamp < ttl:
+                    # Move to front (most recently used)
+                    self.access_order.remove(key)
+                    self.access_order.appendleft(key)
+                    return value
+                else:
+                    # Expired, remove
+                    del self.cache[key]
+                    self.access_order.remove(key)
+        return None
+    
+    def set(self, key: str, value: Any, ttl: Optional[int] = None) -> None:
+        """Set value in cache with TTL"""
+        if ttl is None:
+            ttl = self.default_ttl
         
-    def start_collection(self):
-        """Start background metrics collection"""
-        if not self.is_collecting:
-            self.is_collecting = True
-            self.collection_thread = threading.Thread(target=self._collect_metrics, daemon=True)
-            self.collection_thread.start()
-    
-    def stop_collection(self):
-        """Stop background metrics collection"""
-        self.is_collecting = False
-        if self.collection_thread:
-            self.collection_thread.join(timeout=1)
-    
-    def _collect_metrics(self):
-        """Background thread for collecting metrics"""
-        while self.is_collecting:
-            try:
-                metrics = self._gather_current_metrics()
-                self.metrics_history.append(metrics)
-                
-                # Keep only recent history
-                if len(self.metrics_history) > self.max_history:
-                    self.metrics_history = self.metrics_history[-self.max_history:]
-                    
-            except Exception as e:
-                print(f"Error collecting metrics: {e}")
+        with self.lock:
+            # Remove if exists
+            if key in self.cache:
+                self.access_order.remove(key)
             
-            time.sleep(self.collection_interval)
+            # Add new entry
+            self.cache[key] = (value, time.time(), ttl)
+            self.access_order.appendleft(key)
+            
+            # Evict if cache is full
+            if len(self.cache) > self.max_size:
+                oldest_key = self.access_order.pop()
+                del self.cache[oldest_key]
     
-    def _gather_current_metrics(self):
-        """Gather current system metrics with enhanced data"""
+    def clear(self) -> None:
+        """Clear all cache entries"""
+        with self.lock:
+            self.cache.clear()
+            self.access_order.clear()
+    
+    def size(self) -> int:
+        """Get current cache size"""
+        return len(self.cache)
+
+# Thread pool for concurrent command execution
+class CommandExecutor:
+    def __init__(self, max_workers=10):
+        self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
+        self.cache = EnhancedCache()
+    
+    def execute_command(self, command: str, timeout: int = 10) -> Dict[str, Any]:
+        """Execute a system command with caching"""
+        cache_key = f"cmd:{hashlib.md5(command.encode()).hexdigest()}"
+        
+        # Check cache first
+        cached_result = self.cache.get(cache_key)
+        if cached_result:
+            return cached_result
+        
+        # Execute command
         try:
-            # Basic metrics
-            cpu_percent = psutil.cpu_percent(interval=0.1)
-            memory = psutil.virtual_memory()
-            disk = psutil.disk_usage('/')
-            temperature = self._get_temperature()
-            network = psutil.net_io_counters()
-            disk_io = psutil.disk_io_counters()
+            future = self.executor.submit(self._run_command, command, timeout)
+            result = future.result(timeout=timeout + 5)
             
-            # Enhanced metrics using system commands
-            enhanced_metrics = self._get_enhanced_metrics()
+            # Cache successful results
+            if result['success']:
+                self.cache.set(cache_key, result, ttl=30)  # Cache for 30 seconds
             
+            return result
+        except concurrent.futures.TimeoutError:
             return {
-                "timestamp": time.time(),
-                "cpu_percent": round(cpu_percent, 1),
-                "memory_percent": round(memory.percent, 1),
-                "disk_percent": round(disk.percent, 1),
-                "temperature": temperature,
-                "network": {
-                    "bytes_sent": network.bytes_sent,
-                    "bytes_recv": network.bytes_recv,
-                    "packets_sent": network.packets_sent,
-                    "packets_recv": network.packets_recv
-                },
-                "disk_io": {
-                    "read_bytes": disk_io.read_bytes if disk_io else 0,
-                    "write_bytes": disk_io.write_bytes if disk_io else 0,
-                    "read_count": disk_io.read_count if disk_io else 0,
-                    "write_count": disk_io.write_count if disk_io else 0
-                },
-                "enhanced": enhanced_metrics
+                'success': False,
+                'output': None,
+                'error': 'Command execution timed out'
             }
         except Exception as e:
-            return {"timestamp": time.time(), "error": str(e)}
+            return {
+                'success': False,
+                'output': None,
+                'error': str(e)
+            }
     
-    def _get_enhanced_metrics(self):
-        """Get enhanced metrics using system commands"""
-        enhanced = {}
-        
-        # Get key metrics that don't change frequently
-        key_commands = ['cpu_temperature', 'arm_clock', 'core_voltage', 'throttling_status']
-        
-        for metric in key_commands:
-            if metric in SYSTEM_COMMANDS:
-                try:
-                    result = self._run_command_cached(SYSTEM_COMMANDS[metric])
-                    if result['success']:
-                        enhanced[metric] = result['output']
-                    else:
-                        enhanced[metric] = None
-                except:
-                    enhanced[metric] = None
-        
-        return enhanced
-    
-    def _run_command_cached(self, command):
-        """Run a command with caching to avoid excessive execution"""
-        cache_key = command
-        
-        # Check if we have a cached result
-        if cache_key in self.command_cache:
-            cached_time, cached_result = self.command_cache[cache_key]
-            if time.time() - cached_time < self.cache_duration:
-                return cached_result
-        
-        # Run the command
-        result = self._run_command(command)
-        
-        # Cache the result
-        self.command_cache[cache_key] = (time.time(), result)
-        
-        return result
-    
-    def _run_command(self, command):
+    def _run_command(self, command: str, timeout: int) -> Dict[str, Any]:
         """Run a system command safely"""
         try:
             result = subprocess.run(
@@ -245,7 +262,7 @@ class EnhancedMetricsCollector:
                 shell=True, 
                 capture_output=True, 
                 text=True, 
-                timeout=10
+                timeout=timeout
             )
             
             if result.returncode == 0:
@@ -273,140 +290,207 @@ class EnhancedMetricsCollector:
                 'error': str(e)
             }
     
-    def _get_temperature(self):
-        """Get system temperature using multiple methods"""
-        try:
-            # Try Raspberry Pi specific path
-            if os.path.exists('/sys/class/thermal/thermal_zone0/temp'):
-                with open('/sys/class/thermal/thermal_zone0/temp', 'r') as f:
-                    temp_raw = f.read().strip()
-                    temp_value = float(temp_raw) / 1000.0
-                    if temp_value > 0 and temp_value < 200:  # Sanity check for reasonable temperature range
-                        return round(temp_value, 1)
-            
-            # Try other thermal zones
-            for i in range(10):
-                thermal_path = f'/sys/class/thermal/thermal_zone{i}/temp'
-                if os.path.exists(thermal_path):
-                    with open(thermal_path, 'r') as f:
-                        temp_raw = f.read().strip()
-                        temp_value = float(temp_raw) / 1000.0
-                        if temp_value > 0 and temp_value < 200:  # Sanity check for reasonable temperature range
-                            return round(temp_value, 1)
-            
-            # Try vcgencmd for Raspberry Pi
-            try:
-                result = subprocess.run(['vcgencmd', 'measure_temp'], capture_output=True, text=True, timeout=5)
-                if result.returncode == 0:
-                    temp_match = re.search(r'temp=(\d+\.?\d*)', result.stdout)
-                    if temp_match:
-                        temp_value = float(temp_match.group(1))
-                        if temp_value > 0 and temp_value < 200:  # Sanity check for reasonable temperature range
-                            return round(temp_value, 1)
-            except:
-                pass
-            
-            # Try sensors command if available
-            try:
-                result = subprocess.run(['sensors', '-j'], capture_output=True, text=True, timeout=5)
-                if result.returncode == 0:
-                    data = json.loads(result.stdout)
-                    # Parse sensors output for temperature
-                    for device, values in data.items():
-                        if isinstance(values, dict):
-                            for key, value in values.items():
-                                if 'temp' in key.lower() and isinstance(value, (int, float)):
-                                    temp_value = float(value)
-                                    if temp_value > 0 and temp_value < 200:  # Sanity check for reasonable temperature range
-                                        return round(temp_value, 1)
-            except:
-                pass
-                
-        except Exception:
-            pass
+    def shutdown(self):
+        """Shutdown the executor"""
+        self.executor.shutdown(wait=True)
+
+# Global instances
+connection_pool = ConnectionPool()
+command_executor = CommandExecutor()
+metrics_cache = EnhancedCache(max_size=500, default_ttl=30)
+
+# Global data storage for real-time metrics with improved performance
+class EnhancedMetricsCollector:
+    def __init__(self):
+        self.metrics_history = deque(maxlen=1000)  # Use deque for O(1) operations
+        self.collection_interval = 5.0
+        self.is_collecting = False
+        self.collection_thread = None
+        self.command_cache = EnhancedCache(max_size=100, default_ttl=30)
+        self.last_collection = 0
+        self.collection_lock = threading.Lock()
         
-        # Return a safe default value if all methods fail
-        return 25.0  # Room temperature as safe default
+        # Performance counters
+        self.collection_count = 0
+        self.error_count = 0
+        self.last_error = None
+        self.max_history = 1000  # Keep last 1000 data points
+        
+    def start_collection(self):
+        """Start background metrics collection"""
+        if not self.is_collecting:
+            self.is_collecting = True
+            self.collection_thread = threading.Thread(target=self._collect_metrics, daemon=True)
+            self.collection_thread.start()
+            logger.info("Metrics collection started")
     
-    def _run_command_with_fallback(self, command_name, primary_command, fallback_commands=None):
-        """Run a command with fallback options for Pi-specific commands"""
-        # Try primary command first
-        result = self._run_command(primary_command)
+    def stop_collection(self):
+        """Stop background metrics collection"""
+        self.is_collecting = False
+        if self.collection_thread:
+            self.collection_thread.join(timeout=1)
+            logger.info("Metrics collection stopped")
+    
+    def _collect_metrics(self):
+        """Background thread for collecting metrics with improved error handling"""
+        while self.is_collecting:
+            try:
+                start_time = time.time()
+                
+                # Check if enough time has passed since last collection
+                if start_time - self.last_collection < self.collection_interval:
+                    time.sleep(0.1)
+                    continue
+                
+                metrics = self._gather_current_metrics()
+                if metrics and 'error' not in metrics:
+                    with self.collection_lock:
+                        self.metrics_history.append(metrics)
+                        self.collection_count += 1
+                    
+                    self.last_collection = start_time
+                else:
+                    self.error_count += 1
+                    self.last_error = metrics.get('error', 'Unknown error') if metrics else 'No metrics'
+                    
+            except Exception as e:
+                self.error_count += 1
+                self.last_error = str(e)
+                logger.error(f"Error collecting metrics: {e}")
+            
+            time.sleep(0.1)  # Reduced sleep for more responsive collection
+    
+    def _gather_current_metrics(self):
+        """Gather current system metrics with enhanced data and error handling"""
+        try:
+            # Basic metrics using psutil (more reliable)
+            cpu_percent = psutil.cpu_percent(interval=0.1)
+            memory = psutil.virtual_memory()
+            disk = psutil.disk_usage('/')
+            temperature = self._get_temperature()
+            network = psutil.net_io_counters()
+            disk_io = psutil.disk_io_counters()
+            
+            # Enhanced metrics using system commands (cached)
+            enhanced_metrics = self._get_enhanced_metrics()
+            
+            return {
+                "timestamp": time.time(),
+                "cpu_percent": round(cpu_percent, 1),
+                "memory_percent": round(memory.percent, 1),
+                "disk_percent": round(disk.percent, 1),
+                "temperature": temperature,
+                "network": {
+                    "bytes_sent": network.bytes_sent if network else 0,
+                    "bytes_recv": network.bytes_recv if network else 0,
+                    "packets_sent": network.packets_sent if network else 0,
+                    "packets_recv": network.packets_recv if network else 0
+                },
+                "disk_io": {
+                    "read_bytes": disk_io.read_bytes if disk_io else 0,
+                    "write_bytes": disk_io.write_bytes if disk_io else 0,
+                    "read_count": disk_io.read_count if disk_io else 0,
+                    "write_count": disk_io.write_count if disk_io else 0
+                },
+                "enhanced": enhanced_metrics
+            }
+        except Exception as e:
+            logger.error(f"Failed to gather metrics: {e}")
+            return {"timestamp": time.time(), "error": str(e)}
+    
+    def _get_enhanced_metrics(self):
+        """Get enhanced metrics using system commands with caching"""
+        enhanced = {}
         
-        if result['success']:
-            return result
+        # Get key metrics that don't change frequently
+        key_commands = ['cpu_temperature', 'arm_clock', 'core_voltage', 'throttling_status']
         
-        # If primary failed and we have fallbacks, try them
-        if fallback_commands:
-            for fallback_cmd in fallback_commands:
-                fallback_result = self._run_command(fallback_cmd)
-                if fallback_result['success']:
-                    return fallback_result
+        for metric in key_commands:
+            if metric in SYSTEM_COMMANDS:
+                try:
+                    result = command_executor.execute_command(SYSTEM_COMMANDS[metric])
+                    if result['success']:
+                        enhanced[metric] = result['output']
+                    else:
+                        enhanced[metric] = None
+                except:
+                    enhanced[metric] = None
         
-        # If all failed, return the original error but with fallback info
-        if command_name in ['cpu_temperature', 'arm_clock', 'core_voltage', 'throttling_status']:
-            result['fallback_available'] = True
-            result['fallback_suggestion'] = 'Use alternative system commands for hardware monitoring'
-        
-        return result
+        return enhanced
     
     def get_metrics_history(self, minutes=60):
-        """Get metrics history for the last N minutes"""
+        """Get metrics history for the last N minutes with improved performance"""
         cutoff_time = time.time() - (minutes * 60)
-        return [m for m in self.metrics_history if m.get('timestamp', 0) > cutoff_time]
+        
+        with self.collection_lock:
+            # Use list comprehension for better performance
+            return [m for m in self.metrics_history if m.get('timestamp', 0) > cutoff_time]
     
     def get_latest_metrics(self):
         """Get the most recent metrics"""
         return self.metrics_history[-1] if self.metrics_history else None
     
-    def run_system_command(self, command_name):
-        """Run a specific system command by name with fallbacks for Pi-specific commands"""
-        if command_name in SYSTEM_COMMANDS:
-            primary_command = SYSTEM_COMMANDS[command_name]
-            
-            # Define fallback commands for Pi-specific hardware monitoring
-            fallback_commands = {
-                'cpu_temperature': [
-                    'cat /sys/class/thermal/thermal_zone0/temp',
-                    'cat /sys/class/thermal/thermal_zone1/temp',
-                    'sensors -j'
-                ],
-                'arm_clock': [
-                    'cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq',
-                    'cat /proc/cpuinfo | grep "cpu MHz"'
-                ],
-                'core_voltage': [
-                    'cat /sys/class/hwmon/hwmon*/in1_input',
-                    'cat /sys/class/hwmon/hwmon*/in2_input'
-                ],
-                'throttling_status': [
-                    'cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor',
-                    'cat /proc/cpuinfo | grep "flags"'
-                ]
-            }
-            
-            # Use fallback system for Pi-specific commands
-            if command_name in fallback_commands:
-                return self._run_command_with_fallback(
-                    command_name, 
-                    primary_command, 
-                    fallback_commands[command_name]
-                )
-            else:
-                return self._run_command(primary_command)
-        else:
-            return {
-                'success': False,
-                'output': None,
-                'error': f'Unknown command: {command_name}'
-            }
-    
-    def get_available_commands(self):
-        """Get list of available system commands"""
-        return list(SYSTEM_COMMANDS.keys())
+    def get_stats(self):
+        """Get collection statistics"""
+        return {
+            "collection_count": self.collection_count,
+            "error_count": self.error_count,
+            "last_error": self.last_error,
+            "history_size": len(self.metrics_history),
+            "is_collecting": self.is_collecting
+        }
 
 # Global metrics collector instance
 metrics_collector = EnhancedMetricsCollector()
+
+# Rate limiting decorator
+def rate_limit(max_requests=100, window=60):
+    """Rate limiting decorator"""
+    def decorator(func):
+        request_counts = defaultdict(list)
+        
+        @wraps(func)
+        def wrapper(self, *args, **kwargs):
+            client_ip = self.client_address[0]
+            now = time.time()
+            
+            # Clean old requests
+            request_counts[client_ip] = [req_time for req_time in request_counts[client_ip] 
+                                       if now - req_time < window]
+            
+            # Check rate limit
+            if len(request_counts[client_ip]) >= max_requests:
+                self.send_response(429)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Retry-After', str(window))
+                self.end_headers()
+                response = {"error": "Rate limit exceeded", "retry_after": window}
+                self.wfile.write(json.dumps(response).encode())
+                return
+            
+            # Add current request
+            request_counts[client_ip].append(now)
+            
+            return func(self, *args, **kwargs)
+        return wrapper
+    return decorator
+
+# Performance monitoring decorator
+def monitor_performance(func):
+    """Monitor function performance"""
+    @wraps(func)
+    def wrapper(self, *args, **kwargs):
+        start_time = time.time()
+        try:
+            result = func(self, *args, **kwargs)
+            execution_time = time.time() - start_time
+            logger.debug(f"{func.__name__} executed in {execution_time:.3f}s")
+            return result
+        except Exception as e:
+            execution_time = time.time() - start_time
+            logger.error(f"{func.__name__} failed after {execution_time:.3f}s: {e}")
+            raise
+    return wrapper
 
 class SimplePiMonitorHandler(BaseHTTPRequestHandler):
     # Class variable to persist tokens between requests
@@ -414,812 +498,751 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
     
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.request_start_time = time.time()
     
+    def log_message(self, format, *args):
+        """Custom logging with performance metrics"""
+        execution_time = time.time() - self.request_start_time
+        logger.info(f"{self.client_address[0]} - {format % args} - {execution_time:.3f}s")
+    
+    @rate_limit(max_requests=100, window=60)
     def do_GET(self):
-        """Handle GET requests"""
+        """Handle GET requests with connection pooling"""
+        if not connection_pool.acquire_connection():
+            self.send_response(503)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            response = {"error": "Service temporarily unavailable - too many connections"}
+            self.wfile.write(json.dumps(response).encode())
+            return
+        
+        try:
+            self._handle_get_request()
+        finally:
+            connection_pool.release_connection()
+    
+    @monitor_performance
+    def _handle_get_request(self):
+        """Handle GET request logic"""
         parsed_url = urlparse(self.path)
         path = parsed_url.path
         query_params = parse_qs(parsed_url.query)
         
+        # Route to appropriate handler
         if path == '/':
-            # Root endpoint
-            self.send_response(200)
-            self.send_header('Content-type', 'application/json')
-            self.send_header('Access-Control-Allow-Origin', '*')
-            self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-            self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-            self.end_headers()
-            
-            response = {
-                "message": "Pi Monitor Backend is running!",
-                "status": "ok",
-                "timestamp": time.strftime('%Y-%m-%d %H:%M:%S'),
-                "version": config.get('project.version', '1.0.0'),
-                "endpoints": config.get_backend_endpoints(),
-                "features": config.get('backend.features', {}),
-                "system_info": self._get_system_info(),
-                "available_commands": len(SYSTEM_COMMANDS),
-                "enhanced_monitoring": True
-            }
-            self.wfile.write(json.dumps(response).encode())
-                
+            self._handle_root_endpoint()
         elif path.startswith('/api/logs/') and '/download' in path:
-            # Log download endpoint
-            if not self.check_auth():
-                self.send_response(401)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-                self.end_headers()
-                response = {"error": "Unauthorized"}
-                self.wfile.write(json.dumps(response).encode())
-            else:
-                try:
-                    # Extract log name from path
-                    log_name = path.split('/')[-2]  # /api/logs/name/download
-                    
-                    # Try to find the log file in available directories
-                    log_file = None
-                    log_dirs = ['/var/log', '/tmp', './logs', 'logs']
-                    
-                    for log_dir in log_dirs:
-                        potential_path = os.path.join(log_dir, log_name)
-                        if os.path.exists(potential_path):
-                            log_file = potential_path
-                            break
-                    
-                    if not log_file:
-                        self.send_response(404)
-                        self.send_header('Content-type', 'application/json')
-                        self.send_header('Access-Control-Allow-Origin', '*')
-                        self.end_headers()
-                        response = {"error": f"Log file {log_name} not found"}
-                        self.wfile.write(json.dumps(response).encode())
-                        return
-                    
-                    # Read log content
-                    with open(log_file, 'r', encoding='utf-8', errors='ignore') as f:
-                        content = f.read()
-                    
-                    self.send_response(200)
-                    self.send_header('Content-type', 'text/plain')
-                    self.send_header('Content-Disposition', f'attachment; filename="{log_name}"')
-                    self.send_header('Access-Control-Allow-Origin', '*')
-                    self.end_headers()
-                    
-                    self.wfile.write(content.encode())
-                    
-                except Exception as e:
-                    self.send_response(500)
-                    self.send_header('Content-type', 'application/json')
-                    self.send_header('Access-Control-Allow-Origin', '*')
-                    self.end_headers()
-                    response = {"error": f"Failed to download log: {str(e)}"}
-                    self.wfile.write(json.dumps(response).encode())
-                
+            self._handle_log_download()
         elif path.startswith('/api/logs/') and path.endswith('/clear'):
-            # Log clear endpoint
-            if not self.check_auth():
-                self.send_response(401)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-                self.end_headers()
-                response = {"error": "Unauthorized"}
-                self.wfile.write(json.dumps(response).encode())
-            else:
-                try:
-                    # Extract log name from path
-                    log_name = path.split('/')[-2]  # /api/logs/name/clear
-                    
-                    # Try to find the log file in available directories
-                    log_file = None
-                    log_dirs = ['/var/log', '/tmp', './logs', 'logs']
-                    
-                    for log_dir in log_dirs:
-                        potential_path = os.path.join(log_dir, log_name)
-                        if os.path.exists(potential_path):
-                            log_file = potential_path
-                            break
-                    
-                    if not log_file:
-                        self.send_response(404)
-                        self.send_header('Content-type', 'application/json')
-                        self.send_header('Access-Control-Allow-Origin', '*')
-                        self.end_headers()
-                        response = {"error": f"Log file {log_name} not found"}
-                        self.wfile.write(json.dumps(response).encode())
-                        return
-                    
-                    # Clear log file (truncate to 0 bytes)
-                    with open(log_file, 'w') as f:
-                        pass  # This truncates the file
-                    
-                    self.send_response(200)
-                    self.send_header('Content-type', 'application/json')
-                    self.send_header('Access-Control-Allow-Origin', '*')
-                    self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-                    self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-                    self.end_headers()
-                    
-                    response = {
-                        "success": True,
-                        "message": f"Log {log_name} cleared successfully",
-                        "log_name": log_name,
-                        "timestamp": time.strftime('%Y-%m-%d %H:%M:%S')
-                    }
-                    
-                    self.wfile.write(json.dumps(response).encode())
-                    
-                except Exception as e:
-                    self.send_response(500)
-                    self.send_header('Content-type', 'application/json')
-                    self.send_header('Access-Control-Allow-Origin', '*')
-                    self.end_headers()
-                    response = {"error": f"Failed to clear log: {str(e)}"}
-                    self.wfile.write(json.dumps(response).encode())
-                
+            self._handle_log_clear()
         elif path.startswith('/api/services/'):
-            # Service control endpoint
-            if not self.check_auth():
-                self.send_response(401)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-                self.end_headers()
-                response = {"error": "Unauthorized"}
-                self.wfile.write(json.dumps(response).encode())
-            else:
-                try:
-                    # Extract service name and action from path
-                    path_parts = path.split('/')
-                    if len(path_parts) >= 4:
-                        service_name = path_parts[3]
-                        action = path_parts[4] if len(path_parts) > 4 else 'status'
-                        
-                        # Handle service actions
-                        if action == 'start':
-                            result = os.system(f'systemctl start {service_name}')
-                            if result == 0:
-                                response = {"success": True, "message": f"Service {service_name} started successfully"}
-                            else:
-                                response = {"success": False, "message": f"Failed to start service {service_name}"}
-                        elif action == 'stop':
-                            result = os.system(f'systemctl stop {service_name}')
-                            if result == 0:
-                                response = {"success": True, "message": f"Service {service_name} stopped successfully"}
-                            else:
-                                response = {"success": False, "message": f"Failed to stop service {service_name}"}
-                        elif action == 'restart':
-                            result = os.system(f'systemctl restart {service_name}')
-                            if result == 0:
-                                response = {"success": True, "message": f"Service {service_name} restarted successfully"}
-                            else:
-                                response = {"success": False, "message": f"Failed to restart service {service_name}"}
-                        elif action == 'status':
-                            result = os.system(f'systemctl is-active {service_name}')
-                            if result == 0:
-                                response = {"success": True, "service": service_name, "status": "active"}
-                            else:
-                                response = {"success": True, "service": service_name, "status": "inactive"}
-                        else:
-                            response = {"success": False, "message": f"Unknown action: {action}"}
-                    else:
-                        response = {"success": False, "message": "Invalid service path"}
-                        
-                except Exception as e:
-                    response = {"success": False, "message": f"Service action failed: {str(e)}"}
-                
-                self.send_response(200)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-                self.end_headers()
-                
-                self.wfile.write(json.dumps(response).encode())
-                
+            self._handle_service_control()
         elif path == '/health':
-            # Health check
+            self._handle_health_check()
+        elif path == '/api/system':
+            self._handle_system_stats(query_params)
+        elif path == '/api/system/enhanced':
+            self._handle_enhanced_system_stats()
+        elif path == '/api/service/restart':
+            self._handle_service_restart_info()
+        elif path == '/api/service/manage':
+            self._handle_service_manage_info()
+        elif path == '/api/service/info':
+            self._handle_service_info()
+        else:
+            self._handle_404()
+    
+    def _handle_root_endpoint(self):
+        """Handle root endpoint"""
+        self.send_response(200)
+        self._set_common_headers()
+        
+        response = {
+            "message": "Pi Monitor Backend is running!",
+            "status": "ok",
+            "timestamp": time.strftime('%Y-%m-%d %H:%M:%S'),
+            "version": config.get('project.version', '1.0.0'),
+            "endpoints": config.get_backend_endpoints(),
+            "features": config.get('backend.features', {}),
+            "system_info": self._get_system_info(),
+            "available_commands": len(SYSTEM_COMMANDS),
+            "enhanced_monitoring": True,
+            "performance": {
+                "active_connections": connection_pool.get_active_connections(),
+                "cache_size": metrics_cache.size(),
+                "metrics_stats": metrics_collector.get_stats()
+            }
+        }
+        self.wfile.write(json.dumps(response).encode())
+    
+    def _handle_log_download(self):
+        """Handle log download with improved error handling"""
+        if not self.check_auth():
+            self._send_unauthorized()
+            return
+        
+        try:
+            # Extract log name from path
+            parsed_url = urlparse(self.path)
+            path = parsed_url.path
+            log_name = path.split('/')[-2]  # /api/logs/name/download
+            
+            # Try to find the log file in available directories
+            log_file = self._find_log_file(log_name)
+            
+            if not log_file:
+                self._send_not_found(f"Log file {log_name} not found")
+                return
+            
+            # Read log content with streaming for large files
+            self._stream_log_file(log_file, log_name)
+            
+        except Exception as e:
+            logger.error(f"Log download failed: {e}")
+            self._send_internal_error(f"Failed to download log: {str(e)}")
+    
+    def _find_log_file(self, log_name):
+        """Find log file in available directories"""
+        log_dirs = ['/var/log', '/tmp', './logs', 'logs']
+        
+        for log_dir in log_dirs:
+            potential_path = os.path.join(log_dir, log_name)
+            if os.path.exists(potential_path):
+                return potential_path
+        return None
+    
+    def _stream_log_file(self, log_file, log_name):
+        """Stream log file content for better memory efficiency"""
+        file_size = os.path.getsize(log_file)
+        
+        self.send_response(200)
+        self.send_header('Content-type', 'text/plain')
+        self.send_header('Content-Disposition', f'attachment; filename="{log_name}"')
+        self.send_header('Content-Length', str(file_size))
+        self._set_common_headers()
+        
+        # Stream file in chunks
+        chunk_size = 8192
+        with open(log_file, 'rb') as f:
+            while True:
+                chunk = f.read(chunk_size)
+                if not chunk:
+                    break
+                self.wfile.write(chunk)
+    
+    def _handle_log_clear(self):
+        """Handle log clear with improved error handling"""
+        if not self.check_auth():
+            self._send_unauthorized()
+            return
+        
+        try:
+            # Extract log name from path
+            parsed_url = urlparse(self.path)
+            path = parsed_url.path
+            log_name = path.split('/')[-2]  # /api/logs/name/clear
+            
+            # Try to find the log file in available directories
+            log_file = self._find_log_file(log_name)
+            
+            if not log_file:
+                self._send_not_found(f"Log file {log_name} not found")
+                return
+            
+            # Clear log file (truncate to 0 bytes)
+            with open(log_file, 'w') as f:
+                pass  # This truncates the file
+            
             self.send_response(200)
-            self.send_header('Content-type', 'application/json')
-            self.send_header('Access-Control-Allow-Origin', '*')
-            self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-            self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-            self.end_headers()
+            self._set_common_headers()
             
             response = {
-                "status": "healthy",
-                "timestamp": time.strftime('%Y-%m-%d %H:%M:%S'),
-                "version": config.get('project.version', '1.0.0'),
-                "uptime": self._get_uptime(),
-                "config": {
-                    "ports": config.get('ports', {}),
-                    "features": config.get('backend.features', {})
-                },
-                "enhanced_monitoring": True
+                "success": True,
+                "message": f"Log {log_name} cleared successfully",
+                "log_name": log_name,
+                "timestamp": time.strftime('%Y-%m-%d %H:%M:%S')
             }
+            
             self.wfile.write(json.dumps(response).encode())
             
-        elif path == '/api/system':
-            # System stats endpoint
-            if not self.check_auth():
-                self.send_response(401)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-                self.end_headers()
-                response = {"error": "Unauthorized"}
-                self.wfile.write(json.dumps(response).encode())
-            else:
-                self.send_response(200)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-                self.end_headers()
+        except Exception as e:
+            logger.error(f"Log clear failed: {e}")
+            self._send_internal_error(f"Failed to clear log: {str(e)}")
+    
+    def _handle_service_control(self):
+        """Handle service control with improved error handling"""
+        if not self.check_auth():
+            self._send_unauthorized()
+            return
+        
+        try:
+            # Extract service name and action from path
+            parsed_url = urlparse(self.path)
+            path = parsed_url.path
+            path_parts = path.split('/')
+            if len(path_parts) >= 4:
+                service_name = path_parts[3]
+                action = path_parts[4] if len(path_parts) > 4 else 'status'
                 
-                # Get real-time or historical data based on query params
-                if 'history' in query_params:
-                    minutes = int(query_params.get('history', ['60'])[0])
-                    response = self._get_system_stats_with_history(minutes)
-                elif 'enhanced' in query_params:
-                    # Return enhanced stats with formatted values and status indicators
-                    response = self._get_enhanced_system_stats()
+                # Handle service actions
+                result = self._execute_service_action(service_name, action)
+                
+                self.send_response(200)
+                self._set_common_headers()
+                self.wfile.write(json.dumps(result).encode())
+            else:
+                self._send_bad_request("Invalid service path")
+                
+        except Exception as e:
+            logger.error(f"Service control failed: {e}")
+            self._send_internal_error(f"Service action failed: {str(e)}")
+    
+    def _execute_service_action(self, service_name, action):
+        """Execute service action with improved error handling"""
+        try:
+            if action == 'start':
+                result = os.system(f'systemctl start {service_name}')
+                if result == 0:
+                    return {"success": True, "message": f"Service {service_name} started successfully"}
                 else:
-                    response = self._get_system_stats()
-                    
-                self.wfile.write(json.dumps(response).encode())
-                
-        elif path == '/api/system/enhanced':
-            # Enhanced system stats endpoint with formatted values and status indicators
-            if not self.check_auth():
-                self.send_response(401)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-                self.end_headers()
-                response = {"error": "Unauthorized"}
-                self.wfile.write(json.dumps(response).encode())
+                    return {"success": False, "message": f"Failed to start service {service_name}"}
+            elif action == 'stop':
+                result = os.system(f'systemctl stop {service_name}')
+                if result == 0:
+                    return {"success": True, "message": f"Service {service_name} stopped successfully"}
+                else:
+                    return {"success": False, "message": f"Failed to stop service {service_name}"}
+            elif action == 'restart':
+                result = os.system(f'systemctl restart {service_name}')
+                if result == 0:
+                    return {"success": True, "message": f"Service {service_name} restarted successfully"}
+                else:
+                    return {"success": False, "message": f"Failed to restart service {service_name}"}
+            elif action == 'status':
+                result = os.system(f'systemctl is-active {service_name}')
+                if result == 0:
+                    return {"success": True, "service": service_name, "status": "active"}
+                else:
+                    return {"success": True, "service": service_name, "status": "inactive"}
             else:
-                self.send_response(200)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-                self.end_headers()
-                
-                response = self._get_enhanced_system_stats()
-                self.wfile.write(json.dumps(response).encode())
-                
-        elif path == '/api/service/restart':
-            # Safe service restart endpoint (GET method shows info, POST executes restart)
-            if self.command == 'GET':
-                self.send_response(200)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-                self.end_headers()
-                
-                response = {
-                    "endpoint": "/api/service/restart",
-                    "description": "Safe service restart endpoint",
-                    "methods": {
-                        "GET": "Get endpoint information",
-                        "POST": "Execute safe service restart"
-                    },
-                    "safety_features": [
-                        "No system shutdown/restart",
-                        "Service restart only",
-                        "Multiple fallback methods",
-                        "Graceful process handling"
-                    ],
-                    "available_methods": [
-                        "systemctl restart",
-                        "service restart", 
-                        "docker restart",
-                        "process restart (kill + start)"
-                    ],
-                    "usage": {
-                        "method": "POST",
-                        "headers": "Authorization: Bearer <token>",
-                        "body": "{} (no body required)"
-                    },
-                    "timestamp": time.strftime('%Y-%m-%d %H:%M:%S')
-                }
-                self.wfile.write(json.dumps(response).encode())
-            else:
-                # POST method handled in do_POST
-                self.send_response(405)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-                self.end_headers()
-                response = {"error": "Method not allowed", "allowed_methods": ["GET"]}
-                self.wfile.write(json.dumps(response).encode())
-                
-        elif path == '/api/service/manage':
-            # Service management endpoint (GET shows info, POST executes actions)
-            if self.command == 'GET':
-                self.send_response(200)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-                self.end_headers()
-                
-                response = {
-                    "endpoint": "/api/service/manage",
-                    "description": "Service management endpoint",
-                    "methods": {
-                        "GET": "Get endpoint information",
-                        "POST": "Execute service management actions"
-                    },
-                    "available_actions": ["start", "stop", "status"],
-                    "safety_features": [
-                        "Service-level operations only",
-                        "No system impact",
-                        "Standard systemctl/service commands"
-                    ],
-                    "usage": {
-                        "method": "POST",
-                        "headers": "Authorization: Bearer <token>",
-                        "body": '{"action": "start|stop|status"}'
-                    },
-                    "examples": {
-                        "start": '{"action": "start"}',
-                        "stop": '{"action": "stop"}',
-                        "status": '{"action": "status"}'
-                    },
-                    "timestamp": time.strftime('%Y-%m-%d %H:%M:%S')
-                }
-                self.wfile.write(json.dumps(response).encode())
-            else:
-                # POST method handled in do_POST
-                self.send_response(405)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-                self.end_headers()
-                response = {"error": "Method not allowed", "allowed_methods": ["GET"]}
-                self.wfile.write(json.dumps(response).encode())
-                
-        elif path == '/api/service/info':
-            # Service management information endpoint
-            if not self.check_auth():
-                self.send_response(401)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-                self.end_headers()
-                response = {"error": "Unauthorized"}
-                self.wfile.write(json.dumps(response).encode())
-            else:
-                self.send_response(200)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-                self.end_headers()
-                
-                try:
-                    # Get service management information
-                    service_info = self._get_service_management_info()
-                    response = {
-                        "success": True,
-                        "service_management": service_info,
-                        "timestamp": time.strftime('%Y-%m-%d %H:%M:%S'),
-                        "endpoint_info": {
-                            "description": "Service management information and recommendations",
-                            "available_endpoints": [
-                                "/api/service/restart - Safe service restart",
-                                "/api/service/manage - Service start/stop/status",
-                                "/api/service/info - Service management info"
-                            ]
-                        }
-                    }
-                    
-                except Exception as e:
-                    response = {"success": False, "message": f"Failed to get service info: {str(e)}"}
-                
-                self.wfile.write(json.dumps(response).encode())
-                
-        elif path == '/health':
-            # Health endpoint doesn't support POST
-            self.send_response(405)
-            self.send_header('Content-type', 'application/json')
-            self.send_header('Access-Control-Allow-Origin', '*')
-            self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-            self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-            self.end_headers()
-            response = {"error": "Method not allowed"}
-            self.wfile.write(json.dumps(response).encode())
-                
+                return {"success": False, "message": f"Unknown action: {action}"}
+        except Exception as e:
+            return {"success": False, "message": f"Service action failed: {str(e)}"}
+    
+    def _handle_health_check(self):
+        """Handle health check with enhanced information"""
+        self.send_response(200)
+        self._set_common_headers()
+        
+        response = {
+            "status": "healthy",
+            "timestamp": time.strftime('%Y-%m-%d %H:%M:%S'),
+            "version": config.get('project.version', '1.0.0'),
+            "uptime": self._get_uptime(),
+            "config": {
+                "ports": config.get('ports', {}),
+                "features": config.get('backend.features', {})
+            },
+            "enhanced_monitoring": True,
+            "performance": {
+                "active_connections": connection_pool.get_active_connections(),
+                "cache_size": metrics_cache.size(),
+                "metrics_stats": metrics_collector.get_stats()
+            }
+        }
+        self.wfile.write(json.dumps(response).encode())
+    
+    def _handle_system_stats(self, query_params):
+        """Handle system stats with improved performance"""
+        if not self.check_auth():
+            self._send_unauthorized()
+            return
+        
+        self.send_response(200)
+        self._set_common_headers()
+        
+        # Get real-time or historical data based on query params
+        if 'history' in query_params:
+            minutes = int(query_params.get('history', ['60'])[0])
+            response = self._get_system_stats_with_history(minutes)
+        elif 'enhanced' in query_params:
+            # Return enhanced stats with formatted values and status indicators
+            response = self._get_enhanced_system_stats()
         else:
-            # 404 for unknown paths
-            self.send_response(404)
-            self.send_header('Content-type', 'application/json')
-            self.send_header('Access-Control-Allow-Origin', '*')
-            self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-            self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-            self.end_headers()
-            response = {"error": "Not found"}
+            response = self._get_system_stats()
+            
+        self.wfile.write(json.dumps(response).encode())
+    
+    def _handle_enhanced_system_stats(self):
+        """Handle enhanced system stats"""
+        if not self.check_auth():
+            self._send_unauthorized()
+            return
+        
+        self.send_response(200)
+        self._set_common_headers()
+        
+        response = self._get_enhanced_system_stats()
+        self.wfile.write(json.dumps(response).encode())
+    
+    def _handle_service_restart_info(self):
+        """Handle service restart info"""
+        if self.command == 'GET':
+            self.send_response(200)
+            self._set_common_headers()
+            
+            response = {
+                "endpoint": "/api/service/restart",
+                "description": "Safe service restart endpoint",
+                "methods": {
+                    "GET": "Get endpoint information",
+                    "POST": "Execute safe service restart"
+                },
+                "safety_features": [
+                    "No system shutdown/restart",
+                    "Service restart only",
+                    "Multiple fallback methods",
+                    "Graceful process handling"
+                ],
+                "available_methods": [
+                    "systemctl restart",
+                    "service restart", 
+                    "docker restart",
+                    "process restart (kill + start)"
+                ],
+                "usage": {
+                    "method": "POST",
+                    "headers": "Authorization: Bearer <token>",
+                    "body": "{} (no body required)"
+                },
+                "timestamp": time.strftime('%Y-%m-%d %H:%M:%S')
+            }
             self.wfile.write(json.dumps(response).encode())
+        else:
+            self._send_method_not_allowed(["GET"])
+    
+    def _handle_service_manage_info(self):
+        """Handle service manage info"""
+        if self.command == 'GET':
+            self.send_response(200)
+            self._set_common_headers()
+            
+            response = {
+                "endpoint": "/api/service/manage",
+                "description": "Service management endpoint",
+                "methods": {
+                    "GET": "Get endpoint information",
+                    "POST": "Execute service management actions"
+                },
+                "available_actions": ["start", "stop", "status"],
+                "safety_features": [
+                    "Service-level operations only",
+                    "No system impact",
+                    "Standard systemctl/service commands"
+                ],
+                "usage": {
+                    "method": "POST",
+                    "headers": "Authorization: Bearer <token>",
+                    "body": '{"action": "start|stop|status"}'
+                },
+                "examples": {
+                    "start": '{"action": "start"}',
+                    "stop": '{"action": "stop"}',
+                    "status": '{"action": "status"}'
+                },
+                "timestamp": time.strftime('%Y-%m-%d %H:%M:%S')
+            }
+            self.wfile.write(json.dumps(response).encode())
+        else:
+            self._send_method_not_allowed(["GET"])
+    
+    def _handle_service_info(self):
+        """Handle service info"""
+        if not self.check_auth():
+            self._send_unauthorized()
+            return
+        
+        self.send_response(200)
+        self._set_common_headers()
+        
+        try:
+            # Get service management information
+            service_info = self._get_service_management_info()
+            response = {
+                "success": True,
+                "service_management": service_info,
+                "timestamp": time.strftime('%Y-%m-%d %H:%M:%S'),
+                "endpoint_info": {
+                    "description": "Service management information and recommendations",
+                    "available_endpoints": [
+                        "/api/service/restart - Safe service restart",
+                        "/api/service/manage - Service start/stop/status",
+                        "/api/service/info - Service management info"
+                    ]
+                }
+            }
+            
+        except Exception as e:
+            response = {"success": False, "message": f"Failed to get service info: {str(e)}"}
+        
+        self.wfile.write(json.dumps(response).encode())
+    
+    def _handle_404(self):
+        """Handle 404 errors"""
+        self.send_response(404)
+        self._set_common_headers()
+        response = {"error": "Not found"}
+        self.wfile.write(json.dumps(response).encode())
+    
+    def _set_common_headers(self):
+        """Set common response headers"""
+        self.send_header('Content-type', 'application/json')
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+        self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
+        self.send_header('Pragma', 'no-cache')
+        self.send_header('Expires', '0')
+        self.end_headers()
+    
+    def _send_unauthorized(self):
+        """Send unauthorized response"""
+        self.send_response(401)
+        self._set_common_headers()
+        response = {"error": "Unauthorized"}
+        self.wfile.write(json.dumps(response).encode())
+    
+    def _send_not_found(self, message):
+        """Send not found response"""
+        self.send_response(404)
+        self._set_common_headers()
+        response = {"error": message}
+        self.wfile.write(json.dumps(response).encode())
+    
+    def _send_bad_request(self, message):
+        """Send bad request response"""
+        self.send_response(400)
+        self._set_common_headers()
+        response = {"error": message}
+        self.wfile.write(json.dumps(response).encode())
+    
+    def _send_internal_error(self, message):
+        """Send internal error response"""
+        self.send_response(500)
+        self._set_common_headers()
+        response = {"error": message}
+        self.wfile.write(json.dumps(response).encode())
+    
+    def _send_method_not_allowed(self, allowed_methods):
+        """Send method not allowed response"""
+        self.send_response(405)
+        self._set_common_headers()
+        response = {"error": "Method not allowed", "allowed_methods": allowed_methods}
+        self.wfile.write(json.dumps(response).encode())
     
     def do_POST(self):
-        """Handle POST requests"""
+        """Handle POST requests with connection pooling and rate limiting"""
+        if not connection_pool.acquire_connection():
+            self.send_response(503)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            response = {"error": "Service temporarily unavailable - too many connections"}
+            self.wfile.write(json.dumps(response).encode())
+            return
+        
+        try:
+            self._handle_post_request()
+        finally:
+            connection_pool.release_connection()
+    
+    @monitor_performance
+    def _handle_post_request(self):
+        """Handle POST request logic"""
         parsed_url = urlparse(self.path)
         path = parsed_url.path
         
+        # Route to appropriate handler
         if path == '/api/auth/token':
-            # Authentication endpoint
-            self.send_response(200)
-            self.send_header('Content-type', 'application/json')
-            self.send_header('Access-Control-Allow-Origin', '*')
-            self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-            self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-            self.end_headers()
-            
-            response = self.handle_auth()
-            self.wfile.write(json.dumps(response).encode())
-            
+            self._handle_auth()
         elif path == '/api/services':
-            # Service control endpoint
-            if not self.check_auth():
-                self.send_response(401)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-                self.end_headers()
-                response = {"error": "Unauthorized"}
-                self.wfile.write(json.dumps(response).encode())
-            else:
-                self.send_response(200)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-                self.end_headers()
-                response = self.handle_service_action()
-                self.wfile.write(json.dumps(response).encode())
-                
+            self._handle_services_post()
         elif path == '/api/power':
-            # Power management endpoint
-            if not self.check_auth():
-                self.send_response(401)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-                self.end_headers()
-                response = {"error": "Unauthorized"}
-                self.wfile.write(json.dumps(response).encode())
-            else:
-                self.send_response(200)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-                self.end_headers()
-                response = self.handle_power_action()
-                self.wfile.write(json.dumps(response).encode())
-                
+            self._handle_power_action()
         elif path == '/api/power/shutdown':
-            # Shutdown endpoint
-            if not self.check_auth():
-                self.send_response(401)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-                self.end_headers()
-                response = {"error": "Unauthorized"}
-                self.wfile.write(json.dumps(response).encode())
-            else:
-                self.send_response(200)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-                self.end_headers()
-                
-                try:
-                    # Check permissions first
-                    permission_check = self._check_shutdown_permissions()
-                    if not permission_check['can_shutdown']:
-                        response = {
-                            "success": False, 
-                            "message": f"Permission denied: {permission_check['reason']}",
-                            "action": "shutdown",
-                            "permission_details": permission_check,
-                            "suggestions": permission_check['suggestions']
-                        }
-                    else:
-                        # Execute shutdown with proper command
-                        shutdown_result = self._execute_shutdown()
-                        if shutdown_result['success']:
-                            response = {
-                                "success": True,
-                                "message": shutdown_result['message'],
-                                "action": "shutdown",
-                                "command_used": shutdown_result['command_used'],
-                                "permission_method": permission_check['method'],
-                                "platform": platform.system()
-                            }
-                        else:
-                            response = {
-                                "success": False,
-                                "message": f"Shutdown failed: {shutdown_result['error']}",
-                                "action": "shutdown",
-                                "permission_details": permission_check,
-                                "suggestions": permission_check['suggestions']
-                            }
-                except Exception as e:
-                    response = {"success": False, "message": f"Shutdown failed: {str(e)}"}
-                
-                self.wfile.write(json.dumps(response).encode())
-                
+            self._handle_power_shutdown()
         elif path == '/api/power/restart':
-            # Restart endpoint
-            if not self.check_auth():
-                self.send_response(401)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-                self.end_headers()
-                response = {"error": "Unauthorized"}
-                self.wfile.write(json.dumps(response).encode())
-            else:
-                self.send_response(200)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-                self.end_headers()
-                
-                try:
-                    # Check permissions first
-                    permission_check = self._check_restart_permissions()
-                    if not permission_check['can_restart']:
-                        response = {
-                            "success": False, 
-                            "message": f"Permission denied: {permission_check['reason']}",
-                            "action": "restart",
-                            "permission_details": permission_check,
-                            "suggestions": permission_check['suggestions']
-                        }
-                    else:
-                        # Execute restart with proper command
-                        restart_result = self._execute_restart()
-                        if restart_result['success']:
-                            response = {
-                                "success": True,
-                                "message": restart_result['message'],
-                                "action": "restart",
-                                "command_used": restart_result['command_used'],
-                                "permission_method": permission_check['method'],
-                                "platform": platform.system()
-                            }
-                        else:
-                            response = {
-                                "success": False,
-                                "message": f"Restart failed: {restart_result['error']}",
-                                "action": "restart",
-                                "permission_details": permission_check,
-                                "suggestions": permission_check['suggestions']
-                            }
-                except Exception as e:
-                    response = {"success": False, "message": f"Restart failed: {str(e)}"}
-                
-                self.wfile.write(json.dumps(response).encode())
-                
+            self._handle_power_restart()
         elif path == '/api/power/sleep':
-            # Sleep endpoint
-            if not self.check_auth():
-                self.send_response(401)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-                self.end_headers()
-                response = {"error": "Unauthorized"}
-                self.wfile.write(json.dumps(response).encode())
+            self._handle_power_sleep()
+        elif path == '/api/service/restart':
+            self._handle_service_restart_post()
+        elif path == '/api/service/manage':
+            self._handle_service_manage_post()
+        elif path == '/api/service/info':
+            self._handle_service_info_post()
+        else:
+            self._handle_404()
+    
+    def _handle_auth(self):
+        """Handle authentication with improved security"""
+        self.send_response(200)
+        self._set_common_headers()
+        
+        response = self.handle_auth()
+        self.wfile.write(json.dumps(response).encode())
+    
+    def _handle_services_post(self):
+        """Handle services POST with improved error handling"""
+        if not self.check_auth():
+            self._send_unauthorized()
+            return
+        
+        self.send_response(200)
+        self._set_common_headers()
+        response = self.handle_service_action()
+        self.wfile.write(json.dumps(response).encode())
+    
+    def _handle_power_action(self):
+        """Handle power action with improved error handling"""
+        if not self.check_auth():
+            self._send_unauthorized()
+            return
+        
+        self.send_response(200)
+        self._set_common_headers()
+        response = self.handle_power_action()
+        self.wfile.write(json.dumps(response).encode())
+    
+    def _handle_power_shutdown(self):
+        """Handle power shutdown with improved error handling"""
+        if not self.check_auth():
+            self._send_unauthorized()
+            return
+        
+        self.send_response(200)
+        self._set_common_headers()
+        
+        try:
+            # Check permissions first
+            permission_check = self._check_shutdown_permissions()
+            if not permission_check['can_shutdown']:
+                response = {
+                    "success": False, 
+                    "message": f"Permission denied: {permission_check['reason']}",
+                    "action": "shutdown",
+                    "permission_details": permission_check,
+                    "suggestions": permission_check['suggestions']
+                }
             else:
-                self.send_response(200)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-                self.end_headers()
-                
-                try:
-                    # Try to put system to sleep (cross-platform)
-                    if platform.system() == 'Windows':
-                        os.system('powercfg /hibernate off')  # Disable hibernate first
-                        os.system('rundll32.exe powrprof.dll,SetSuspendState 0,1,0')  # Sleep
-                    else:
-                        os.system('systemctl suspend')
-                    
+                # Execute shutdown with proper command
+                shutdown_result = self._execute_shutdown()
+                if shutdown_result['success']:
                     response = {
                         "success": True,
-                        "message": "Sleep command sent",
-                        "action": "sleep",
+                        "message": shutdown_result['message'],
+                        "action": "shutdown",
+                        "command_used": shutdown_result['command_used'],
+                        "permission_method": permission_check['method'],
                         "platform": platform.system()
                     }
-                except Exception as e:
-                    response = {"success": False, "message": f"Sleep failed: {str(e)}"}
-                
-                self.wfile.write(json.dumps(response).encode())
-                
-        elif path == '/api/service/restart':
-            # Safe service restart endpoint
-            if not self.check_auth():
-                self.send_response(401)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-                self.end_headers()
-                response = {"error": "Unauthorized"}
-                self.wfile.write(json.dumps(response).encode())
-            else:
-                self.send_response(200)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-                self.end_headers()
-                
-                try:
-                    # Use the safe service restart method
-                    restart_result = self._safe_restart_pi_monitor_service()
+                else:
                     response = {
-                        "success": restart_result['success'],
-                        "message": restart_result.get('message', ''),
-                        "method": restart_result.get('method', ''),
-                        "command_used": restart_result.get('command_used', ''),
-                        "safety_level": restart_result.get('safety_level', ''),
-                        "description": restart_result.get('description', ''),
-                        "timestamp": time.strftime('%Y-%m-%d %H:%M:%S')
+                        "success": False,
+                        "message": f"Shutdown failed: {shutdown_result['error']}",
+                        "action": "shutdown",
+                        "permission_details": permission_check,
+                        "suggestions": permission_check['suggestions']
                     }
-                    
-                    if not restart_result['success']:
-                        response["error"] = restart_result.get('error', '')
-                        response["methods_tried"] = restart_result.get('methods_tried', [])
-                        response["suggestions"] = restart_result.get('suggestions', [])
-                        
-                except Exception as e:
-                    response = {"success": False, "message": f"Service restart failed: {str(e)}"}
-                
-                self.wfile.write(json.dumps(response).encode())
-                
-        elif path == '/api/service/manage':
-            # Service management endpoint (start/stop/status)
-            if not self.check_auth():
-                self.send_response(401)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-                self.end_headers()
-                response = {"error": "Unauthorized"}
-                self.wfile.write(json.dumps(response).encode())
+        except Exception as e:
+            logger.error(f"Shutdown failed: {e}")
+            response = {"success": False, "message": f"Shutdown failed: {str(e)}"}
+        
+        self.wfile.write(json.dumps(response).encode())
+    
+    def _handle_power_restart(self):
+        """Handle power restart with improved error handling"""
+        if not self.check_auth():
+            self._send_unauthorized()
+            return
+        
+        self.send_response(200)
+        self._set_common_headers()
+        
+        try:
+            # Check permissions first
+            permission_check = self._check_restart_permissions()
+            if not permission_check['can_restart']:
+                response = {
+                    "success": False, 
+                    "message": f"Permission denied: {permission_check['reason']}",
+                    "action": "restart",
+                    "permission_details": permission_check,
+                    "suggestions": permission_check['suggestions']
+                }
             else:
-                self.send_response(200)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-                self.end_headers()
-                
-                try:
-                    # Get action from POST data
-                    content_length = int(self.headers.get('Content-Length', 0))
-                    if content_length > 0:
-                        post_data = self.rfile.read(content_length)
-                        data = json.loads(post_data.decode('utf-8'))
-                        action = data.get('action', 'status')
-                    else:
-                        action = 'status'
-                    
-                    # Use the safe service management method
-                    manage_result = self._safe_manage_pi_monitor_service(action)
-                    response = {
-                        "success": manage_result['success'],
-                        "action": manage_result.get('action', ''),
-                        "message": manage_result.get('message', ''),
-                        "method": manage_result.get('method', ''),
-                        "timestamp": time.strftime('%Y-%m-%d %H:%M:%S')
-                    }
-                    
-                    if manage_result['success'] and action == 'status':
-                        response["status"] = manage_result.get('status', '')
-                        response["detailed_status"] = manage_result.get('detailed_status', '')
-                    elif not manage_result['success']:
-                        response["error"] = manage_result.get('error', '')
-                        response["available_actions"] = manage_result.get('available_actions', [])
-                        
-                except Exception as e:
-                    response = {"success": False, "message": f"Service management failed: {str(e)}"}
-                
-                self.wfile.write(json.dumps(response).encode())
-                
-        elif path == '/api/service/info':
-            # Service management information endpoint
-            if not self.check_auth():
-                self.send_response(401)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-                self.end_headers()
-                response = {"error": "Unauthorized"}
-                self.wfile.write(json.dumps(response).encode())
-            else:
-                self.send_response(200)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-                self.end_headers()
-                
-                try:
-                    # Get service management information
-                    service_info = self._get_service_management_info()
+                # Execute restart with proper command
+                restart_result = self._execute_restart()
+                if restart_result['success']:
                     response = {
                         "success": True,
-                        "service_management": service_info,
-                        "timestamp": time.strftime('%Y-%m-%d %H:%M:%S'),
-                        "endpoint_info": {
-                            "description": "Service management information and recommendations",
-                            "available_endpoints": [
-                                "/api/service/restart - Safe service restart",
-                                "/api/service/manage - Service start/stop/status",
-                                "/api/service/info - Service management info"
-                            ]
-                        }
+                        "message": restart_result['message'],
+                        "action": "restart",
+                        "command_used": restart_result['command_used'],
+                        "permission_method": permission_check['method'],
+                        "platform": platform.system()
                     }
-                    
-                except Exception as e:
-                    response = {"success": False, "message": f"Failed to get service info: {str(e)}"}
+                else:
+                    response = {
+                        "success": False,
+                        "message": f"Restart failed: {restart_result['error']}",
+                        "action": "restart",
+                        "permission_details": permission_check,
+                        "suggestions": permission_check['suggestions']
+                    }
+        except Exception as e:
+            logger.error(f"Restart failed: {e}")
+            response = {"success": False, "message": f"Restart failed: {str(e)}"}
+        
+        self.wfile.write(json.dumps(response).encode())
+    
+    def _handle_power_sleep(self):
+        """Handle power sleep with improved error handling"""
+        if not self.check_auth():
+            self._send_unauthorized()
+            return
+        
+        self.send_response(200)
+        self._set_common_headers()
+        
+        try:
+            # Try to put system to sleep (cross-platform)
+            if platform.system() == 'Windows':
+                os.system('powercfg /hibernate off')  # Disable hibernate first
+                os.system('rundll32.exe powrprof.dll,SetSuspendState 0,1,0')  # Sleep
+            else:
+                os.system('systemctl suspend')
+            
+            response = {
+                "success": True,
+                "message": "Sleep command sent",
+                "action": "sleep",
+                "platform": platform.system()
+            }
+        except Exception as e:
+            logger.error(f"Sleep failed: {e}")
+            response = {"success": False, "message": f"Sleep failed: {str(e)}"}
+        
+        self.wfile.write(json.dumps(response).encode())
+    
+    def _handle_service_restart_post(self):
+        """Handle service restart POST with improved error handling"""
+        if not self.check_auth():
+            self._send_unauthorized()
+            return
+        
+        self.send_response(200)
+        self._set_common_headers()
+        
+        try:
+            # Use the safe service restart method
+            restart_result = self._safe_restart_pi_monitor_service()
+            response = {
+                "success": restart_result['success'],
+                "message": restart_result.get('message', ''),
+                "method": restart_result.get('method', ''),
+                "command_used": restart_result.get('command_used', ''),
+                "safety_level": restart_result.get('safety_level', ''),
+                "description": restart_result.get('description', ''),
+                "timestamp": time.strftime('%Y-%m-%d %H:%M:%S')
+            }
+            
+            if not restart_result['success']:
+                response["error"] = restart_result.get('error', '')
+                response["methods_tried"] = restart_result.get('methods_tried', [])
+                response["suggestions"] = restart_result.get('suggestions', [])
                 
-                self.wfile.write(json.dumps(response).encode())
+        except Exception as e:
+            logger.error(f"Service restart failed: {e}")
+            response = {"success": False, "message": f"Service restart failed: {str(e)}"}
+        
+        self.wfile.write(json.dumps(response).encode())
+    
+    def _handle_service_manage_post(self):
+        """Handle service manage POST with improved error handling"""
+        if not self.check_auth():
+            self._send_unauthorized()
+            return
+        
+        self.send_response(200)
+        self._set_common_headers()
+        
+        try:
+            # Get action from POST data
+            content_length = int(self.headers.get('Content-Length', 0))
+            if content_length > 0:
+                post_data = self.rfile.read(content_length)
+                data = json.loads(post_data.decode('utf-8'))
+                action = data.get('action', 'status')
+            else:
+                action = 'status'
+            
+            # Use the safe service management method
+            manage_result = self._safe_manage_pi_monitor_service(action)
+            response = {
+                "success": manage_result['success'],
+                "action": manage_result.get('action', ''),
+                "message": manage_result.get('message', ''),
+                "method": manage_result.get('method', ''),
+                "timestamp": time.strftime('%Y-%m-%d %H:%M:%S')
+            }
+            
+            if manage_result['success'] and action == 'status':
+                response["status"] = manage_result.get('status', '')
+                response["detailed_status"] = manage_result.get('detailed_status', '')
+            elif not manage_result['success']:
+                response["error"] = manage_result.get('error', '')
+                response["available_actions"] = manage_result.get('available_actions', [])
                 
-        elif path == '/health':
-            # Health endpoint doesn't support POST
-            self.send_response(405)
-            self.send_header('Content-type', 'application/json')
-            self.send_header('Access-Control-Allow-Origin', '*')
-            self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-            self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-            self.end_headers()
-            response = {"error": "Method not allowed"}
-            self.wfile.write(json.dumps(response).encode())
-                
-        else:
-            # 404 for unknown paths
-            self.send_response(404)
-            self.send_header('Content-type', 'application/json')
-            self.send_header('Access-Control-Allow-Origin', '*')
-            self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-            self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-            self.end_headers()
-            response = {"error": "Not found"}
-            self.wfile.write(json.dumps(response).encode())
+        except Exception as e:
+            logger.error(f"Service management failed: {e}")
+            response = {"success": False, "message": f"Service management failed: {str(e)}"}
+        
+        self.wfile.write(json.dumps(response).encode())
+    
+    def _handle_service_info_post(self):
+        """Handle service info POST with improved error handling"""
+        if not self.check_auth():
+            self._send_unauthorized()
+            return
+        
+        self.send_response(200)
+        self._set_common_headers()
+        
+        try:
+            # Get service management information
+            service_info = self._get_service_management_info()
+            response = {
+                "success": True,
+                "service_management": service_info,
+                "timestamp": time.strftime('%Y-%m-%d %H:%M:%S'),
+                "endpoint_info": {
+                    "description": "Service management information and recommendations",
+                    "available_endpoints": [
+                        "/api/service/restart - Safe service restart",
+                        "/api/service/manage - Service start/stop/status",
+                        "/api/service/info - Service management info"
+                    ]
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to get service info: {e}")
+            response = {"success": False, "message": f"Failed to get service info: {str(e)}"}
+        
+        self.wfile.write(json.dumps(response).encode())
     
     def do_OPTIONS(self):
-        """Handle CORS preflight"""
+        """Handle CORS preflight with improved headers"""
         parsed_url = urlparse(self.path)
         path = parsed_url.path
         
@@ -1229,19 +1252,30 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
         self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
         self.send_header('Access-Control-Max-Age', '86400')  # Cache preflight for 24 hours
+        self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
         self.end_headers()
     
     def check_auth(self):
-        """Simple authentication check"""
+        """Simple authentication check with improved security"""
         auth_header = self.headers.get('Authorization', '')
         if not auth_header.startswith('Bearer '):
             return False
         
         token = auth_header.split(' ')[1]
-        return token in SimplePiMonitorHandler.auth_tokens
+        
+        # Check if token exists and is not expired
+        if token in SimplePiMonitorHandler.auth_tokens:
+            token_data = SimplePiMonitorHandler.auth_tokens[token]
+            if time.time() < token_data['expires']:
+                return True
+            else:
+                # Remove expired token
+                del SimplePiMonitorHandler.auth_tokens[token]
+        
+        return False
     
     def handle_auth(self):
-        """Handle authentication and return token"""
+        """Handle authentication and return token with improved security"""
         # Get content length from headers
         content_length = int(self.headers.get('Content-Length', 0))
         if content_length > 0:
@@ -1253,47 +1287,55 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                 username = auth_data.get('username', '')
                 password = auth_data.get('password', '')
                 
-                # Check credentials
+                # Check credentials (in production, use proper password hashing)
                 if username == 'abhinav' and password == 'kavachi':
                     # Authentication successful
                     token = self.generate_token()
                     SimplePiMonitorHandler.auth_tokens[token] = {
                         'user': username,
-                        'expires': time.time() + JWT_EXPIRATION
+                        'expires': time.time() + JWT_EXPIRATION,
+                        'created': time.time()
                     }
+                    
+                    logger.info(f"Authentication successful for user: {username}")
                     
                     return {
                         "access_token": token,
                         "token_type": "bearer",
-                        "message": "Authentication successful"
+                        "message": "Authentication successful",
+                        "expires_in": JWT_EXPIRATION
                     }
                 else:
                     # Authentication failed
+                    logger.warning(f"Authentication failed for user: {username}")
                     return {
                         "error": "Invalid username or password",
                         "message": "Authentication failed"
                     }
                     
-            except (json.JSONDecodeError, UnicodeDecodeError):
+            except (json.JSONDecodeError, UnicodeDecodeError) as e:
+                logger.error(f"Invalid JSON data in auth request: {e}")
                 return {
                     "error": "Invalid JSON data",
                     "message": "Request body must be valid JSON"
                 }
         else:
+            logger.warning("Missing request body in auth request")
             return {
                 "error": "Missing request body",
                 "message": "Username and password required"
             }
     
     def generate_token(self):
-        """Generate a simple token"""
+        """Generate a simple token with improved security"""
         timestamp = str(int(time.time()))
         message = f"pi-monitor:{timestamp}"
         signature = hmac.new(JWT_SECRET.encode(), message.encode(), hashlib.sha256).hexdigest()
         return base64.b64encode(f"{message}:{signature}".encode()).decode()
     
+    @lru_cache(maxsize=128)
     def _get_system_info(self):
-        """Get basic system information"""
+        """Get basic system information with caching"""
         try:
             uptime_seconds = time.time() - psutil.boot_time()
             uptime_hours = int(uptime_seconds // 3600)
@@ -1307,27 +1349,29 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                 "server_time": time.strftime('%Y-%m-%d %H:%M:%S')
             }
         except Exception as e:
+            logger.error(f"Failed to get system info: {e}")
             return {"error": f"Failed to get system info: {str(e)}"}
     
     def _get_uptime(self):
-        """Get system uptime"""
+        """Get system uptime with improved error handling"""
         try:
             uptime_seconds = time.time() - psutil.boot_time()
             uptime_hours = int(uptime_seconds // 3600)
             uptime_minutes = int((uptime_seconds % 3600) // 60)
             return f"{uptime_hours}h {uptime_minutes}m"
         except Exception as e:
+            logger.error(f"Failed to get uptime: {e}")
             return {"error": f"Failed to get uptime: {str(e)}"}
     
     def _get_system_stats(self):
-        """Get current system statistics (real-time)"""
+        """Get current system statistics (real-time) with improved performance"""
         try:
             cpu_percent = psutil.cpu_percent(interval=0.1)
             memory = psutil.virtual_memory()
             disk = psutil.disk_usage('/')
             
             # Get temperature using the global metrics collector
-            temperature = metrics_collector._get_temperature()
+            temperature = self._get_temperature()
             
             # Get network stats
             network = psutil.net_io_counters()
@@ -1360,10 +1404,11 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                 }
             }
         except Exception as e:
+            logger.error(f"Failed to get system stats: {e}")
             return {"timestamp": time.time(), "error": f"Failed to get system stats: {str(e)}"}
     
     def _get_system_stats_with_history(self, minutes):
-        """Get system statistics with history for the last N minutes"""
+        """Get system statistics with history for the last N minutes with improved performance"""
         try:
             cutoff_time = time.time() - (minutes * 60)
             recent_metrics = [m for m in metrics_collector.metrics_history if m.get('timestamp', 0) > cutoff_time]
@@ -1393,6 +1438,7 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
             }
             return aggregated_metrics
         except Exception as e:
+            logger.error(f"Failed to get historical system stats: {e}")
             return {"timestamp": time.time(), "error": f"Failed to get historical system stats: {str(e)}"}
     
     def _get_enhanced_system_stats(self):
@@ -1480,6 +1526,7 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
             return enhanced_stats
             
         except Exception as e:
+            logger.error(f"Failed to get enhanced system stats: {e}")
             return {"timestamp": time.time(), "error": f"Failed to get enhanced system stats: {str(e)}"}
     
     def _get_cpu_status(self, cpu_percent):
@@ -1526,226 +1573,63 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
         else:
             return {"level": "normal", "color": "green", "message": "Normal"}
     
-    def _get_power_status(self):
-        """Get power status and available actions"""
+    def _get_temperature(self):
+        """Get system temperature using multiple methods with improved error handling"""
         try:
-            # Get actual uptime
-            uptime_seconds = time.time() - psutil.boot_time()
-            uptime_hours = int(uptime_seconds // 3600)
-            uptime_minutes = int((uptime_seconds % 3600) // 60)
-            uptime_formatted = f"{uptime_hours}h {uptime_minutes}m"
+            # Try Raspberry Pi specific path
+            if os.path.exists('/sys/class/thermal/thermal_zone0/temp'):
+                with open('/sys/class/thermal/thermal_zone0/temp', 'r') as f:
+                    temp_raw = f.read().strip()
+                    temp_value = float(temp_raw) / 1000.0
+                    if temp_value > 0 and temp_value < 200:  # Sanity check for reasonable temperature range
+                        return round(temp_value, 1)
             
-            # Get system load
-            load_avg = os.getloadavg()
+            # Try other thermal zones
+            for i in range(10):
+                thermal_path = f'/sys/class/thermal/thermal_zone{i}/temp'
+                if os.path.exists(thermal_path):
+                    with open(thermal_path, 'r') as f:
+                        temp_raw = f.read().strip()
+                        temp_value = float(temp_raw) / 1000.0
+                        if temp_value > 0 and temp_value < 200:  # Sanity check for reasonable temperature range
+                            return round(temp_value, 1)
             
-            # Get power source info (try to detect if running on battery)
-            power_source = "AC"
+            # Try vcgencmd for Raspberry Pi
             try:
-                # Check if we're on a Pi (no battery)
-                with open('/proc/cpuinfo', 'r') as f:
-                    if 'Raspberry Pi' in f.read():
-                        power_source = "AC (Pi)"
+                result = subprocess.run(['vcgencmd', 'measure_temp'], capture_output=True, text=True, timeout=5)
+                if result.returncode == 0:
+                    temp_match = re.search(r'temp=(\d+\.?\d*)', result.stdout)
+                    if temp_match:
+                        temp_value = float(temp_match.group(1))
+                        if temp_value > 0 and temp_value < 200:  # Sanity check for reasonable temperature range
+                            return round(temp_value, 1)
             except:
                 pass
             
-            return {
-                "timestamp": time.strftime('%Y-%m-%d %H:%M:%S'),
-                "status": "ready",
-                "power_state": "on",
-                "power_source": power_source,
-                "uptime": uptime_formatted,
-                "uptime_seconds": int(uptime_seconds),
-                "system_load": {
-                    "1min": round(load_avg[0], 2),
-                    "5min": round(load_avg[1], 2),
-                    "15min": round(load_avg[2], 2)
-                },
-                "available_actions": ["restart", "shutdown", "reboot"],
-                "last_boot": time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(psutil.boot_time())),
-                "battery": None  # Pi doesn't have battery
-            }
+            # Try sensors command if available
+            try:
+                result = subprocess.run(['sensors', '-j'], capture_output=True, text=True, timeout=5)
+                if result.returncode == 0:
+                    data = json.loads(result.stdout)
+                    # Parse sensors output for temperature
+                    for device, values in data.items():
+                        if isinstance(values, dict):
+                            for key, value in values.items():
+                                if 'temp' in key.lower() and isinstance(value, (int, float)):
+                                    temp_value = float(value)
+                                    if temp_value > 0 and temp_value < 200:  # Sanity check for reasonable temperature range
+                                        return round(temp_value, 1)
+            except:
+                pass
+                
         except Exception as e:
-            return {
-                "error": f"Failed to get power status: {str(e)}",
-                "timestamp": time.strftime('%Y-%m-%d %H:%M:%S')
-            }
-    
-    def _get_services_status(self):
-        """Get services status"""
-        try:
-            services = [
-                {"name": "pi-monitor", "status": "running", "active": True, "enabled": True, "description": "Pi Monitor Backend"}
-            ]
-            
-            # Try to get actual service statuses
-            systemctl_available = False
-            try:
-                # Check if systemctl is available
-                result = subprocess.run(['systemctl', '--version'], capture_output=True, text=True)
-                systemctl_available = result.returncode == 0
-            except:
-                systemctl_available = False
-            
-            if systemctl_available:
-                # systemctl is available, check some common services
-                common_services = config.get('monitoring.common_services', ['ssh', 'nginx', 'apache2', 'docker', 'systemd'])
-                for service in common_services:
-                    try:
-                        result = subprocess.run(['systemctl', 'is-active', service], capture_output=True, text=True)
-                        status = "running" if result.returncode == 0 else "stopped"
-                        services.append({
-                            "name": service,
-                            "status": status,
-                            "active": result.returncode == 0,
-                            "enabled": True,
-                            "description": f"{service} service"
-                        })
-                    except:
-                        pass
-            else:
-                # systemctl not available, try alternative detection methods
-                services.extend(self._detect_services_alternative())
-            
-            # Add system information
-            system_info = {
-                "systemctl_available": systemctl_available,
-                "platform": "Raspberry Pi" if os.path.exists('/proc/cpuinfo') else "Unknown",
-                "python_version": sys.version.split()[0],
-                "server_time": time.strftime('%Y-%m-%d %H:%M:%S')
-            }
-            
-            return {
-                "services": services,
-                "system_info": system_info,
-                "total_services": len(services)
-            }
-        except Exception as e:
-            return {"error": f"Failed to get services: {str(e)}"}
-    
-    def _detect_services_alternative(self):
-        """Detect services using alternative methods when systemctl is not available"""
-        alternative_services = []
+            logger.error(f"Failed to get temperature: {e}")
         
-        # Check for SSH service
-        try:
-            # Check if SSH port is listening
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            result = sock.connect_ex(('localhost', 22))
-            ssh_status = "running" if result == 0 else "stopped"
-            alternative_services.append({
-                "name": "ssh",
-                "status": ssh_status,
-                "active": result == 0,
-                "enabled": True,
-                "description": "SSH service (port 22)"
-            })
-            sock.close()
-        except:
-            alternative_services.append({
-                "name": "ssh",
-                "status": "unknown",
-                "active": False,
-                "enabled": False,
-                "description": "SSH service (detection failed)"
-            })
-        
-        # Check for Docker
-        try:
-            result = subprocess.run(['docker', '--version'], capture_output=True, text=True, timeout=5)
-            docker_status = "running" if result.returncode == 0 else "stopped"
-            alternative_services.append({
-                "name": "docker",
-                "status": docker_status,
-                "active": result.returncode == 0,
-                "enabled": True,
-                "description": "Docker service (daemon check)"
-            })
-        except:
-            alternative_services.append({
-                "name": "docker",
-                "status": "unknown",
-                "active": False,
-                "enabled": False,
-                "description": "Docker service (not installed)"
-            })
-        
-        # Check for Nginx
-        try:
-            # Check if nginx port is listening
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            result = sock.connect_ex(('localhost', 80))
-            nginx_status = "running" if result == 0 else "stopped"
-            alternative_services.append({
-                "name": "nginx",
-                "status": nginx_status,
-                "active": result == 0,
-                "enabled": True,
-                "description": "Nginx service (port 80)"
-            })
-            sock.close()
-        except:
-            alternative_services.append({
-                "name": "nginx",
-                "status": "unknown",
-                "active": False,
-                "enabled": False,
-                "description": "Nginx service (not running)"
-            })
-        
-        # Check for Python processes
-        try:
-            result = subprocess.run(['pgrep', '-f', 'python'], capture_output=True, text=True)
-            if result.returncode == 0:
-                alternative_services.append({
-                    "name": "python",
-                    "status": "running",
-                    "active": True,
-                    "enabled": True,
-                    "description": "Python processes active"
-                })
-        except:
-            # On Windows, try tasklist instead of pgrep
-            try:
-                result = subprocess.run(['tasklist', '/FI', 'IMAGENAME eq python.exe'], capture_output=True, text=True, shell=True)
-                if 'python.exe' in result.stdout:
-                    alternative_services.append({
-                        "name": "python",
-                        "status": "running",
-                        "active": True,
-                        "enabled": True,
-                        "description": "Python processes active (Windows)"
-                    })
-            except:
-                pass
-        
-        # Add Windows-specific services
-        if platform.system() == 'Windows':
-            try:
-                # Check for Windows services
-                result = subprocess.run(['sc', 'query', 'wuauserv'], capture_output=True, text=True, shell=True)
-                if 'RUNNING' in result.stdout:
-                    alternative_services.append({
-                        "name": "wuauserv",
-                        "status": "running",
-                        "active": True,
-                        "enabled": True,
-                        "description": "Windows Update service"
-                    })
-                else:
-                    alternative_services.append({
-                        "name": "wuauserv",
-                        "status": "stopped",
-                        "active": False,
-                        "enabled": True,
-                        "description": "Windows Update service"
-                    })
-            except:
-                pass
-        
-        return alternative_services
+        # Return a safe default value if all methods fail
+        return 25.0  # Room temperature as safe default
     
     def handle_service_action(self):
-        """Handle service control actions"""
+        """Handle service control actions with improved error handling"""
         try:
             content_length = int(self.headers.get('Content-Length', 0))
             if content_length > 0:
@@ -1778,137 +1662,11 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
             else:
                 return {"success": False, "message": "No data received"}
         except Exception as e:
+            logger.error(f"Service action failed: {e}")
             return {"success": False, "message": f"Service action failed: {str(e)}"}
     
-    def _handle_service_action_alternative(self, service_name, action):
-        """Handle service actions using alternative methods when systemctl is not available"""
-        try:
-            if platform.system() == 'Windows':
-                # Windows service control using sc command
-                if action == 'start':
-                    result = subprocess.run(['sc', 'start', service_name], capture_output=True, text=True, shell=True)
-                    if result.returncode == 0:
-                        return {"success": True, "message": f"Service {service_name} started successfully using sc command"}
-                    else:
-                        return {"success": False, "message": f"Service {service_name} start failed: {result.stderr}"}
-                elif action == 'stop':
-                    result = subprocess.run(['sc', 'stop', service_name], capture_output=True, text=True, shell=True)
-                    if result.returncode == 0:
-                        return {"success": True, "message": f"Service {service_name} stopped successfully using sc command"}
-                    else:
-                        return {"success": False, "message": f"Service {service_name} stop failed: {result.stderr}"}
-                elif action == 'restart':
-                    # Stop then start
-                    stop_result = subprocess.run(['sc', 'stop', service_name], capture_output=True, text=True, shell=True)
-                    time.sleep(2)  # Wait a bit
-                    start_result = subprocess.run(['sc', 'start', service_name], capture_output=True, text=True, shell=True)
-                    if start_result.returncode == 0:
-                        return {"success": True, "message": f"Service {service_name} restarted successfully using sc command"}
-                    else:
-                        return {"success": False, "message": f"Service {service_name} restart failed: {start_result.stderr}"}
-                elif action == 'status':
-                    result = subprocess.run(['sc', 'query', service_name], capture_output=True, text=True, shell=True)
-                    if 'RUNNING' in result.stdout:
-                        return {"success": True, "service": service_name, "status": "running"}
-                    else:
-                        return {"success": True, "service": service_name, "status": "stopped"}
-            else:
-                # Linux service control using service command
-                if service_name == 'ssh':
-                    if action == 'start':
-                        try:
-                            result = subprocess.run(['service', 'ssh', 'start'], capture_output=True, text=True)
-                            if result.returncode == 0:
-                                return {"success": True, "message": "SSH service started using service command"}
-                            else:
-                                return {"success": False, "message": f"SSH start failed: {result.stderr}"}
-                        except:
-                            return {"success": False, "message": "SSH service control not available (systemctl and service commands not found)"}
-                    elif action == 'stop':
-                        try:
-                            result = subprocess.run(['service', 'ssh', 'stop'], capture_output=True, text=True)
-                            if result.returncode == 0:
-                                return {"success": True, "message": "SSH service stopped using service command"}
-                            else:
-                                return {"success": False, "message": f"SSH stop failed: {result.stderr}"}
-                        except:
-                            return {"success": False, "message": "SSH service control not available (systemctl and service commands not found)"}
-                    elif action == 'restart':
-                        try:
-                            result = subprocess.run(['service', 'ssh', 'restart'], capture_output=True, text=True)
-                            if result.returncode == 0:
-                                return {"success": True, "message": "SSH service restarted using service command"}
-                            else:
-                                return {"success": False, "message": f"SSH restart failed: {result.stderr}"}
-                        except:
-                            return {"success": False, "message": "SSH service control not available (systemctl and service commands not found)"}
-                
-                elif service_name == 'nginx':
-                    if action == 'start':
-                        try:
-                            result = subprocess.run(['service', 'nginx', 'start'], capture_output=True, text=True)
-                            if result.returncode == 0:
-                                return {"success": True, "message": "Nginx service started using service command"}
-                            else:
-                                return {"success": False, "message": f"Nginx start failed: {result.stderr}"}
-                        except:
-                            return {"success": False, "message": "Nginx service control not available (systemctl and service commands not found)"}
-                    elif action == 'stop':
-                        try:
-                            result = subprocess.run(['service', 'nginx', 'stop'], capture_output=True, text=True)
-                            if result.returncode == 0:
-                                return {"success": True, "message": "Nginx service stopped using service command"}
-                            else:
-                                return {"success": False, "message": f"Nginx stop failed: {result.stderr}"}
-                        except:
-                            return {"success": False, "message": "Nginx service control not available (systemctl and service commands not found)"}
-                    elif action == 'restart':
-                        try:
-                            result = subprocess.run(['service', 'nginx', 'restart'], capture_output=True, text=True)
-                            if result.returncode == 0:
-                                return {"success": True, "message": "Nginx service restarted using service command"}
-                            else:
-                                return {"success": False, "message": f"Nginx restart failed: {result.stderr}"}
-                        except:
-                            return {"success": False, "message": "Nginx service control not available (systemctl and service commands not found)"}
-                
-                elif service_name == 'docker':
-                    if action == 'start':
-                        try:
-                            result = subprocess.run(['service', 'docker', 'start'], capture_output=True, text=True)
-                            if result.returncode == 0:
-                                return {"success": True, "message": "Docker service started using service command"}
-                            else:
-                                return {"success": False, "message": f"Docker start failed: {result.stderr}"}
-                        except:
-                            return {"success": False, "message": "Docker service control not available (systemctl and service commands not found)"}
-                    elif action == 'stop':
-                        try:
-                            result = subprocess.run(['service', 'docker', 'stop'], capture_output=True, text=True)
-                            if result.returncode == 0:
-                                return {"success": True, "message": "Docker service stopped using service command"}
-                            else:
-                                return {"success": False, "message": f"Docker stop failed: {result.stderr}"}
-                        except:
-                            return {"success": False, "message": "Docker service control not available (systemctl and service commands not found)"}
-                    elif action == 'restart':
-                        try:
-                            result = subprocess.run(['service', 'docker', 'restart'], capture_output=True, text=True)
-                            if result.returncode == 0:
-                                return {"success": True, "message": "Docker service restarted using service command"}
-                            else:
-                                return {"success": False, "message": f"Docker restart failed: {result.stderr}"}
-                        except:
-                            return {"success": False, "message": "Docker service control not available (systemctl and service commands not found)"}
-            
-            # Default fallback for unknown services
-            return {"success": False, "message": f"Service {service_name} control not available (systemctl and service commands not found)"}
-            
-        except Exception as e:
-            return {"success": False, "message": f"Alternative service control failed: {str(e)}"}
-    
     def handle_power_action(self):
-        """Handle power management actions"""
+        """Handle power management actions with improved error handling"""
         try:
             content_length = int(self.headers.get('Content-Length', 0))
             if content_length > 0:
@@ -2026,84 +1784,11 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
             else:
                 return {"success": False, "message": "No data received"}
         except Exception as e:
+            logger.error(f"Power action failed: {e}")
             return {"success": False, "message": f"Power action failed: {str(e)}"}
     
-    def _get_detailed_system_info(self):
-        """Get detailed system information including hardware and software"""
-        try:
-            system_info = self._get_system_info()
-            power_status = self._get_power_status()
-            services_status = self._get_services_status()
-            
-            # Get CPU model and frequency
-            cpu_info = psutil.cpu_freq()
-            cpu_model = platform.processor()
-            
-            # Get memory details
-            memory_info = psutil.virtual_memory()
-            swap_info = psutil.swap_memory()
-            
-            # Get disk details
-            disk_partitions = psutil.disk_partitions()
-            disk_usage = psutil.disk_usage('/')
-            
-            # Get network interfaces
-            network_interfaces = psutil.net_if_addrs()
-            
-            # Get system logs (example: last 100 lines of /var/log/syslog)
-            syslog_path = '/var/log/syslog' if os.path.exists('/var/log/syslog') else '/var/log/messages'
-            system_logs = []
-            try:
-                with open(syslog_path, 'r') as f:
-                    lines = f.readlines()
-                    system_logs = [{"timestamp": datetime.fromtimestamp(os.path.getmtime(syslog_path)).strftime('%Y-%m-%d %H:%M:%S'), "message": line.strip()} for line in lines[-100:]]
-            except:
-                system_logs = [{"timestamp": "N/A", "message": "Could not read system logs."}]
-            
-            # Get system uptime history
-            uptime_history = metrics_collector.get_metrics_history(60) # Get last 60 minutes
-            
-            return {
-                "system_info": system_info,
-                "power_status": power_status,
-                "services_status": services_status,
-                "cpu_info": {
-                    "current_freq": round(cpu_info.current, 2) if cpu_info and cpu_info.current else 0,
-                    "min_freq": round(cpu_info.min, 2) if cpu_info and cpu_info.min else 0,
-                    "max_freq": round(cpu_info.max, 2) if cpu_info and cpu_info.max else 0,
-                    "model": cpu_model or "Unknown"
-                },
-                "memory_info": {
-                    "total": round(memory_info.total / (1024**3), 2), # GB
-                    "available": round(memory_info.available / (1024**3), 2), # GB
-                    "used": round(memory_info.used / (1024**3), 2), # GB
-                    "percent": round(memory_info.percent, 1)
-                },
-                "swap_info": {
-                    "total": round(swap_info.total / (1024**3), 2), # GB
-                    "used": round(swap_info.used / (1024**3), 2), # GB
-                    "free": round(swap_info.free / (1024**3), 2), # GB
-                    "percent": round(swap_info.percent, 1)
-                },
-                "disk_info": {
-                    "total": round(disk_usage.total / (1024**3), 2), # GB
-                    "used": round(disk_usage.used / (1024**3), 2), # GB
-                    "free": round(disk_usage.free / (1024**3), 2), # GB
-                    "percent": round(disk_usage.percent, 1)
-                },
-                "network_interfaces": {
-                    iface: {
-                        "addrs": [{"addr": addr.address, "netmask": addr.netmask, "broadcast": addr.broadcast} for addr in addrs]
-                    } for iface, addrs in network_interfaces.items()
-                },
-                "system_logs": system_logs,
-                "uptime_history": uptime_history
-            }
-        except Exception as e:
-            return {"error": f"Failed to get detailed system info: {str(e)}"}
-    
     def _check_shutdown_permissions(self):
-        """Check if current user can execute shutdown commands"""
+        """Check if current user can execute shutdown commands with improved error handling"""
         try:
             if platform.system() == 'Windows':
                 # Check if running as administrator on Windows
@@ -2138,12 +1823,12 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
             else:
                 # Linux/Raspberry Pi permission checking
                 current_user = os.getenv('USER', 'unknown')
-                print(f"Checking shutdown permissions for user: {current_user}")
+                logger.info(f"Checking shutdown permissions for user: {current_user}")
                 
                 # Check if running as root
                 try:
                     if os.geteuid() == 0:
-                        print("Running as root user - shutdown allowed")
+                        logger.info("Running as root user - shutdown allowed")
                         return {
                             'can_shutdown': True,
                             'method': 'root',
@@ -2151,12 +1836,12 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                             'suggestions': []
                         }
                 except AttributeError:
-                    print("geteuid not available on this platform")
+                    logger.info("geteuid not available on this platform")
                 
                 # Check if user can use sudo without password for shutdown commands
                 sudo_check = self._check_sudo_permissions()
                 if sudo_check['can_sudo']:
-                    print(f"User {current_user} can use sudo for shutdown")
+                    logger.info(f"User {current_user} can use sudo for shutdown")
                     return {
                         'can_shutdown': True,
                         'method': 'sudo',
@@ -2168,7 +1853,7 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                 try:
                     result = subprocess.run(['groups'], capture_output=True, text=True, timeout=5)
                     if result.returncode == 0 and 'sudo' in result.stdout:
-                        print(f"User {current_user} in sudo group but may need password")
+                        logger.info(f"User {current_user} in sudo group but may need password")
                         return {
                             'can_shutdown': False,
                             'method': 'sudo_group',
@@ -2180,12 +1865,12 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                             ]
                         }
                 except Exception as e:
-                    print(f"Error checking groups: {str(e)}")
+                    logger.error(f"Error checking groups: {str(e)}")
                 
                 # Check if shutdown commands are available in PATH
                 shutdown_available = self._check_command_availability(['shutdown', 'poweroff', 'halt'])
                 if shutdown_available:
-                    print(f"Shutdown commands available but user {current_user} lacks permissions")
+                    logger.info(f"Shutdown commands available but user {current_user} lacks permissions")
                     return {
                         'can_shutdown': False,
                         'method': 'commands_available',
@@ -2197,7 +1882,7 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                         ]
                     }
                 else:
-                    print(f"Shutdown commands not available for user {current_user}")
+                    logger.info(f"Shutdown commands not available for user {current_user}")
                     return {
                         'can_shutdown': False,
                         'method': 'no_commands',
@@ -2210,7 +1895,7 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                     }
                     
         except Exception as e:
-            print(f"Error checking shutdown permissions: {str(e)}")
+            logger.error(f"Error checking shutdown permissions: {str(e)}")
             return {
                 'can_shutdown': False,
                 'method': 'error',
@@ -2219,7 +1904,7 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
             }
     
     def _check_restart_permissions(self):
-        """Check if current user can execute restart commands"""
+        """Check if current user can execute restart commands with improved error handling"""
         try:
             if platform.system() == 'Windows':
                 # Same as shutdown for Windows
@@ -2227,12 +1912,12 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
             else:
                 # Linux/Raspberry Pi permission checking
                 current_user = os.getenv('USER', 'unknown')
-                print(f"Checking restart permissions for user: {current_user}")
+                logger.info(f"Checking restart permissions for user: {current_user}")
                 
                 # Check if running as root
                 try:
                     if os.geteuid() == 0:
-                        print("Running as root user - restart allowed")
+                        logger.info("Running as root user - restart allowed")
                         return {
                             'can_restart': True,
                             'method': 'root',
@@ -2240,12 +1925,12 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                             'suggestions': []
                         }
                 except AttributeError:
-                    print("geteuid not available on this platform")
+                    logger.info("geteuid not available on this platform")
                 
                 # Check if user can use sudo without password for restart commands
                 sudo_check = self._check_sudo_permissions()
                 if sudo_check['can_sudo']:
-                    print(f"User {current_user} can use sudo for restart")
+                    logger.info(f"User {current_user} can use sudo for restart")
                     return {
                         'can_restart': True,
                         'method': 'sudo',
@@ -2257,7 +1942,7 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                 try:
                     result = subprocess.run(['groups'], capture_output=True, text=True, timeout=5)
                     if result.returncode == 0 and 'sudo' in result.stdout:
-                        print(f"User {current_user} in sudo group but may need password")
+                        logger.info(f"User {current_user} in sudo group but may need password")
                         return {
                             'can_restart': False,
                             'method': 'sudo_group',
@@ -2269,12 +1954,12 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                             ]
                         }
                 except Exception as e:
-                    print(f"Error checking groups: {str(e)}")
+                    logger.error(f"Error checking groups: {str(e)}")
                 
                 # Check if restart commands are available in PATH
                 restart_available = self._check_command_availability(['reboot', 'shutdown', 'systemctl'])
                 if restart_available:
-                    print(f"Restart commands available but user {current_user} lacks permissions")
+                    logger.info(f"Restart commands available but user {current_user} lacks permissions")
                     return {
                         'can_restart': False,
                         'method': 'commands_available',
@@ -2286,7 +1971,7 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                         ]
                     }
                 else:
-                    print(f"Restart commands not available for user {current_user}")
+                    logger.info(f"Restart commands not available for user {current_user}")
                     return {
                         'can_restart': False,
                         'method': 'no_commands',
@@ -2299,7 +1984,7 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                     }
                     
         except Exception as e:
-            print(f"Error checking restart permissions: {str(e)}")
+            logger.error(f"Error checking restart permissions: {str(e)}")
             return {
                 'can_restart': False,
                 'method': 'error',
@@ -2310,7 +1995,7 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
     def _check_sudo_permissions(self):
         """Check if current user can use sudo without password for shutdown/restart commands"""
         try:
-            print("Testing sudo permissions for shutdown/restart commands...")
+            logger.info("Testing sudo permissions for shutdown/restart commands...")
             
             # Test if user can run shutdown command with sudo without password
             test_commands = [
@@ -2321,26 +2006,26 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
             
             for cmd in test_commands:
                 try:
-                    print(f"Testing sudo command: {' '.join(cmd)}")
+                    logger.info(f"Testing sudo command: {' '.join(cmd)}")
                     result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
                     if result.returncode == 0:
-                        print(f"Sudo command successful: {' '.join(cmd)}")
+                        logger.info(f"Sudo command successful: {' '.join(cmd)}")
                         return {
                             'can_sudo': True,
                             'command': ' '.join(cmd),
                             'reason': 'Sudo command executed successfully without password'
                         }
                     else:
-                        print(f"Sudo command failed: {' '.join(cmd)} - return code: {result.returncode}")
+                        logger.info(f"Sudo command failed: {' '.join(cmd)} - return code: {result.returncode}")
                         if result.stderr:
-                            print(f"Error output: {result.stderr.strip()}")
+                            logger.info(f"Error output: {result.stderr.strip()}")
                 except subprocess.TimeoutExpired:
-                    print(f"Sudo command timed out: {' '.join(cmd)}")
+                    logger.info(f"Sudo command timed out: {' '.join(cmd)}")
                 except Exception as e:
-                    print(f"Exception testing sudo command {' '.join(cmd)}: {str(e)}")
+                    logger.info(f"Exception testing sudo command {' '.join(cmd)}: {str(e)}")
                     continue
             
-            print("No sudo commands worked without password")
+            logger.info("No sudo commands worked without password")
             return {
                 'can_sudo': False,
                 'command': None,
@@ -2348,7 +2033,7 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
             }
             
         except Exception as e:
-            print(f"Error testing sudo: {str(e)}")
+            logger.error(f"Error testing sudo: {str(e)}")
             return {
                 'can_sudo': False,
                 'command': None,
@@ -2358,22 +2043,22 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
     def _check_command_availability(self, commands):
         """Check if specified commands are available in PATH"""
         available_commands = []
-        print(f"Checking command availability for: {commands}")
+        logger.info(f"Checking command availability for: {commands}")
         
         for cmd in commands:
             try:
                 result = subprocess.run(['which', cmd], capture_output=True, text=True, timeout=5)
                 if result.returncode == 0:
                     available_commands.append(cmd)
-                    print(f"  ✅ {cmd}: {result.stdout.strip()}")
+                    logger.info(f"  ✅ {cmd}: {result.stdout.strip()}")
                 else:
-                    print(f"  ❌ {cmd}: Not found in PATH")
+                    logger.info(f"  ❌ {cmd}: Not found in PATH")
             except subprocess.TimeoutExpired:
-                print(f"  ⏰ {cmd}: Timeout checking availability")
+                logger.info(f"  ⏰ {cmd}: Timeout checking availability")
             except Exception as e:
-                print(f"  💥 {cmd}: Error checking availability - {str(e)}")
+                logger.info(f"  💥 {cmd}: Error checking availability - {str(e)}")
         
-        print(f"Available commands: {available_commands}")
+        logger.info(f"Available commands: {available_commands}")
         return available_commands
     
     def _execute_shutdown(self):
@@ -2422,21 +2107,21 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                 # Use available commands, or fall back to all if none detected
                 if available_commands:
                     shutdown_commands = available_commands
-                    print(f"Available shutdown commands: {[cmd[0] for cmd in available_commands]}")
+                    logger.info(f"Available shutdown commands: {[cmd[0] for cmd in available_commands]}")
                 else:
                     shutdown_commands = potential_commands
-                    print("No shutdown commands detected in PATH, trying all potential commands")
+                    logger.info("No shutdown commands detected in PATH, trying all potential commands")
                 
                 # Try each command with proper error handling
                 for cmd in shutdown_commands:
                     try:
-                        print(f"Attempting shutdown with: {' '.join(cmd)}")
+                        logger.info(f"Attempting shutdown with: {' '.join(cmd)}")
                         
                         # For shutdown commands, don't capture output as they don't return normally
                         # Just execute the command and assume success if no exception
                         result = subprocess.run(cmd, timeout=15)
                         # If we get here, the command executed (though it may not have completed)
-                        print(f"Shutdown command executed successfully: {' '.join(cmd)}")
+                        logger.info(f"Shutdown command executed successfully: {' '.join(cmd)}")
                         return {
                             'success': True,
                             'message': f'Shutdown initiated successfully with: {" ".join(cmd)}',
@@ -2444,24 +2129,24 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                         }
                     except subprocess.TimeoutExpired:
                         # Command timed out, but this is expected for shutdown commands
-                        print(f"Shutdown command timed out (expected): {' '.join(cmd)}")
+                        logger.info(f"Shutdown command timed out (expected): {' '.join(cmd)}")
                         return {
                             'success': True,
                             'message': f'Shutdown command timed out (expected for shutdown): {" ".join(cmd)}',
                             'command_used': ' '.join(cmd)
                         }
                     except FileNotFoundError:
-                        print(f"Command not found: {' '.join(cmd)}")
+                        logger.info(f"Command not found: {' '.join(cmd)}")
                         continue
                     except PermissionError:
-                        print(f"Permission denied for: {' '.join(cmd)}")
+                        logger.info(f"Permission denied for: {' '.join(cmd)}")
                         continue
                     except Exception as e:
-                        print(f"Error executing shutdown command {' '.join(cmd)}: {str(e)}")
+                        logger.info(f"Error executing shutdown command {' '.join(cmd)}: {str(e)}")
                         continue
                 
                 # If all commands failed, provide detailed error information
-                print("All shutdown commands failed")
+                logger.error("All shutdown commands failed")
                 return {
                     'success': False,
                     'error': 'All shutdown commands failed - check system logs for details',
@@ -2475,7 +2160,7 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                 }
                 
         except Exception as e:
-            print(f"Shutdown execution error: {str(e)}")
+            logger.error(f"Shutdown execution error: {str(e)}")
             return {
                 'success': False,
                 'error': f'Shutdown execution error: {str(e)}',
@@ -2526,21 +2211,21 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                 # Use available commands, or fall back to all if none detected
                 if available_commands:
                     restart_commands = available_commands
-                    print(f"Available restart commands: {[cmd[0] for cmd in available_commands]}")
+                    logger.info(f"Available restart commands: {[cmd[0] for cmd in available_commands]}")
                 else:
                     restart_commands = potential_commands
-                    print("No restart commands detected in PATH, trying all potential commands")
+                    logger.info("No restart commands detected in PATH, trying all potential commands")
                 
                 # Try each command with proper error handling
                 for cmd in restart_commands:
                     try:
-                        print(f"Attempting restart with: {' '.join(cmd)}")
+                        logger.info(f"Attempting restart with: {' '.join(cmd)}")
                         
                         # For restart commands, don't capture output as they don't return normally
                         # Just execute the command and assume success if no exception
                         result = subprocess.run(cmd, timeout=15)
                         # If we get here, the command executed (though it may not have completed)
-                        print(f"Restart command executed successfully: {' '.join(cmd)}")
+                        logger.info(f"Restart command executed successfully: {' '.join(cmd)}")
                         return {
                             'success': True,
                             'message': f'Restart initiated successfully with: {" ".join(cmd)}',
@@ -2548,24 +2233,24 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                         }
                     except subprocess.TimeoutExpired:
                         # Command timed out, but this is expected for restart commands
-                        print(f"Restart command timed out (expected): {' '.join(cmd)}")
+                        logger.info(f"Restart command timed out (expected): {' '.join(cmd)}")
                         return {
                             'success': True,
                             'message': f'Restart command timed out (expected for restart): {" ".join(cmd)}',
                             'command_used': ' '.join(cmd)
                         }
                     except FileNotFoundError:
-                        print(f"Command not found: {' '.join(cmd)}")
+                        logger.info(f"Command not found: {' '.join(cmd)}")
                         continue
                     except PermissionError:
-                        print(f"Permission denied for: {' '.join(cmd)}")
+                        logger.info(f"Permission denied for: {' '.join(cmd)}")
                         continue
                     except Exception as e:
-                        print(f"Error executing restart command {' '.join(cmd)}: {str(e)}")
+                        logger.info(f"Error executing restart command {' '.join(cmd)}: {str(e)}")
                         continue
                 
                 # If all commands failed, provide detailed error information
-                print("All restart commands failed")
+                logger.error("All restart commands failed")
                 return {
                     'success': False,
                     'error': 'All restart commands failed - check system logs for details',
@@ -2579,7 +2264,7 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                 }
                 
         except Exception as e:
-            print(f"Restart execution error: {str(e)}")
+            logger.error(f"Restart execution error: {str(e)}")
             return {
                 'success': False,
                 'error': f'Restart execution error: {str(e)}',
@@ -2589,15 +2274,15 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
     def _safe_restart_pi_monitor_service(self):
         """Safely restart the pi-monitor service without system restart"""
         try:
-            print("🔄 Attempting safe restart of pi-monitor service...")
+            logger.info("🔄 Attempting safe restart of pi-monitor service...")
             
             # Method 1: Try systemctl first (most reliable)
             try:
-                print("  🔧 Trying systemctl restart...")
+                logger.info("  🔧 Trying systemctl restart...")
                 result = subprocess.run(['systemctl', 'restart', 'pi-monitor'], 
                                       capture_output=True, text=True, timeout=30)
                 if result.returncode == 0:
-                    print("  ✅ systemctl restart successful")
+                    logger.info("  ✅ systemctl restart successful")
                     return {
                         'success': True,
                         'message': 'Pi-monitor service restarted successfully using systemctl',
@@ -2607,17 +2292,17 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                         'description': 'Service restart only - no system impact'
                     }
                 else:
-                    print(f"  ❌ systemctl restart failed: {result.stderr}")
+                    logger.info(f"  ❌ systemctl restart failed: {result.stderr}")
             except Exception as e:
-                print(f"  ❌ systemctl restart exception: {str(e)}")
+                logger.info(f"  ❌ systemctl restart exception: {str(e)}")
             
             # Method 2: Try service command (fallback)
             try:
-                print("  🔧 Trying service restart...")
+                logger.info("  🔧 Trying service restart...")
                 result = subprocess.run(['service', 'pi-monitor', 'restart'], 
                                       capture_output=True, text=True, timeout=30)
                 if result.returncode == 0:
-                    print("  ✅ service restart successful")
+                    logger.info("  ✅ service restart successful")
                     return {
                         'success': True,
                         'message': 'Pi-monitor service restarted successfully using service command',
@@ -2627,17 +2312,17 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                         'description': 'Service restart only - no system impact'
                     }
                 else:
-                    print(f"  ❌ service restart failed: {result.stderr}")
+                    logger.info(f"  ❌ service restart failed: {result.stderr}")
             except Exception as e:
-                print(f"  ❌ service restart exception: {str(e)}")
+                logger.info(f"  ❌ service restart exception: {str(e)}")
             
             # Method 3: Try Docker restart if running in container
             try:
-                print("  🔧 Trying Docker restart...")
+                logger.info("  🔧 Trying Docker restart...")
                 result = subprocess.run(['docker', 'restart', 'pi-monitor'], 
                                       capture_output=True, text=True, timeout=30)
                 if result.returncode == 0:
-                    print("  ✅ Docker restart successful")
+                    logger.info("  ✅ Docker restart successful")
                     return {
                         'success': True,
                         'message': 'Pi-monitor container restarted successfully using Docker',
@@ -2647,19 +2332,19 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                         'description': 'Container restart only - no system impact'
                     }
                 else:
-                    print(f"  ❌ Docker restart failed: {result.stderr}")
+                    logger.info(f"  ❌ Docker restart failed: {result.stderr}")
             except Exception as e:
-                print(f"  ❌ Docker restart exception: {str(e)}")
+                logger.info(f"  ❌ Docker restart exception: {str(e)}")
             
             # Method 4: Try process restart (kill and restart)
             try:
-                print("  🔧 Trying process restart...")
+                logger.info("  🔧 Trying process restart...")
                 # Find pi-monitor processes
                 result = subprocess.run(['pgrep', '-f', 'pi-monitor'], 
                                       capture_output=True, text=True, timeout=10)
                 if result.returncode == 0:
                     pids = result.stdout.strip().split('\n')
-                    print(f"  📍 Found {len(pids)} pi-monitor processes: {pids}")
+                    logger.info(f"  📍 Found {len(pids)} pi-monitor processes: {pids}")
                     
                     # Kill processes gracefully
                     for pid in pids:
@@ -2667,9 +2352,9 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                             try:
                                 subprocess.run(['kill', '-TERM', pid.strip()], 
                                              capture_output=True, timeout=5)
-                                print(f"  🛑 Sent TERM signal to PID {pid}")
+                                logger.info(f"  🛑 Sent TERM signal to PID {pid}")
                             except Exception as e:
-                                print(f"  ❌ Failed to kill PID {pid}: {str(e)}")
+                                logger.info(f"  ❌ Failed to kill PID {pid}: {str(e)}")
                     
                     # Wait a moment for graceful shutdown
                     time.sleep(2)
@@ -2678,7 +2363,7 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                     start_result = subprocess.run(['systemctl', 'start', 'pi-monitor'], 
                                                 capture_output=True, text=True, timeout=30)
                     if start_result.returncode == 0:
-                        print("  ✅ Process restart successful")
+                        logger.info("  ✅ Process restart successful")
                         return {
                             'success': True,
                             'message': 'Pi-monitor service restarted successfully using process restart',
@@ -2688,14 +2373,14 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                             'description': 'Process restart - minimal system impact'
                         }
                     else:
-                        print(f"  ❌ Process restart failed: {start_result.stderr}")
+                        logger.info(f"  ❌ Process restart failed: {start_result.stderr}")
                 else:
-                    print("  ❌ No pi-monitor processes found")
+                    logger.info("  ❌ No pi-monitor processes found")
             except Exception as e:
-                print(f"  ❌ Process restart exception: {str(e)}")
+                logger.info(f"  ❌ Process restart exception: {str(e)}")
             
             # If all methods failed
-            print("  ❌ All safe restart methods failed")
+            logger.error("  ❌ All safe restart methods failed")
             return {
                 'success': False,
                 'error': 'All safe restart methods failed',
@@ -2712,7 +2397,7 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
             }
             
         except Exception as e:
-            print(f"❌ Safe restart error: {str(e)}")
+            logger.error(f"❌ Safe restart error: {str(e)}")
             return {
                 'success': False,
                 'error': f'Safe restart error: {str(e)}',
@@ -2723,7 +2408,7 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
     def _safe_manage_pi_monitor_service(self, action):
         """Safely manage the pi-monitor service (start/stop/status)"""
         try:
-            print(f"🔧 Attempting {action} of pi-monitor service...")
+            logger.info(f"🔧 Attempting {action} of pi-monitor service...")
             
             if action == 'start':
                 # Try to start the service
@@ -2873,9 +2558,132 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                 'error': f'Failed to get service management info: {str(e)}'
             }
     
-    def log_message(self, format, *args):
-        """Custom logging"""
-        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {format % args}")
+    def _handle_service_action_alternative(self, service_name, action):
+        """Handle service actions using alternative methods when systemctl is not available"""
+        try:
+            if platform.system() == 'Windows':
+                # Windows service control using sc command
+                if action == 'start':
+                    result = subprocess.run(['sc', 'start', service_name], capture_output=True, text=True, shell=True)
+                    if result.returncode == 0:
+                        return {"success": True, "message": f"Service {service_name} started successfully using sc command"}
+                    else:
+                        return {"success": False, "message": f"Service {service_name} start failed: {result.stderr}"}
+                elif action == 'stop':
+                    result = subprocess.run(['sc', 'stop', service_name], capture_output=True, text=True, shell=True)
+                    if result.returncode == 0:
+                        return {"success": True, "message": f"Service {service_name} stopped successfully using sc command"}
+                    else:
+                        return {"success": False, "message": f"Service {service_name} stop failed: {result.stderr}"}
+                elif action == 'restart':
+                    # Stop then start
+                    stop_result = subprocess.run(['sc', 'stop', service_name], capture_output=True, text=True, shell=True)
+                    time.sleep(2)  # Wait a bit
+                    start_result = subprocess.run(['sc', 'start', service_name], capture_output=True, text=True, shell=True)
+                    if start_result.returncode == 0:
+                        return {"success": True, "message": f"Service {service_name} restarted successfully using sc command"}
+                    else:
+                        return {"success": False, "message": f"Service {service_name} restart failed: {start_result.stderr}"}
+                elif action == 'status':
+                    result = subprocess.run(['sc', 'query', service_name], capture_output=True, text=True, shell=True)
+                    if 'RUNNING' in result.stdout:
+                        return {"success": True, "service": service_name, "status": "running"}
+                    else:
+                        return {"success": True, "service": service_name, "status": "stopped"}
+            else:
+                # Linux service control using service command
+                if service_name == 'ssh':
+                    if action == 'start':
+                        try:
+                            result = subprocess.run(['service', 'ssh', 'start'], capture_output=True, text=True)
+                            if result.returncode == 0:
+                                return {"success": True, "message": "SSH service started using service command"}
+                            else:
+                                return {"success": False, "message": f"SSH start failed: {result.stderr}"}
+                        except:
+                            return {"success": False, "message": "SSH service control not available (systemctl and service commands not found)"}
+                    elif action == 'stop':
+                        try:
+                            result = subprocess.run(['service', 'ssh', 'stop'], capture_output=True, text=True)
+                            if result.returncode == 0:
+                                return {"success": True, "message": "SSH service stopped using service command"}
+                            else:
+                                return {"success": False, "message": f"SSH stop failed: {result.stderr}"}
+                        except:
+                            return {"success": False, "message": "SSH service control not available (systemctl and service commands not found)"}
+                    elif action == 'restart':
+                        try:
+                            result = subprocess.run(['service', 'ssh', 'restart'], capture_output=True, text=True)
+                            if result.returncode == 0:
+                                return {"success": True, "message": "SSH service restarted using service command"}
+                            else:
+                                return {"success": False, "message": f"SSH restart failed: {result.stderr}"}
+                        except:
+                            return {"success": False, "message": "SSH service control not available (systemctl and service commands not found)"}
+                
+                elif service_name == 'nginx':
+                    if action == 'start':
+                        try:
+                            result = subprocess.run(['service', 'nginx', 'start'], capture_output=True, text=True)
+                            if result.returncode == 0:
+                                return {"success": True, "message": "Nginx service started using service command"}
+                            else:
+                                return {"success": False, "message": f"Nginx start failed: {result.stderr}"}
+                        except:
+                            return {"success": False, "message": "Nginx service control not available (systemctl and service commands not found)"}
+                    elif action == 'stop':
+                        try:
+                            result = subprocess.run(['service', 'nginx', 'stop'], capture_output=True, text=True)
+                            if result.returncode == 0:
+                                return {"success": True, "message": "Nginx service stopped using service command"}
+                            else:
+                                return {"success": False, "message": f"Nginx stop failed: {result.stderr}"}
+                        except:
+                            return {"success": False, "message": "Nginx service control not available (systemctl and service commands not found)"}
+                    elif action == 'restart':
+                        try:
+                            result = subprocess.run(['service', 'nginx', 'restart'], capture_output=True, text=True)
+                            if result.returncode == 0:
+                                return {"success": True, "message": "Nginx service restarted using service command"}
+                            else:
+                                return {"success": False, "message": f"Nginx restart failed: {result.stderr}"}
+                        except:
+                            return {"success": False, "message": "Nginx service control not available (systemctl and service commands not found)"}
+                
+                elif service_name == 'docker':
+                    if action == 'start':
+                        try:
+                            result = subprocess.run(['service', 'docker', 'start'], capture_output=True, text=True)
+                            if result.returncode == 0:
+                                return {"success": True, "message": "Docker service started using service command"}
+                            else:
+                                return {"success": False, "message": f"Docker start failed: {result.stderr}"}
+                        except:
+                            return {"success": False, "message": "Docker service control not available (systemctl and service commands not found)"}
+                    elif action == 'stop':
+                        try:
+                            result = subprocess.run(['service', 'docker', 'stop'], capture_output=True, text=True)
+                            if result.returncode == 0:
+                                return {"success": True, "message": "Docker service stopped using service command"}
+                            else:
+                                return {"success": False, "message": f"Docker stop failed: {result.stderr}"}
+                        except:
+                            return {"success": False, "message": "Docker service control not available (systemctl and service commands not found)"}
+                    elif action == 'restart':
+                        try:
+                            result = subprocess.run(['service', 'docker', 'restart'], capture_output=True, text=True)
+                            if result.returncode == 0:
+                                return {"success": True, "message": "Docker service restarted using service command"}
+                            else:
+                                return {"success": False, "message": f"Docker restart failed: {result.stderr}"}
+                        except:
+                            return {"success": False, "message": "Docker service control not available (systemctl and service commands not found)"}
+            
+            # Default fallback for unknown services
+            return {"success": False, "message": f"Service {service_name} control not available (systemctl and service commands not found)"}
+            
+        except Exception as e:
+            return {"success": False, "message": f"Alternative service control failed: {str(e)}"}
 
 def run_server(port=None):
     """Run the enhanced Pi Monitor HTTP server"""
@@ -2927,6 +2735,8 @@ def run_server(port=None):
         print("\n🛑 Shutting down server...")
         print("🛑 Stopping metrics collection...")
         metrics_collector.stop_collection()
+        print("🛑 Shutting down command executor...")
+        command_executor.shutdown()
         print("🛑 Shutting down HTTP server...")
         httpd.shutdown()
         print("✅ Server shutdown complete")

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Save, RefreshCw, Monitor, Bell, Shield, Palette, Database } from 'lucide-react';
+import { Close as X, Save, Refresh as RefreshCw, Monitor, Notifications as Bell, Shield, Palette, DataObject as Database } from '@mui/icons-material';
 import toast from 'react-hot-toast';
 
 const SettingsPanel = ({ isDarkMode, setIsDarkMode, onClose }) => {

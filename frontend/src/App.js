@@ -1,7 +1,7 @@
 import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { QueryClient, QueryClientProvider } from 'react-query';
 import { Toaster } from 'react-hot-toast';
-import { AlertCircle, Wifi, WifiOff, Sun, Moon, Settings, RefreshCw, Menu, X, LayoutDashboard, Monitor, BarChart, Zap, Wrench, Globe, FileText } from 'lucide-react';
+import { ErrorOutline as AlertCircle, Wifi, WifiOff, LightMode as Sun, DarkMode as Moon, Settings, Refresh as RefreshCw, Menu, Close as X, Dashboard as LayoutDashboard, Monitor, BarChart, Bolt as Zap, Build as Wrench, Public as Globe, Article as FileText } from '@mui/icons-material';
 
 import { UnifiedClient } from './services/unifiedClient';
 import ErrorBoundary from './components/ErrorBoundary';

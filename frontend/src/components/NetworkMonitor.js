@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery } from 'react-query';
-import { Wifi, WifiOff, Globe, Activity, Download, Upload, Signal, RefreshCw } from 'lucide-react';
+import { Wifi, WifiOff, Public as Globe, Timeline as Activity, Download, Upload, SignalCellularAlt as Signal, Refresh as RefreshCw } from '@mui/icons-material';
 import toast from 'react-hot-toast';
 
 const NetworkMonitor = ({ unifiedClient }) => {

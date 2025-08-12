@@ -1,6 +1,6 @@
 import React from 'react';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
-import { Play, Square, RotateCcw, RefreshCw, Settings, CheckCircle, AlertCircle, XCircle } from 'lucide-react';
+import { PlayArrow as Play, Stop as Square, RestartAlt as RotateCcw, Refresh as RefreshCw, Settings, CheckCircle, ErrorOutline as AlertCircle, Cancel as XCircle } from '@mui/icons-material';
 import toast from 'react-hot-toast';
 
 function ServiceManagement({ unifiedClient }) {

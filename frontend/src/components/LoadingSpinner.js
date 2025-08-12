@@ -1,5 +1,5 @@
 import React from 'react';
-import { Loader2 } from 'lucide-react';
+import { Autorenew as Loader2 } from '@mui/icons-material';
 
 const LoadingSpinner = ({ size = 'md', text = 'Loading...', className = '' }) => {
   const sizeClasses = {

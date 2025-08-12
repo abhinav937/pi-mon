@@ -11,7 +11,7 @@ import {
   Legend,
   Filler,
 } from 'chart.js';
-import { TrendingUp, BarChart3, Activity, HardDrive, Database } from 'lucide-react';
+import { TrendingUp, BarChart as BarChart3, Timeline as Activity, Storage as HardDrive, DataObject as Database } from '@mui/icons-material';
 
 // Register Chart.js components
 ChartJS.register(

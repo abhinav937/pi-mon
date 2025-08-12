@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery } from 'react-query';
-import { RefreshCw, Server, HardDrive, Cpu, Monitor, Wifi } from 'lucide-react';
+import { Refresh as RefreshCw, Dns as Server, Storage as HardDrive, Memory as Cpu, Monitor, Wifi } from '@mui/icons-material';
 import toast from 'react-hot-toast';
 
 const SystemStatus = ({ unifiedClient }) => {

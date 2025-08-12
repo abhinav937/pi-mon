@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery } from 'react-query';
-import { FileText, Search, Filter, Download, RefreshCw, AlertTriangle, Info, XCircle } from 'lucide-react';
+import { Article as FileText, Search, FilterAlt as Filter, Download, Refresh as RefreshCw, Warning as AlertTriangle, Info, Cancel as XCircle } from '@mui/icons-material';
 import toast from 'react-hot-toast';
 import LoadingSpinner from './LoadingSpinner';
 

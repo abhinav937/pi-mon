@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useMutation } from 'react-query';
-import { Power, RotateCcw, Clock, AlertTriangle } from 'lucide-react';
+import { PowerSettingsNew as Power, RestartAlt as RotateCcw, AccessTime as Clock, Warning as AlertTriangle } from '@mui/icons-material';
 import toast from 'react-hot-toast';
 
 const PowerManagement = ({ unifiedClient }) => {

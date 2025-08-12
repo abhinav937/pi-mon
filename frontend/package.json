@@ -16,9 +16,12 @@
     "axios": "^1.6.2",
     "zod": "^3.22.4",
     "react-hot-toast": "^2.4.1",
-    "lucide-react": "^0.294.0",
     "clsx": "^2.0.0",
-    "tailwind-merge": "^2.0.0"
+    "tailwind-merge": "^2.0.0",
+    "@emotion/react": "^11.11.4",
+    "@emotion/styled": "^11.11.0",
+    "@mui/material": "^5.15.7",
+    "@mui/icons-material": "^5.15.7"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",

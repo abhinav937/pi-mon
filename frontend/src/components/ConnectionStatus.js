@@ -1,5 +1,5 @@
 import React from 'react';
-import { Wifi, WifiOff, Clock } from 'lucide-react';
+import { Wifi, WifiOff, AccessTime as Clock } from '@mui/icons-material';
 
 const ConnectionStatus = ({ status, isOnline, lastUpdate, isMobile = false }) => {
   const getStatusColor = () => {

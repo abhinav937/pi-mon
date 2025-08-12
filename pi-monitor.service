@@ -1,20 +1,38 @@
 [Unit]
-Description=Pi Monitor Backend (venv)
+Description=Pi Monitor - Continuous System Monitoring Service
 After=network.target
+Wants=network.target
 
 [Service]
 Type=simple
-# Change this to the user that owns the repo on your device
-User=pi
-# Change this path to where your repo lives
-WorkingDirectory=/home/pi/pi-mon/backend
-Environment=PYTHONUNBUFFERED=1
-# Optional .env file with PI_MONITOR_API_KEY
-EnvironmentFile=/home/pi/pi-mon/backend/.env
-# Run using project's venv; adjust path if needed
-ExecStart=/home/pi/pi-mon/.venv/bin/python simple_server.py
+User=abhinav
+Group=abhinav
+WorkingDirectory=/home/abhinav/pi-mon
+ExecStart=/usr/bin/python3 /home/abhinav/pi-mon/backend/simple_server.py
 Restart=always
-RestartSec=5
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pi-monitor
+
+# Environment variables
+Environment=PI_MONITOR_API_KEY=pi-monitor-api-key-2024
+Environment=PYTHONUNBUFFERED=1
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/home/pi/pi-mon/backend /home/pi/pi-mon
+
+# Auto-restart on failure
+StartLimitInterval=60
+StartLimitBurst=3
 
 [Install]
 WantedBy=multi-user.target

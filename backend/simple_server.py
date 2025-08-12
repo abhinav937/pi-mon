@@ -433,6 +433,13 @@ connection_pool = ConnectionPool()
 command_executor = CommandExecutor()
 metrics_cache = EnhancedCache(max_size=500, default_ttl=30)
 
+# Network rate tracker for calculating upload/download speeds
+net_rate_tracker = {
+    'last_ts': 0.0,
+    'pernic': {},  # name -> (bytes_recv, bytes_sent)
+    'totals': {'bytes_recv': 0, 'bytes_sent': 0}
+}
+
 # Global data storage for real-time metrics with improved performance
 class EnhancedMetricsCollector:
     def __init__(self):
@@ -688,6 +695,8 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
             self._handle_system_stats(query_params)
         elif path == '/api/system/enhanced':
             self._handle_enhanced_system_stats()
+        elif path == '/api/system/info':
+            self._handle_system_info_detail()
         elif path == '/api/service/restart':
             self._handle_service_restart_info()
         elif path == '/api/service/manage':
@@ -696,6 +705,21 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
             self._handle_service_info()
         elif path == '/api/power':
             self._handle_power_status_get()
+        elif path == '/api/services':
+            self._handle_services_list()
+        elif path == '/api/network':
+            self._handle_network_info()
+        elif path == '/api/network/stats':
+            self._handle_network_stats()
+        elif path == '/api/logs':
+            self._handle_logs_list(query_params)
+        elif path.startswith('/api/logs/') and '?' in self.path:
+            self._handle_log_read(query_params)
+        elif path.startswith('/api/metrics/history'):
+            self._handle_metrics_history(query_params)
+        elif path == '/api/refresh':
+            # Treat GET refresh to be idempotent for frontend convenience
+            self._handle_refresh()
         else:
             self._handle_404()
     
@@ -930,6 +954,313 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
         self._set_common_headers()
         
         response = self._get_enhanced_system_stats()
+        self.wfile.write(json.dumps(response).encode())
+
+    def _handle_system_info_detail(self):
+        """Provide detailed system info used by frontend SystemStatus."""
+        if not self.check_auth():
+            self._send_unauthorized()
+            return
+        self.send_response(200)
+        self._set_common_headers()
+        try:
+            cpu_freq = psutil.cpu_freq()
+            memory = psutil.virtual_memory()
+            net_if_addrs = getattr(psutil, 'net_if_addrs', lambda: {})()
+            network_interfaces = {}
+            for name, addrs in net_if_addrs.items() if isinstance(net_if_addrs, dict) else []:
+                network_interfaces[name] = {
+                    'addrs': [
+                        {
+                            'addr': getattr(a, 'address', ''),
+                            'netmask': getattr(a, 'netmask', ''),
+                            'broadcast': getattr(a, 'broadcast', '')
+                        }
+                        for a in addrs
+                    ]
+                }
+            response = {
+                'cpu_info': {
+                    'current_freq': round(cpu_freq.current, 1) if cpu_freq else 0,
+                    'max_freq': round(cpu_freq.max, 1) if cpu_freq else 0,
+                    'model': platform.processor() or platform.machine(),
+                },
+                'memory_info': {
+                    'total': round(memory.total / (1024**3), 2) if memory else 0,
+                    'available': round(memory.available / (1024**3), 2) if memory else 0,
+                    'used': round(memory.used / (1024**3), 2) if memory else 0,
+                    'percent': round(float(memory.percent), 1) if memory else 0,
+                },
+                'network_interfaces': network_interfaces
+            }
+        except Exception as e:
+            response = {'error': str(e)}
+        self.wfile.write(json.dumps(response).encode())
+
+    def _handle_services_list(self):
+        """List a small set of services with status for ServiceManagement UI."""
+        if not self.check_auth():
+            self._send_unauthorized()
+            return
+        self.send_response(200)
+        self._set_common_headers()
+        services = []
+        candidate_services = ['ssh', 'nginx', 'docker', 'pi-monitor']
+        for svc in candidate_services:
+            status = 'unknown'
+            active = False
+            enabled = False
+            try:
+                result = subprocess.run(['systemctl', 'is-active', svc], capture_output=True, text=True, timeout=5)
+                status = result.stdout.strip() if result.returncode == 0 else 'stopped'
+                active = (status == 'active' or status == 'running')
+                result2 = subprocess.run(['systemctl', 'is-enabled', svc], capture_output=True, text=True, timeout=5)
+                enabled = (result2.returncode == 0 and 'enabled' in result2.stdout)
+            except Exception:
+                pass
+            services.append({
+                'name': svc,
+                'status': 'running' if active else ('stopped' if status == 'stopped' else status or 'unknown'),
+                'active': active,
+                'enabled': enabled,
+                'description': f'{svc} service'
+            })
+        self.wfile.write(json.dumps(services).encode())
+
+    def _handle_network_info(self):
+        """Return network interface details similar to frontend expectations."""
+        if not self.check_auth():
+            self._send_unauthorized()
+            return
+        self.send_response(200)
+        self._set_common_headers()
+        interfaces = []
+        dns = {'primary': None, 'secondary': None}
+        gateway = None
+        route_status = None
+        try:
+            # Interfaces
+            addrs = getattr(psutil, 'net_if_addrs', lambda: {})()
+            stats = getattr(psutil, 'net_if_stats', lambda: {})()
+            for name, addr_list in (addrs.items() if isinstance(addrs, dict) else []):
+                iface_type = 'ethernet' if name.lower().startswith(('eth', 'enp', 'eno')) else ('wifi' if name.lower().startswith(('wlan', 'wl')) else 'other')
+                iface = {
+                    'name': name,
+                    'type': iface_type,
+                    'status': 'up' if (stats.get(name).isup if isinstance(stats, dict) and stats.get(name) else True) else 'down',
+                }
+                for a in addr_list:
+                    if getattr(a, 'family', None) and str(getattr(a, 'family')) in ('AddressFamily.AF_INET', '2'):
+                        iface['ip'] = getattr(a, 'address', None)
+                    if hasattr(a, 'address') and a.address and ':' in a.address and 'mac' not in iface:
+                        # crude MAC hint if psutil provides
+                        iface['mac'] = a.address
+                if isinstance(stats, dict) and stats.get(name):
+                    iface['mtu'] = stats[name].mtu
+                interfaces.append(iface)
+            # DNS
+            try:
+                with open('/etc/resolv.conf', 'r') as f:
+                    servers = [line.split()[1] for line in f if line.startswith('nameserver')]
+                    if servers:
+                        dns['primary'] = servers[0]
+                    if len(servers) > 1:
+                        dns['secondary'] = servers[1]
+            except Exception:
+                pass
+            # Gateway/route
+            try:
+                result = subprocess.run(['ip', 'route'], capture_output=True, text=True, timeout=3)
+                if result.returncode == 0:
+                    for line in result.stdout.splitlines():
+                        if line.startswith('default via'):
+                            gateway = line.split()[2]
+                            route_status = 'ok'
+                            break
+            except Exception:
+                pass
+        except Exception as e:
+            interfaces = []
+        self.wfile.write(json.dumps({
+            'interfaces': interfaces,
+            'dns': dns,
+            'gateway': gateway,
+            'routeStatus': route_status
+        }).encode())
+
+    def _handle_network_stats(self):
+        """Return instantaneous upload/download speeds per interface and totals."""
+        if not self.check_auth():
+            self._send_unauthorized()
+            return
+        self.send_response(200)
+        self._set_common_headers()
+        try:
+            now = time.time()
+            pernic = getattr(psutil, 'net_io_counters', lambda pernic=False: None)(pernic=True)
+            speeds = {}
+            total_dl = 0.0
+            total_ul = 0.0
+            if isinstance(pernic, dict):
+                last_ts = net_rate_tracker['last_ts']
+                delta_t = max(1e-6, now - last_ts) if last_ts else None
+                for name, counters in pernic.items():
+                    prev = net_rate_tracker['pernic'].get(name, (counters.bytes_recv, counters.bytes_sent))
+                    if delta_t:
+                        dl = max(0, counters.bytes_recv - prev[0]) / delta_t
+                        ul = max(0, counters.bytes_sent - prev[1]) / delta_t
+                    else:
+                        dl = 0.0
+                        ul = 0.0
+                    speeds[name] = {'download': dl, 'upload': ul}
+                    net_rate_tracker['pernic'][name] = (counters.bytes_recv, counters.bytes_sent)
+                    total_dl += dl
+                    total_ul += ul
+                net_rate_tracker['last_ts'] = now
+            response = {'download': total_dl, 'upload': total_ul}
+            response.update(speeds)
+        except Exception as e:
+            response = {'download': 0, 'upload': 0}
+        self.wfile.write(json.dumps(response).encode())
+
+    def _handle_logs_list(self, query_params):
+        """Return a list of available log files (subset)."""
+        if not self.check_auth():
+            self._send_unauthorized()
+            return
+        self.send_response(200)
+        self._set_common_headers()
+        results = []
+        for base in ['/var/log', './logs', 'logs']:
+            try:
+                if os.path.isdir(base):
+                    for name in os.listdir(base):
+                        # include a few common logs
+                        if any(name.startswith(prefix) for prefix in ('syslog', 'auth', 'kern', 'daemon')) or name.endswith('.log'):
+                            full = os.path.join(base, name)
+                            try:
+                                size_bytes = os.path.getsize(full)
+                            except Exception:
+                                size_bytes = 0
+                            results.append({'name': name, 'path': base, 'size': size_bytes})
+            except Exception:
+                continue
+        # include backend log if present
+        if os.path.exists('pi_monitor.log'):
+            try:
+                size_bytes = os.path.getsize('pi_monitor.log')
+            except Exception:
+                size_bytes = 0
+            results.append({'name': 'pi_monitor.log', 'path': '.', 'size': size_bytes})
+        self.wfile.write(json.dumps(results).encode())
+
+    def _handle_log_read(self, query_params):
+        """Return last N lines of a specific log file."""
+        if not self.check_auth():
+            self._send_unauthorized()
+            return
+        self.send_response(200)
+        self._set_common_headers()
+        try:
+            parsed_url = urlparse(self.path)
+            path = parsed_url.path
+            log_name = path.split('/')[-1]
+            lines = int(query_params.get('lines', ['100'])[0])
+            log_file = self._find_log_file(log_name) or ('pi_monitor.log' if log_name == 'pi_monitor.log' and os.path.exists('pi_monitor.log') else None)
+            if not log_file:
+                self.wfile.write(json.dumps({'error': 'Log not found'}).encode())
+                return
+            # Read last N lines efficiently
+            content = self._tail_file(log_file, lines)
+            entries = []
+            error_count = 0
+            warn_count = 0
+            for line in content.splitlines():
+                level = 'info'
+                low = line.lower()
+                if 'error' in low or ' err ' in low:
+                    level = 'error'
+                    error_count += 1
+                elif 'warn' in low:
+                    level = 'warning'
+                    warn_count += 1
+                entries.append({
+                    'level': level,
+                    'message': line,
+                })
+            try:
+                size_bytes = os.path.getsize(log_file)
+            except Exception:
+                size_bytes = 0
+            self.wfile.write(json.dumps({
+                'name': log_name,
+                'entries': entries,
+                'totalEntries': len(entries),
+                'errorCount': error_count,
+                'warningCount': warn_count,
+                'size': size_bytes
+            }).encode())
+        except Exception as e:
+            self.wfile.write(json.dumps({'error': str(e)}).encode())
+
+    def _handle_refresh(self):
+        """Invalidate caches and trigger an immediate metrics sample."""
+        if not self.check_auth():
+            self._send_unauthorized()
+            return
+        self.send_response(200)
+        self._set_common_headers()
+        try:
+            # Clear caches
+            metrics_cache.clear()
+            command_executor.cache.clear()
+            # Force an immediate metrics read and append to history
+            data = self._get_system_stats()
+            if data and 'error' not in data:
+                with metrics_collector.collection_lock:
+                    metrics_collector.metrics_history.append(data)
+            response = {'success': True, 'message': 'Refreshed'}
+        except Exception as e:
+            response = {'success': False, 'message': str(e)}
+        self.wfile.write(json.dumps(response).encode())
+
+    def _tail_file(self, filepath, num_lines):
+        try:
+            with open(filepath, 'rb') as f:
+                f.seek(0, os.SEEK_END)
+                end = f.tell()
+                buf = bytearray()
+                lines = []
+                while end > 0 and len(lines) <= num_lines:
+                    step = min(8192, end)
+                    f.seek(end - step)
+                    buf[:0] = f.read(step)
+                    end -= step
+                    lines = buf.splitlines()
+                return '\n'.join(line.decode('utf-8', errors='ignore') for line in lines[-num_lines:])
+        except Exception:
+            return ''
+
+    def _handle_metrics_history(self, query_params):
+        if not self.check_auth():
+            self._send_unauthorized()
+            return
+        self.send_response(200)
+        self._set_common_headers()
+        try:
+            minutes = int(query_params.get('minutes', ['60'])[0])
+        except Exception:
+            minutes = 60
+        metrics_list = [m for m in metrics_collector.metrics_history if isinstance(m, dict)]
+        trimmed = metrics_list[-minutes:]
+        response = {
+            'metrics': trimmed,
+            'collection_status': {
+                'active': metrics_collector.is_collecting,
+                'interval': int(metrics_collector.collection_interval),
+                'total_points': len(metrics_list)
+            }
+        }
         self.wfile.write(json.dumps(response).encode())
     
     def _handle_service_restart_info(self):

@@ -1,25 +1,75 @@
 import React, { useState } from 'react';
 import { useMutation } from 'react-query';
-import { Power, RotateCcw, Clock, AlertTriangle } from 'lucide-react';
+import { Power, RotateCcw, Clock, AlertTriangle, Bug } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 const PowerManagement = ({ unifiedClient }) => {
   const [selectedAction, setSelectedAction] = useState('shutdown');
   const [delay, setDelay] = useState(0);
   const [showConfirmation, setShowConfirmation] = useState(false);
+  const [debugInfo, setDebugInfo] = useState(null);
+  const [showDebugPanel, setShowDebugPanel] = useState(false);
+
+  // Debug function to log all relevant information
+  const logDebugInfo = (message, data = null) => {
+    const timestamp = new Date().toISOString();
+    const debugEntry = {
+      timestamp,
+      message,
+      data,
+      action: selectedAction,
+      delay,
+      clientAvailable: !!unifiedClient,
+      clientState: unifiedClient?.getConnectionState?.() || 'unknown'
+    };
+    
+    console.log(`🔍 [PowerManagement Debug] ${message}`, debugEntry);
+    setDebugInfo(debugEntry);
+  };
 
   const powerMutation = useMutation(
     async ({ action, delay }) => {
-      if (!unifiedClient) throw new Error('Client not available');
-      return await unifiedClient.executePowerAction(action, delay);
+      logDebugInfo('Starting power action execution', { action, delay });
+      
+      if (!unifiedClient) {
+        const error = 'Client not available';
+        logDebugInfo('Client not available error', { error });
+        throw new Error(error);
+      }
+
+      logDebugInfo('Client available, checking connection state', {
+        connectionState: unifiedClient.getConnectionState?.(),
+        serverUrl: unifiedClient.serverUrl
+      });
+
+      try {
+        logDebugInfo('Calling executePowerAction on unifiedClient', { action, delay });
+        const result = await unifiedClient.executePowerAction(action, delay);
+        logDebugInfo('Power action executed successfully', { result });
+        return result;
+      } catch (error) {
+        logDebugInfo('Power action execution failed', { 
+          error: error.message, 
+          errorStack: error.stack,
+          errorResponse: error.response?.data,
+          errorStatus: error.response?.status
+        });
+        throw error;
+      }
     },
     {
       onSuccess: (data) => {
+        logDebugInfo('Power action mutation succeeded', { data });
         toast.success(data.message || `${selectedAction} initiated successfully`);
         setShowConfirmation(false);
         setDelay(0);
       },
       onError: (error) => {
+        logDebugInfo('Power action mutation failed', { 
+          error: error.message,
+          errorResponse: error.response?.data,
+          errorStatus: error.response?.status
+        });
         toast.error(error.message || `Failed to ${selectedAction} system`);
         setShowConfirmation(false);
       },
@@ -27,7 +77,38 @@ const PowerManagement = ({ unifiedClient }) => {
   );
 
   const handleExecutePowerAction = () => {
+    logDebugInfo('User clicked execute power action button', {
+      selectedAction,
+      delay,
+      clientAvailable: !!unifiedClient
+    });
     powerMutation.mutate({ action: selectedAction, delay });
+  };
+
+  // Test connection function for debugging
+  const testConnection = async () => {
+    if (!unifiedClient) {
+      logDebugInfo('Cannot test connection - no client available');
+      return;
+    }
+
+    try {
+      logDebugInfo('Testing connection to backend');
+      const health = await unifiedClient.checkHealth();
+      logDebugInfo('Health check successful', { health });
+      
+      const powerStatus = await unifiedClient.getPowerStatus();
+      logDebugInfo('Power status check successful', { powerStatus });
+      
+      toast.success('Connection test successful!');
+    } catch (error) {
+      logDebugInfo('Connection test failed', { 
+        error: error.message,
+        errorResponse: error.response?.data,
+        errorStatus: error.response?.status
+      });
+      toast.error(`Connection test failed: ${error.message}`);
+    }
   };
 
   const formatDelay = (seconds) => {
@@ -111,6 +192,119 @@ const PowerManagement = ({ unifiedClient }) => {
         <div className="text-sm text-gray-500 dark:text-gray-400">
           System control actions
         </div>
+      </div>
+
+      {/* Debug Panel */}
+      <div className="metric-card border-l-4 border-blue-500 bg-blue-50 dark:bg-blue-900/20">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center space-x-2">
+            <Bug className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+            <h3 className="text-lg font-semibold text-blue-800 dark:text-blue-200">
+              Debug Panel
+            </h3>
+          </div>
+          <div className="flex space-x-2">
+            <button
+              onClick={() => setShowDebugPanel(!showDebugPanel)}
+              className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+            >
+              {showDebugPanel ? 'Hide' : 'Show'} Debug
+            </button>
+            <button
+              onClick={testConnection}
+              className="px-3 py-1 text-sm bg-green-600 text-white rounded hover:bg-green-700 transition-colors"
+            >
+              Test Connection
+            </button>
+          </div>
+        </div>
+        
+        {showDebugPanel && (
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+              <div>
+                <strong>Client Status:</strong>
+                <div className="mt-1 space-y-1">
+                  <div>Available: {unifiedClient ? '✅ Yes' : '❌ No'}</div>
+                  <div>State: {unifiedClient?.getConnectionState?.() || 'Unknown'}</div>
+                  <div>Server: {unifiedClient?.serverUrl || 'Not set'}</div>
+                </div>
+              </div>
+              <div>
+                <strong>Current Action:</strong>
+                <div className="mt-1 space-y-1">
+                  <div>Action: {selectedAction}</div>
+                  <div>Delay: {delay}s</div>
+                  <div>Loading: {powerMutation.isLoading ? '✅ Yes' : '❌ No'}</div>
+                </div>
+              </div>
+            </div>
+            
+            {unifiedClient && (
+              <div className="bg-gray-100 dark:bg-gray-800 rounded p-3">
+                <div className="flex items-center justify-between mb-2">
+                  <strong>Debug Logs Summary:</strong>
+                  <button
+                    onClick={() => {
+                      unifiedClient.clearDebugLogs();
+                      setDebugInfo(null);
+                    }}
+                    className="px-2 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
+                  >
+                    Clear Logs
+                  </button>
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                  {(() => {
+                    const summary = unifiedClient.getDebugSummary();
+                    return (
+                      <>
+                        <div>Total: {summary.totalLogs}</div>
+                        <div>Errors: {summary.errorLogs}</div>
+                        <div>Info: {summary.infoLogs}</div>
+                        <div>Requests: {summary.recentRequests.length}</div>
+                      </>
+                    );
+                  })()}
+                </div>
+                
+                {(() => {
+                  const summary = unifiedClient.getDebugSummary();
+                  if (summary.recentErrors.length > 0) {
+                    return (
+                      <div className="mt-2">
+                        <strong className="text-red-600">Recent Errors:</strong>
+                        <div className="mt-1 space-y-1 max-h-20 overflow-auto">
+                          {summary.recentErrors.map((log, index) => (
+                            <div key={index} className="text-xs text-red-600 bg-red-50 dark:bg-red-900/20 p-1 rounded">
+                              {log.message}: {JSON.stringify(log.data)}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
+              </div>
+            )}
+            
+            {debugInfo && (
+              <div className="bg-gray-100 dark:bg-gray-800 rounded p-3">
+                <strong>Last Debug Info:</strong>
+                <div className="mt-2 text-xs font-mono bg-white dark:bg-gray-900 p-2 rounded overflow-auto max-h-32">
+                  <div>Time: {debugInfo.timestamp}</div>
+                  <div>Message: {debugInfo.message}</div>
+                  <div>Data: {JSON.stringify(debugInfo.data, null, 2)}</div>
+                </div>
+              </div>
+            )}
+            
+            <div className="text-xs text-blue-700 dark:text-blue-300">
+              💡 Open Chrome DevTools (F12) and check the Console tab for detailed debug logs
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Warning Banner */}

@@ -7,8 +7,36 @@ const CONNECTION_STATES = {
   ERROR: 'error'
 };
 
+// Debug logging function
+const logDebug = (message, data = null, type = 'info') => {
+  const timestamp = new Date().toISOString();
+  const logEntry = {
+    timestamp,
+    type,
+    message,
+    data
+  };
+  
+  console.log(`🔍 [UnifiedClient Debug] ${message}`, logEntry);
+  
+  // Also log to localStorage for persistence across page reloads
+  try {
+    const existingLogs = JSON.parse(localStorage.getItem('pi-monitor-debug-logs') || '[]');
+    existingLogs.push(logEntry);
+    // Keep only last 100 logs
+    if (existingLogs.length > 100) {
+      existingLogs.splice(0, existingLogs.length - 100);
+    }
+    localStorage.setItem('pi-monitor-debug-logs', JSON.stringify(existingLogs));
+  } catch (error) {
+    console.warn('Failed to save debug log to localStorage:', error);
+  }
+};
+
 class UnifiedClient {
   constructor(options = {}) {
+    logDebug('Initializing UnifiedClient', { options });
+    
     // Use domain-based URL if available, otherwise fall back to localhost
     const domainUrl = process.env.REACT_APP_API_BASE_URL || `https://${window.location.hostname}`;
     this.serverUrl = options.serverUrl || domainUrl;
@@ -17,29 +45,72 @@ class UnifiedClient {
     this.onError = options.onError || (() => {});
     this.connectionState = CONNECTION_STATES.DISCONNECTED;
     this.authToken = localStorage.getItem('pi-monitor-token');
+    
+    logDebug('Client configuration', {
+      serverUrl: this.serverUrl,
+      hasAuthToken: !!this.authToken,
+      domainUrl,
+      hostname: window.location.hostname
+    });
+    
     this.httpClient = axios.create({
       baseURL: this.serverUrl,
       timeout: 10000
     });
     
-    // Add request interceptor to include auth token
+    // Add request interceptor to include auth token and log requests
     this.httpClient.interceptors.request.use(
       (config) => {
+        logDebug('HTTP Request', {
+          method: config.method?.toUpperCase(),
+          url: config.url,
+          baseURL: config.baseURL,
+          fullURL: `${config.baseURL}${config.url}`,
+          headers: config.headers,
+          data: config.data,
+          params: config.params
+        });
+        
         if (this.authToken) {
           config.headers.Authorization = `Bearer ${this.authToken}`;
+          logDebug('Added auth token to request', { hasToken: !!this.authToken });
         }
         return config;
       },
       (error) => {
+        logDebug('Request interceptor error', { error: error.message }, 'error');
         return Promise.reject(error);
       }
     );
     
-    // Add response interceptor to handle auth errors
+    // Add response interceptor to handle auth errors and log responses
     this.httpClient.interceptors.response.use(
-      (response) => response,
+      (response) => {
+        logDebug('HTTP Response Success', {
+          status: response.status,
+          statusText: response.statusText,
+          url: response.config.url,
+          method: response.config.method?.toUpperCase(),
+          data: response.data,
+          headers: response.headers
+        });
+        return response;
+      },
       async (error) => {
+        logDebug('HTTP Response Error', {
+          message: error.message,
+          status: error.response?.status,
+          statusText: error.response?.statusText,
+          url: error.config?.url,
+          method: error.config?.method?.toUpperCase(),
+          responseData: error.response?.data,
+          responseHeaders: error.response?.headers,
+          requestData: error.config?.data,
+          requestHeaders: error.config?.headers
+        }, 'error');
+        
         if (error.response?.status === 401) {
+          logDebug('Received 401 Unauthorized, attempting re-authentication');
           // Token expired or invalid, try to re-authenticate
           try {
             await this.authenticate();
@@ -48,8 +119,13 @@ class UnifiedClient {
             if (this.authToken) {
               originalRequest.headers.Authorization = `Bearer ${this.authToken}`;
             }
+            logDebug('Retrying original request after re-authentication', {
+              url: originalRequest.url,
+              method: originalRequest.method
+            });
             return this.httpClient(originalRequest);
           } catch (authError) {
+            logDebug('Re-authentication failed', { error: authError.message }, 'error');
             // Re-authentication failed
             this.setConnectionState(CONNECTION_STATES.ERROR);
             this.onError(authError);
@@ -228,15 +304,27 @@ class UnifiedClient {
   // Power management methods
   async getPowerStatus() {
     try {
+      logDebug('Getting power status from backend');
       const response = await this.httpClient.get('/api/power');
+      logDebug('Power status response received', { 
+        status: response.status,
+        data: response.data 
+      });
       return response.data;
     } catch (error) {
+      logDebug('Failed to get power status', { 
+        error: error.message,
+        status: error.response?.status,
+        responseData: error.response?.data
+      }, 'error');
       throw error;
     }
   }
 
   async executePowerAction(action, delay = 0) {
     try {
+      logDebug('Executing power action', { action, delay });
+      
       let endpoint = '';
       let data = { action, delay };
       
@@ -251,39 +339,93 @@ class UnifiedClient {
           endpoint = '/api/power/sleep';
           break;
         default:
-          throw new Error(`Unknown power action: ${action}`);
+          const error = `Unknown power action: ${action}`;
+          logDebug('Unknown power action requested', { action }, 'error');
+          throw new Error(error);
       }
       
+      logDebug('Power action endpoint determined', { 
+        action, 
+        endpoint, 
+        fullUrl: `${this.serverUrl}${endpoint}`,
+        data 
+      });
+      
       const response = await this.httpClient.post(endpoint, data);
+      logDebug('Power action executed successfully', { 
+        action,
+        response: {
+          status: response.status,
+          data: response.data
+        }
+      });
       return response.data;
     } catch (error) {
+      logDebug('Power action execution failed', { 
+        action,
+        delay,
+        error: error.message,
+        errorStatus: error.response?.status,
+        errorResponse: error.response?.data,
+        errorStack: error.stack
+      }, 'error');
       throw error;
     }
   }
 
   async shutdown() {
     try {
+      logDebug('Executing shutdown via legacy method');
       const response = await this.httpClient.post('/api/power/shutdown');
+      logDebug('Shutdown executed successfully via legacy method', { 
+        status: response.status,
+        data: response.data 
+      });
       return response.data;
     } catch (error) {
+      logDebug('Shutdown failed via legacy method', { 
+        error: error.message,
+        status: error.response?.status,
+        responseData: error.response?.data
+      }, 'error');
       throw error;
     }
   }
 
   async restart() {
     try {
+      logDebug('Executing restart via legacy method');
       const response = await this.httpClient.post('/api/power/restart');
+      logDebug('Restart executed successfully via legacy method', { 
+        status: response.status,
+        data: response.data 
+      });
       return response.data;
     } catch (error) {
+      logDebug('Restart failed via legacy method', { 
+        error: error.message,
+        status: error.response?.status,
+        responseData: error.response?.data
+      }, 'error');
       throw error;
     }
   }
 
   async sleep() {
     try {
+      logDebug('Executing sleep via legacy method');
       const response = await this.httpClient.post('/api/power/sleep');
+      logDebug('Sleep executed successfully via legacy method', { 
+        status: response.status,
+        data: response.data 
+      });
       return response.data;
     } catch (error) {
+      logDebug('Sleep failed via legacy method', { 
+        error: error.message,
+        status: error.response?.status,
+        responseData: error.response?.data
+      }, 'error');
       throw error;
     }
   }
@@ -300,6 +442,41 @@ class UnifiedClient {
 
   getConnectionState() {
     return this.connectionState;
+  }
+
+  // Debug utility methods
+  getDebugLogs() {
+    try {
+      const logs = JSON.parse(localStorage.getItem('pi-monitor-debug-logs') || '[]');
+      return logs;
+    } catch (error) {
+      logDebug('Failed to retrieve debug logs', { error: error.message }, 'error');
+      return [];
+    }
+  }
+
+  clearDebugLogs() {
+    try {
+      localStorage.removeItem('pi-monitor-debug-logs');
+      logDebug('Debug logs cleared');
+      return true;
+    } catch (error) {
+      logDebug('Failed to clear debug logs', { error: error.message }, 'error');
+      return false;
+    }
+  }
+
+  getDebugSummary() {
+    const logs = this.getDebugLogs();
+    const summary = {
+      totalLogs: logs.length,
+      errorLogs: logs.filter(log => log.type === 'error').length,
+      infoLogs: logs.filter(log => log.type === 'info').length,
+      recentErrors: logs.filter(log => log.type === 'error').slice(-5),
+      recentRequests: logs.filter(log => log.message.includes('HTTP Request')).slice(-5),
+      recentResponses: logs.filter(log => log.message.includes('HTTP Response')).slice(-5)
+    };
+    return summary;
   }
 
   disconnect() {

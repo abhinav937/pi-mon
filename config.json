@@ -145,6 +145,12 @@
     "development": {
       "backend": "http://localhost:5001",
       "frontend": "http://localhost:3000"
+    },
+    "production": {
+      "backend": "http://65.36.123.68:5001",
+      "frontend": "http://65.36.123.68",
+      "health": "http://65.36.123.68:5001/health",
+      "api_base": "http://65.36.123.68"
     }
   }
 }

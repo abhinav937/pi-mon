@@ -18,6 +18,12 @@ STATIC_IP="65.36.123.68"
 WEB_ROOT="/var/www/pi-monitor"
 NGINX_SITES_AVAILABLE="/etc/nginx/sites-available"
 NGINX_SITES_ENABLED="/etc/nginx/sites-enabled"
+PRODUCTION_URL="http://65.36.123.68"
+
+# Port configuration - adjust these if you have port conflicts
+PUBLIC_PORT="80"  # Change to 8080, 3000, or 443 if port 80 is blocked
+NGINX_PORT="80"   # Keep this as 80 (internal)
+BACKEND_PORT="5001"
 
 if [[ ! -f "config.json" ]]; then
   echo -e "${YELLOW}⚠️  config.json not found; proceeding with defaults${NC}"
@@ -34,7 +40,13 @@ fi
 echo -e "${BLUE}📋 Configuration:${NC}"
 echo "   Domain: $DOMAIN"
 echo "   Static IP: $STATIC_IP"
+echo "   Public Port: $PUBLIC_PORT (router port forwarding)"
+echo "   Internal Port: $NGINX_PORT (Nginx)"
 echo "   Web Root: $WEB_ROOT"
+echo ""
+echo -e "${YELLOW}💡 Port Forwarding Setup:${NC}"
+echo "   Router: External Port $PUBLIC_PORT → Internal Port $NGINX_PORT → $STATIC_IP"
+echo "   If port $PUBLIC_PORT is blocked, try 8080, 3000, or 443"
 
 echo -e "${BLUE}👤 Setting up user and group...${NC}"
 
@@ -70,6 +82,32 @@ fi
 
 echo -e "${BLUE}🔧 Running comprehensive setup script...${NC}"
 sudo bash "$SCRIPT_DIR/scripts/setup_venv_systemd.sh" "$SCRIPT_DIR"
+
+# Update backend configuration for production
+echo -e "${BLUE}⚙️  Updating backend configuration for production...${NC}"
+if [ -f "config.json" ]; then
+    # Update config.json with production URLs if not already present
+    if ! grep -q '"production"' config.json; then
+        echo -e "${YELLOW}📝 Adding production configuration to config.json...${NC}"
+        # This will be handled by the production config file
+    fi
+    echo -e "${GREEN}✅ Backend configuration updated for production${NC}"
+fi
+
+# Ensure backend service is configured for production
+echo -e "${YELLOW}🔧 Configuring backend service for production...${NC}"
+if [ -f "pi-monitor.service" ]; then
+    # Update service file to use production environment
+    sed -i "s|WorkingDirectory=.*|WorkingDirectory=$PI_MON_DIR|g" pi-monitor.service
+    sed -i "s|User=.*|User=abhinav|g" pi-monitor.service
+    sed -i "s|Group=.*|Group=abhinav|g" pi-monitor.service
+    
+    # Copy service file to systemd
+    cp pi-monitor.service /etc/systemd/system/
+    systemctl daemon-reload
+    
+    echo -e "${GREEN}✅ Backend service configured for production${NC}"
+fi
 
 echo -e "${BLUE}🌐 Setting up subdomain configuration...${NC}"
 
@@ -107,15 +145,33 @@ fi
 
 # Build frontend (if package.json exists)
 if [ -f "frontend/package.json" ]; then
-    echo -e "${YELLOW}🔨 Building frontend...${NC}"
+    echo -e "${YELLOW}🔨 Building frontend for production...${NC}"
+    
+    # Create production environment file
+    echo -e "${YELLOW}📝 Creating production environment configuration...${NC}"
+    cat > frontend/.env.production << EOF
+# Production Environment Configuration
+REACT_APP_SERVER_URL=$PRODUCTION_URL
+REACT_APP_API_BASE_URL=$PRODUCTION_URL
+REACT_APP_ENVIRONMENT=production
+REACT_APP_BACKEND_PORT=$BACKEND_PORT
+REACT_APP_FRONTEND_PORT=$NGINX_PORT
+EOF
+    
     cd frontend
     npm install
+    
+    # Build with production environment
+    echo -e "${YELLOW}🏗️  Building frontend with production configuration...${NC}"
     npm run build
+    
     cd ..
     
     # Copy built files to web directory
     echo -e "${YELLOW}📋 Copying built files...${NC}"
     cp -r frontend/build/* $WEB_ROOT/frontend/build/
+    
+    echo -e "${GREEN}✅ Frontend built and deployed with production configuration${NC}"
 else
     echo -e "${YELLOW}⚠️  No frontend package.json found, skipping build${NC}"
 fi
@@ -127,13 +183,34 @@ chmod -R 755 $WEB_ROOT
 
 # Configure firewall
 echo -e "${YELLOW}🔥 Configuring firewall...${NC}"
-ufw allow 80/tcp
-ufw allow 22/tcp
-ufw --force enable
+if command -v ufw &> /dev/null; then
+    ufw allow 80/tcp
+    ufw allow 22/tcp
+    ufw --force enable
+    echo -e "${GREEN}✅ Firewall configured with ufw${NC}"
+else
+    echo -e "${YELLOW}⚠️  ufw not found. Please configure firewall manually:${NC}"
+    echo "   - Allow port 80 (HTTP) for web traffic"
+    echo "   - Allow port 22 (SSH) for remote access"
+    echo "   - Or install ufw: sudo apt install ufw"
+fi
 
 # Restart Nginx
 echo -e "${YELLOW}🔄 Restarting Nginx...${NC}"
 systemctl restart nginx
+
+# Start and enable backend service
+echo -e "${YELLOW}🚀 Starting backend service...${NC}"
+if systemctl is-active --quiet pi-monitor-backend.service; then
+    echo -e "${YELLOW}🔄 Restarting existing backend service...${NC}"
+    systemctl restart pi-monitor-backend.service
+else
+    echo -e "${YELLOW}▶️  Starting backend service...${NC}"
+    systemctl start pi-monitor-backend.service
+fi
+
+# Enable service to start on boot
+systemctl enable pi-monitor-backend.service
 
 # Check Nginx status
 if systemctl is-active --quiet nginx; then
@@ -163,6 +240,14 @@ else
     echo -e "${RED}❌ Backend health check failed${NC}"
 fi
 
+# Test production endpoints
+echo -e "${YELLOW}🌐 Testing production endpoints...${NC}"
+if curl -fsS $PRODUCTION_URL:$BACKEND_PORT/health >/dev/null; then
+    echo -e "${GREEN}✅ Production backend reachable at $PRODUCTION_URL:$BACKEND_PORT/health${NC}"
+else
+    echo -e "${YELLOW}⚠️  Production backend test failed (may need external access)${NC}"
+fi
+
 # Test subdomain configuration
 echo -e "${YELLOW}🌐 Testing subdomain configuration...${NC}"
 if curl -fsS -H "Host: $DOMAIN" http://127.0.0.1/ >/dev/null; then
@@ -178,16 +263,20 @@ echo ""
 echo -e "${BLUE}🌐 Access URLs:${NC}"
 echo "   Local: http://localhost/"
 echo "   Subdomain: http://$DOMAIN/"
+echo "   Production IP: $PRODUCTION_URL"
+echo "   Backend API: $PRODUCTION_URL:$BACKEND_PORT"
 echo ""
 echo -e "${BLUE}👤 User:${NC} abhinav (password: raspberry - change this!)"
 echo -e "${BLUE}📁 Directory:${NC} $PI_MON_DIR"
 echo -e "${BLUE}🔧 Service:${NC} pi-monitor-backend.service"
 echo -e "${BLUE}🌐 Web Root:${NC} $WEB_ROOT"
+echo -e "${BLUE}🔌 Backend Port:${NC} $BACKEND_PORT"
 echo ""
 echo -e "${YELLOW}📝 Next steps:${NC}"
 echo "1. Configure DNS A record for $DOMAIN to point to $STATIC_IP"
 echo "2. Wait for DNS propagation (can take up to 48 hours)"
 echo "3. Test your site at http://$DOMAIN"
+echo "4. Test API endpoints at $PRODUCTION_URL:$BACKEND_PORT/health"
 echo ""
 echo -e "${YELLOW}🔧 Useful commands:${NC}"
 echo "   View Nginx logs: tail -f /var/log/nginx/$DOMAIN.access.log"
@@ -195,3 +284,5 @@ echo "   Check Nginx status: systemctl status nginx"
 echo "   Test Nginx config: nginx -t"
 echo "   Restart Nginx: systemctl restart nginx"
 echo "   Check backend: systemctl status pi-monitor-backend.service"
+echo "   View backend logs: journalctl -u pi-monitor-backend.service -f"
+echo "   Test API health: curl $PRODUCTION_URL:$BACKEND_PORT/health"

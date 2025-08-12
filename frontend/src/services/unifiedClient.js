@@ -1,4 +1,5 @@
 import axios from 'axios';
+import PRODUCTION_CONFIG from '../config/production.js';
 
 const CONNECTION_STATES = {
   DISCONNECTED: 'disconnected',
@@ -45,6 +46,10 @@ class UnifiedClient {
       // If running under CRA dev server (localhost:3000), default backend 5001
       if (host === 'localhost' || host === '127.0.0.1') {
         return `http://${host}:5001`;
+      }
+      // In production, use the production deployment URL
+      if (host !== 'localhost' && host !== '127.0.0.1') {
+        return PRODUCTION_CONFIG.API_BASE_URL;
       }
       // In production behind proxy, hit same-origin
       return `${isHttps ? 'https' : 'http'}://${host}`;

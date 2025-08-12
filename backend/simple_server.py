@@ -197,8 +197,7 @@ except ImportError:
         config = MinimalConfig()
 
 # Configuration constants
-JWT_SECRET = "pi-monitor-secret-key-2024"
-JWT_EXPIRATION = 24 * 60 * 60  # 24 hours
+API_KEY = os.environ.get('PI_MONITOR_API_KEY', 'pi-monitor-api-key-2024')  # Default fallback
 MAX_CONNECTIONS = 100
 REQUEST_TIMEOUT = 30
 CACHE_TTL = 60  # Cache TTL in seconds
@@ -633,9 +632,6 @@ def monitor_performance(func):
     return wrapper
 
 class SimplePiMonitorHandler(BaseHTTPRequestHandler):
-    # Class variable to persist tokens between requests
-    auth_tokens = {}
-    
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.request_start_time = time.time()
@@ -1449,26 +1445,18 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
         self.end_headers()
     
     def check_auth(self):
-        """Simple authentication check with improved security"""
+        """Simple API key authentication check"""
         auth_header = self.headers.get('Authorization', '')
         if not auth_header.startswith('Bearer '):
             return False
         
-        token = auth_header.split(' ')[1]
+        api_key = auth_header.split(' ')[1]
         
-        # Check if token exists and is not expired
-        if token in SimplePiMonitorHandler.auth_tokens:
-            token_data = SimplePiMonitorHandler.auth_tokens[token]
-            if time.time() < token_data['expires']:
-                return True
-            else:
-                # Remove expired token
-                del SimplePiMonitorHandler.auth_tokens[token]
-        
-        return False
+        # Check if API key matches
+        return api_key == API_KEY
     
     def handle_auth(self):
-        """Handle authentication and return token with improved security"""
+        """Handle API key validation"""
         # Get content length from headers
         content_length = int(self.headers.get('Content-Length', 0))
         if content_length > 0:
@@ -1477,32 +1465,23 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
             try:
                 # Parse JSON data
                 auth_data = json.loads(post_data.decode('utf-8'))
-                username = auth_data.get('username', '')
-                password = auth_data.get('password', '')
+                api_key = auth_data.get('api_key', '')
                 
-                # Check credentials (in production, use proper password hashing)
-                if username == 'abhinav' and password == 'kavachi':
+                # Check API key
+                if api_key == API_KEY:
                     # Authentication successful
-                    token = self.generate_token()
-                    SimplePiMonitorHandler.auth_tokens[token] = {
-                        'user': username,
-                        'expires': time.time() + JWT_EXPIRATION,
-                        'created': time.time()
-                    }
-                    
-                    logger.info(f"Authentication successful for user: {username}")
+                    logger.info("API key authentication successful")
                     
                     return {
-                        "access_token": token,
-                        "token_type": "bearer",
-                        "message": "Authentication successful",
-                        "expires_in": JWT_EXPIRATION
+                        "success": True,
+                        "message": "API key authentication successful",
+                        "auth_method": "api_key"
                     }
                 else:
                     # Authentication failed
-                    logger.warning(f"Authentication failed for user: {username}")
+                    logger.warning("API key authentication failed")
                     return {
-                        "error": "Invalid username or password",
+                        "error": "Invalid API key",
                         "message": "Authentication failed"
                     }
                     
@@ -1516,15 +1495,13 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
             logger.warning("Missing request body in auth request")
             return {
                 "error": "Missing request body",
-                "message": "Username and password required"
+                "message": "API key required"
             }
     
-    def generate_token(self):
-        """Generate a simple token with improved security"""
-        timestamp = str(int(time.time()))
-        message = f"pi-monitor:{timestamp}"
-        signature = hmac.new(JWT_SECRET.encode(), message.encode(), hashlib.sha256).hexdigest()
-        return base64.b64encode(f"{message}:{signature}".encode()).decode()
+    def generate_api_key(self):
+        """Generate a new API key (for admin use)"""
+        import secrets
+        return secrets.token_urlsafe(32)
     
     @lru_cache(maxsize=128)
     def _get_system_info(self):

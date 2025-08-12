@@ -13,7 +13,7 @@ BLUE='\033[0;34m'
 NC='\033[0m'
 
 # Configuration
-BACKEND_URL="http://localhost:5001"
+BACKEND_URL="http://192.168.0.201:5001"
 AUTH_USERNAME="abhinav"
 AUTH_PASSWORD="kavachi"
 LOG_FILE="api_test_$(date +%Y%m%d_%H:%M:%S).log"

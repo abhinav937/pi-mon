@@ -44,11 +44,11 @@ class UnifiedClient {
     this.onDataUpdate = options.onDataUpdate || (() => {});
     this.onError = options.onError || (() => {});
     this.connectionState = CONNECTION_STATES.DISCONNECTED;
-    this.authToken = localStorage.getItem('pi-monitor-token');
+    this.apiKey = localStorage.getItem('pi-monitor-api-key');
     
     logDebug('Client configuration', {
       serverUrl: this.serverUrl,
-      hasAuthToken: !!this.authToken,
+      hasApiKey: !!this.apiKey,
       domainUrl,
       hostname: window.location.hostname
     });
@@ -71,9 +71,9 @@ class UnifiedClient {
           params: config.params
         });
         
-        if (this.authToken) {
-          config.headers.Authorization = `Bearer ${this.authToken}`;
-          logDebug('Added auth token to request', { hasToken: !!this.authToken });
+        if (this.apiKey) {
+          config.headers.Authorization = `Bearer ${this.apiKey}`;
+          logDebug('Added api key to request', { hasApiKey: !!this.apiKey });
         }
         return config;
       },
@@ -116,8 +116,8 @@ class UnifiedClient {
             await this.authenticate();
             // Retry the original request
             const originalRequest = error.config;
-            if (this.authToken) {
-              originalRequest.headers.Authorization = `Bearer ${this.authToken}`;
+            if (this.apiKey) {
+              originalRequest.headers.Authorization = `Bearer ${this.apiKey}`;
             }
             logDebug('Retrying original request after re-authentication', {
               url: originalRequest.url,
@@ -140,7 +140,7 @@ class UnifiedClient {
 
   async initializeConnection() {
     try {
-      if (!this.authToken) {
+      if (!this.apiKey) {
         await this.authenticate();
       }
       await this.checkHealth();
@@ -156,11 +156,18 @@ class UnifiedClient {
   async authenticate() {
     try {
       const response = await this.httpClient.post('/api/auth/token', {
-        username: 'abhinav',
-        password: 'kavachi'
+        api_key: this.apiKey || 'pi-monitor-api-key-2024'  // Use stored key or default
       });
-      this.authToken = response.data.access_token;
-      localStorage.setItem('pi-monitor-token', this.authToken);
+      
+      if (response.data.success) {
+        // Store the API key if not already stored
+        if (!this.apiKey) {
+          this.apiKey = 'pi-monitor-api-key-2024';  // Default key
+          localStorage.setItem('pi-monitor-api-key', this.apiKey);
+        }
+      } else {
+        throw new Error('Authentication failed');
+      }
     } catch (error) {
       throw new Error('Failed to authenticate');
     }

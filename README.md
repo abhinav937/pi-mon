@@ -83,17 +83,44 @@ All settings are in `config.json`:
 }
 ```
 
+## 🔐 Authentication
+
+Pi Monitor now uses **API Key authentication** for secure access to protected endpoints.
+
+### Setting Up Your API Key
+
+1. **Generate a secure API key:**
+   ```bash
+   python generate_api_key.py
+   ```
+
+2. **Set the API key as an environment variable:**
+   ```bash
+   export PI_MONITOR_API_KEY='your-generated-api-key'
+   ```
+
+3. **Or create a .env file in the backend directory:**
+   ```bash
+   cd backend
+   cp env.example .env
+   # Edit .env and set your API key
+   ```
+
+### Default API Key (Development Only)
+For development/testing, the system uses a default API key: `pi-monitor-api-key-2024`
+
+⚠️ **Security Warning**: Change this default key in production!
+
 ## 🔧 Available Endpoints
 
 | Endpoint | Method | Description | Auth |
 |----------|--------|-------------|------|
 | `/` | GET | Basic status | No |
 | `/health` | GET | Health check | No |
-| `/api/auth/token` | POST | Get auth token | No |
+| `/api/auth/token` | POST | Validate API key | No |
 | `/api/system` | GET | System stats | Yes |
+| `/api/system/enhanced` | GET | Enhanced system stats | Yes |
 | `/api/system` | GET | System stats with history | Yes |
-| `/api/metrics` | GET | Historical metrics data | Yes |
-| `/api/system/info` | GET | Detailed system information | No |
 | `/api/services` | GET | Services status | Yes |
 | `/api/services` | POST | Control services | Yes |
 | `/api/power` | GET | Power status | Yes |

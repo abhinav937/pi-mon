@@ -52,7 +52,10 @@ fi
 
 echo "==> Building frontend"
 pushd "$FRONTEND_DIR" >/dev/null
-sudo -u "$APP_USER" npm ci
+sudo -u "$APP_USER" npm ci --no-audit --no-fund || {
+  echo "npm ci failed (lockfile out of sync). Falling back to 'npm install'..."
+  sudo -u "$APP_USER" npm install --no-audit --no-fund
+}
 sudo -u "$APP_USER" npm run build
 popd >/dev/null
 

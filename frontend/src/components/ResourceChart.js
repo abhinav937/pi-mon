@@ -43,7 +43,7 @@ const ResourceChart = ({ unifiedClient }) => {
   // Load time range from localStorage or default to 60 minutes
   const [timeRange, setTimeRange] = useState(() => {
     const saved = localStorage.getItem('pi-monitor-time-range');
-    return saved ? parseInt(saved) : 60;
+    return saved ? parseInt(saved) : 120; // Default to last 2 hours
   });
 
   // Save time range to localStorage whenever it changes

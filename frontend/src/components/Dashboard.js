@@ -28,7 +28,7 @@ const Dashboard = ({ unifiedClient }) => {
     'metricsHistory',
     async () => {
       if (!unifiedClient) return null;
-      return await unifiedClient.getMetricsHistory(60); // Last 60 minutes
+      return await unifiedClient.getMetricsHistory(120); // Last 2 hours
     },
     {
       enabled: !!unifiedClient,

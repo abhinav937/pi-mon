@@ -454,10 +454,12 @@ class EnhancedMetricsCollector:
         self.collection_count = 0
         self.error_count = 0
         self.last_error = None
-        self.max_history = 1000  # Keep last 1000 data points in memory for quick access
+        self.max_history = 5000  # Keep last 5000 data points in memory for quick access (~7h at 5s)
         
         # In-memory cache for recent data (for performance)
-        self.recent_cache = deque(maxlen=100)
+        self.recent_cache = deque(maxlen=self.max_history)
+        # Maintain compatibility with any code referencing metrics_history
+        self.metrics_history = self.recent_cache
         
     def start_collection(self):
         """Start background metrics collection"""
@@ -488,10 +490,10 @@ class EnhancedMetricsCollector:
                 metrics = self._gather_current_metrics()
                 if metrics and 'error' not in metrics:
                     with self.collection_lock:
-                        # Store in database for persistence
+                        # Always keep in memory cache for quick access
+                        self.recent_cache.append(metrics)
+                        # Attempt to store in database for persistence
                         if metrics_db.insert_metrics(metrics):
-                            # Also keep in memory cache for quick access
-                            self.recent_cache.append(metrics)
                             self.collection_count += 1
                         else:
                             self.error_count += 1
@@ -570,11 +572,16 @@ class EnhancedMetricsCollector:
     def get_metrics_history(self, minutes=60):
         """Get metrics history for the last N minutes from database with memory cache fallback"""
         try:
+            # Compute an appropriate limit based on requested window and collection interval
+            expected_points = int((minutes * 60) / max(self.collection_interval, 1)) + 10
+            # Cap the max we will ever return to avoid oversized payloads
+            limit = min(max(expected_points, 200), 10000)
+
             # Try to get from database first
-            db_metrics = metrics_db.get_metrics_history(minutes, self.max_history)
+            db_metrics = metrics_db.get_metrics_history(minutes, limit)
             if db_metrics:
                 return db_metrics
-            
+
             # Fallback to memory cache if database fails
             cutoff_time = time.time() - (minutes * 60)
             with self.collection_lock:
@@ -3170,7 +3177,7 @@ class MetricsDatabase:
                            disk_read_bytes, disk_write_bytes, disk_read_count, disk_write_count
                     FROM metrics 
                     WHERE timestamp > ? 
-                    ORDER BY timestamp DESC 
+                    ORDER BY timestamp ASC 
                     LIMIT ?
                 ''', (cutoff_time, limit))
                 

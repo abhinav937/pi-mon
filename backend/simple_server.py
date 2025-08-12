@@ -698,6 +698,8 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
             self._handle_service_manage_info()
         elif path == '/api/service/info':
             self._handle_service_info()
+        elif path == '/api/power':
+            self._handle_power_status_get()
         else:
             self._handle_404()
     
@@ -1149,6 +1151,48 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self._set_common_headers()
         response = self.handle_service_action()
+        self.wfile.write(json.dumps(response).encode())
+    
+    def _handle_power_status_get(self):
+        """Handle GET request for power status"""
+        if not self.check_auth():
+            self._send_unauthorized()
+            return
+        
+        self.send_response(200)
+        self._set_common_headers()
+        
+        try:
+            # Get current power status with permission info
+            shutdown_perms = self._check_shutdown_permissions()
+            restart_perms = self._check_restart_permissions()
+            
+            # Get current uptime
+            uptime_seconds = time.time() - psutil.boot_time()
+            uptime_hours = int(uptime_seconds // 3600)
+            uptime_minutes = int((uptime_seconds % 3600) // 60)
+            uptime_formatted = f"{uptime_hours}h {uptime_minutes}m"
+            
+            response = {
+                "success": True,
+                "action": "status",
+                "power_state": "on",
+                "current_uptime": uptime_formatted,
+                "uptime_seconds": int(uptime_seconds),
+                "last_boot": time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(psutil.boot_time())),
+                "available_actions": ["restart", "shutdown", "reboot"],
+                "permissions": {
+                    "shutdown": shutdown_perms,
+                    "restart": restart_perms
+                },
+                "platform": platform.system(),
+                "timestamp": time.strftime('%Y-%m-%d %H:%M:%S')
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to get power status: {e}")
+            response = {"success": False, "message": f"Failed to get power status: {str(e)}"}
+        
         self.wfile.write(json.dumps(response).encode())
     
     def _handle_power_action(self):

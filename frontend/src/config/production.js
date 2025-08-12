@@ -4,14 +4,14 @@ export const PRODUCTION_CONFIG = {
   BACKEND_PORT: 5001,
   FRONTEND_PORT: 80,
   ENDPOINTS: {
-    HEALTH: 'http://65.36.123.68:5001/health',
-    AUTH: 'http://65.36.123.68:5001/api/auth/token',
-    SYSTEM: 'http://65.36.123.68:5001/api/system',
-    METRICS: 'http://65.36.123.68:5001/api/metrics',
-    SERVICES: 'http://65.36.123.68:5001/api/services',
-    POWER: 'http://65.36.123.68:5001/api/power',
-    NETWORK: 'http://65.36.123.68:5001/api/network',
-    LOGS: 'http://65.36.123.68:5001/api/logs'
+    HEALTH: 'http://65.36.123.68/health',
+    AUTH: 'http://65.36.123.68/api/auth/token',
+    SYSTEM: 'http://65.36.123.68/api/system',
+    METRICS: 'http://65.36.123.68/api/metrics',
+    SERVICES: 'http://65.36.123.68/api/services',
+    POWER: 'http://65.36.123.68/api/power',
+    NETWORK: 'http://65.36.123.68/api/network',
+    LOGS: 'http://65.36.123.68/api/logs'
   },
   POLLING_INTERVAL: 5000,
   TIMEOUT: 10000

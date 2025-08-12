@@ -38,7 +38,7 @@ class UnifiedClient {
   constructor(options = {}) {
     logDebug('Initializing UnifiedClient', { options });
     
-    // Resolve API base URL. Prefer explicit env, else infer http://host:5001 (dev) or same-origin (prod)
+    // Resolve API base URL. Prefer explicit env, else use Nginx proxy (port 80) in production
     const envUrl = process.env.REACT_APP_SERVER_URL || process.env.REACT_APP_API_BASE_URL;
     const inferredUrl = (() => {
       const host = window.location.hostname;
@@ -47,11 +47,11 @@ class UnifiedClient {
       if (host === 'localhost' || host === '127.0.0.1') {
         return `http://${host}:5001`;
       }
-      // In production, use the production deployment URL
+      // In production, use Nginx proxy on port 80 (no port number needed)
       if (host !== 'localhost' && host !== '127.0.0.1') {
-        return PRODUCTION_CONFIG.API_BASE_URL;
+        return `${isHttps ? 'https' : 'http'}://${host}`;
       }
-      // In production behind proxy, hit same-origin
+      // Fallback to same-origin
       return `${isHttps ? 'https' : 'http'}://${host}`;
     })();
     const domainUrl = envUrl || inferredUrl;

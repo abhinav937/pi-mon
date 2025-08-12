@@ -872,25 +872,25 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
         """Execute service action with improved error handling"""
         try:
             if action == 'start':
-                result = os.system(f'systemctl start {service_name}')
+                result = os.system(f'sudo systemctl start {service_name}')
                 if result == 0:
                     return {"success": True, "message": f"Service {service_name} started successfully"}
                 else:
                     return {"success": False, "message": f"Failed to start service {service_name}"}
             elif action == 'stop':
-                result = os.system(f'systemctl stop {service_name}')
+                result = os.system(f'sudo systemctl stop {service_name}')
                 if result == 0:
                     return {"success": True, "message": f"Service {service_name} stopped successfully"}
                 else:
                     return {"success": False, "message": f"Failed to stop service {service_name}"}
             elif action == 'restart':
-                result = os.system(f'systemctl restart {service_name}')
+                result = os.system(f'sudo systemctl restart {service_name}')
                 if result == 0:
                     return {"success": True, "message": f"Service {service_name} restarted successfully"}
                 else:
                     return {"success": False, "message": f"Failed to restart service {service_name}"}
             elif action == 'status':
-                result = os.system(f'systemctl is-active {service_name}')
+                result = os.system(f'sudo systemctl is-active {service_name}')
                 if result == 0:
                     return {"success": True, "service": service_name, "status": "active"}
                 else:
@@ -1226,19 +1226,14 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
 
     def _tail_file(self, filepath, num_lines):
         try:
-            with open(filepath, 'rb') as f:
-                f.seek(0, os.SEEK_END)
-                end = f.tell()
-                buf = bytearray()
-                lines = []
-                while end > 0 and len(lines) <= num_lines:
-                    step = min(8192, end)
-                    f.seek(end - step)
-                    buf[:0] = f.read(step)
-                    end -= step
-                    lines = buf.splitlines()
-                return '\n'.join(line.decode('utf-8', errors='ignore') for line in lines[-num_lines:])
-        except Exception:
+            result = subprocess.run(['sudo', 'tail', '-n', str(num_lines), filepath], capture_output=True, text=True, timeout=5)
+            if result.returncode == 0:
+                return result.stdout
+            else:
+                logger.error(f"Failed to tail file {filepath}: {result.stderr}")
+                return ''
+        except Exception as e:
+            logger.error(f"Error tailing file {filepath}: {str(e)}")
             return ''
 
     def _handle_metrics_history(self, query_params):
@@ -1523,15 +1518,88 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
         self.wfile.write(json.dumps(response).encode())
     
     def _handle_power_action(self):
-        """Handle power action with improved error handling"""
-        if not self.check_auth():
-            self._send_unauthorized()
-            return
-        
-        self.send_response(200)
-        self._set_common_headers()
-        response = self.handle_power_action()
-        self.wfile.write(json.dumps(response).encode())
+        """Handle power management actions with improved error handling"""
+        try:
+            content_length = int(self.headers.get('Content-Length', 0))
+            if content_length > 0:
+                post_data = self.rfile.read(content_length)
+                data = json.loads(post_data.decode('utf-8'))
+                
+                action = data.get('action', '')
+                delay = data.get('delay', 0)
+                
+                # Get current system info
+                uptime_seconds = time.time() - psutil.boot_time()
+                uptime_hours = int(uptime_seconds // 3600)
+                uptime_minutes = int((uptime_seconds % 3600) // 60)
+                uptime_formatted = f"{uptime_hours}h {uptime_minutes}m"
+                
+                if action == 'shutdown':
+                    shutdown_result = self._execute_shutdown()
+                    if shutdown_result['success']:
+                        return {
+                            "success": True, 
+                            "message": shutdown_result['message'],
+                            "action": "shutdown",
+                            "command_used": shutdown_result['command_used'],
+                            "current_uptime": uptime_formatted,
+                            "platform": platform.system()
+                        }
+                    else:
+                        return {
+                            "success": False, 
+                            "message": f"Shutdown failed: {shutdown_result.get('error', 'Unknown error')}",
+                            "action": "shutdown",
+                            "current_uptime": uptime_formatted,
+                            "platform": platform.system()
+                        }
+                    
+                elif action == 'restart':
+                    restart_result = self._execute_restart()
+                    if restart_result['success']:
+                        return {
+                            "success": True, 
+                            "message": restart_result['message'],
+                            "action": "restart",
+                            "command_used": restart_result['command_used'],
+                            "current_uptime": uptime_formatted,
+                            "platform": platform.system()
+                        }
+                    else:
+                        return {
+                            "success": False, 
+                            "message": f"Restart failed: {restart_result.get('error', 'Unknown error')}",
+                            "action": "restart",
+                            "current_uptime": uptime_formatted,
+                            "platform": platform.system()
+                        }
+                    
+                elif action == 'status':
+                    # Return current power status with permission info
+                    shutdown_perms = self._check_shutdown_permissions()
+                    restart_perms = self._check_restart_permissions()
+                    
+                    return {
+                        "success": True,
+                        "action": "status",
+                        "power_state": "on",
+                        "current_uptime": uptime_formatted,
+                        "uptime_seconds": int(uptime_seconds),
+                        "last_boot": time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(psutil.boot_time())),
+                        "available_actions": ["restart", "shutdown", "reboot"],
+                        "permissions": {
+                            "shutdown": shutdown_perms,
+                            "restart": restart_perms
+                        },
+                        "platform": platform.system()
+                    }
+                else:
+                    return {"success": False, "message": f"Unknown action: {action}"}
+            else:
+                return {"success": False, "message": "No data received"}
+        except Exception as e:
+            logger.error(f"Power action failed: {e}")
+            return {"success": False, "message": f"Power action failed: {str(e)}"}
     
     def _handle_power_shutdown(self):
         """Handle power shutdown with improved error handling"""
@@ -1543,36 +1611,21 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
         self._set_common_headers()
         
         try:
-            # Check permissions first
-            permission_check = self._check_shutdown_permissions()
-            if not permission_check['can_shutdown']:
+            shutdown_result = self._execute_shutdown()
+            if shutdown_result['success']:
                 response = {
-                    "success": False, 
-                    "message": f"Permission denied: {permission_check['reason']}",
+                    "success": True,
+                    "message": shutdown_result['message'],
                     "action": "shutdown",
-                    "permission_details": permission_check,
-                    "suggestions": permission_check['suggestions']
+                    "command_used": shutdown_result['command_used'],
+                    "platform": platform.system()
                 }
             else:
-                # Execute shutdown with proper command
-                shutdown_result = self._execute_shutdown()
-                if shutdown_result['success']:
-                    response = {
-                        "success": True,
-                        "message": shutdown_result['message'],
-                        "action": "shutdown",
-                        "command_used": shutdown_result['command_used'],
-                        "permission_method": permission_check['method'],
-                        "platform": platform.system()
-                    }
-                else:
-                    response = {
-                        "success": False,
-                        "message": f"Shutdown failed: {shutdown_result['error']}",
-                        "action": "shutdown",
-                        "permission_details": permission_check,
-                        "suggestions": permission_check['suggestions']
-                    }
+                response = {
+                    "success": False,
+                    "message": f"Shutdown failed: {shutdown_result.get('error', 'Unknown error')}",
+                    "action": "shutdown"
+                }
         except Exception as e:
             logger.error(f"Shutdown failed: {e}")
             response = {"success": False, "message": f"Shutdown failed: {str(e)}"}
@@ -1589,36 +1642,21 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
         self._set_common_headers()
         
         try:
-            # Check permissions first
-            permission_check = self._check_restart_permissions()
-            if not permission_check['can_restart']:
+            restart_result = self._execute_restart()
+            if restart_result['success']:
                 response = {
-                    "success": False, 
-                    "message": f"Permission denied: {permission_check['reason']}",
+                    "success": True,
+                    "message": restart_result['message'],
                     "action": "restart",
-                    "permission_details": permission_check,
-                    "suggestions": permission_check['suggestions']
+                    "command_used": restart_result['command_used'],
+                    "platform": platform.system()
                 }
             else:
-                # Execute restart with proper command
-                restart_result = self._execute_restart()
-                if restart_result['success']:
-                    response = {
-                        "success": True,
-                        "message": restart_result['message'],
-                        "action": "restart",
-                        "command_used": restart_result['command_used'],
-                        "permission_method": permission_check['method'],
-                        "platform": platform.system()
-                    }
-                else:
-                    response = {
-                        "success": False,
-                        "message": f"Restart failed: {restart_result['error']}",
-                        "action": "restart",
-                        "permission_details": permission_check,
-                        "suggestions": permission_check['suggestions']
-                    }
+                response = {
+                    "success": False,
+                    "message": f"Restart failed: {restart_result.get('error', 'Unknown error')}",
+                    "action": "restart"
+                }
         except Exception as e:
             logger.error(f"Restart failed: {e}")
             response = {"success": False, "message": f"Restart failed: {str(e)}"}
@@ -2166,128 +2204,6 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
             logger.error(f"Service action failed: {e}")
             return {"success": False, "message": f"Service action failed: {str(e)}"}
     
-    def handle_power_action(self):
-        """Handle power management actions with improved error handling"""
-        try:
-            content_length = int(self.headers.get('Content-Length', 0))
-            if content_length > 0:
-                post_data = self.rfile.read(content_length)
-                data = json.loads(post_data.decode('utf-8'))
-                
-                action = data.get('action', '')
-                delay = data.get('delay', 0)
-                
-                # Get current system info
-                uptime_seconds = time.time() - psutil.boot_time()
-                uptime_hours = int(uptime_seconds // 3600)
-                uptime_minutes = int((uptime_seconds % 3600) // 60)
-                uptime_formatted = f"{uptime_hours}h {uptime_minutes}m"
-                
-                if action == 'shutdown':
-                    # Check permissions first
-                    permission_check = self._check_shutdown_permissions()
-                    if not permission_check['can_shutdown']:
-                        return {
-                            "success": False, 
-                            "message": f"Permission denied: {permission_check['reason']}",
-                            "action": "shutdown",
-                            "permission_details": permission_check,
-                            "suggestions": permission_check['suggestions'],
-                            "current_uptime": uptime_formatted,
-                            "platform": platform.system()
-                        }
-                    
-                    # Execute shutdown with proper command
-                    shutdown_result = self._execute_shutdown()
-                    if shutdown_result['success']:
-                        return {
-                            "success": True, 
-                            "message": shutdown_result['message'],
-                            "action": "shutdown",
-                            "command_used": shutdown_result['command_used'],
-                            "permission_method": permission_check['method'],
-                            "current_uptime": uptime_formatted,
-                            "platform": platform.system()
-                        }
-                    else:
-                        return {
-                            "success": False, 
-                            "message": f"Shutdown failed: {shutdown_result['error']}",
-                            "action": "shutdown",
-                            "permission_details": permission_check,
-                            "suggestions": permission_check['suggestions'],
-                            "current_uptime": uptime_formatted,
-                            "platform": platform.system()
-                        }
-                        
-                elif action == 'restart':
-                    # Check permissions first
-                    permission_check = self._check_restart_permissions()
-                    if not permission_check['can_restart']:
-                        return {
-                            "success": False, 
-                            "message": f"Permission denied: {permission_check['reason']}",
-                            "action": "restart",
-                            "permission_details": permission_check,
-                            "suggestions": permission_check['suggestions'],
-                            "current_uptime": uptime_formatted,
-                            "platform": platform.system()
-                        }
-                    
-                    # Execute restart with proper command
-                    restart_result = self._execute_restart()
-                    if restart_result['success']:
-                        return {
-                            "success": True, 
-                            "message": restart_result['message'],
-                            "action": "restart",
-                            "command_used": restart_result['command_used'],
-                            "permission_method": permission_check['method'],
-                            "current_uptime": uptime_formatted,
-                            "platform": platform.system()
-                        }
-                    else:
-                        return {
-                            "success": False, 
-                            "message": f"Restart failed: {restart_result['error']}",
-                            "action": "restart",
-                            "permission_details": permission_check,
-                            "suggestions": permission_check['suggestions'],
-                            "current_uptime": uptime_formatted,
-                            "platform": platform.system()
-                        }
-                        
-                elif action == 'status':
-                    # Return current power status with permission info
-                    shutdown_perms = self._check_shutdown_permissions()
-                    restart_perms = self._check_restart_permissions()
-                    
-                    return {
-                        "success": True,
-                        "action": "status",
-                        "power_state": "on",
-                        "current_uptime": uptime_formatted,
-                        "uptime_seconds": int(uptime_seconds),
-                        "last_boot": time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(psutil.boot_time())),
-                        "available_actions": ["restart", "shutdown", "reboot"],
-                        "permissions": {
-                            "shutdown": shutdown_perms,
-                            "restart": restart_perms
-                        },
-                        "platform": platform.system()
-                    }
-                else:
-                    return {
-                        "success": False, 
-                        "message": f"Unknown power action: {action}",
-                        "available_actions": ["restart", "shutdown", "reboot", "status"]
-                    }
-            else:
-                return {"success": False, "message": "No data received"}
-        except Exception as e:
-            logger.error(f"Power action failed: {e}")
-            return {"success": False, "message": f"Power action failed: {str(e)}"}
-    
     def _check_shutdown_permissions(self):
         """Check if current user can execute shutdown commands with improved error handling"""
         try:
@@ -2582,84 +2498,29 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                         'command_used': shutdown_cmd
                     }
             else:
-                # Linux/Raspberry Pi shutdown with multiple fallback methods
-                # First check which commands are available
-                available_commands = []
-                potential_commands = [
-                    ['systemctl', 'poweroff'],
-                    ['sudo', 'shutdown', '-h', 'now'],
-                    ['sudo', 'poweroff'],
-                    ['sudo', 'halt'],
-                    ['shutdown', '-h', 'now'],
-                    ['poweroff'],
-                    ['halt']
-                ]
-                
-                # Check which commands exist in PATH
-                for cmd in potential_commands:
-                    try:
-                        result = subprocess.run(['which', cmd[0]], capture_output=True, text=True, timeout=5)
-                        if result.returncode == 0:
-                            available_commands.append(cmd)
-                    except:
-                        # If 'which' command fails, assume command might be available
-                        available_commands.append(cmd)
-                
-                # Use available commands, or fall back to all if none detected
-                if available_commands:
-                    shutdown_commands = available_commands
-                    logger.info(f"Available shutdown commands: {[cmd[0] for cmd in available_commands]}")
-                else:
-                    shutdown_commands = potential_commands
-                    logger.info("No shutdown commands detected in PATH, trying all potential commands")
-                
-                # Try each command with proper error handling
-                for cmd in shutdown_commands:
-                    try:
-                        logger.info(f"Attempting shutdown with: {' '.join(cmd)}")
-                        
-                        # For shutdown commands, don't capture output as they don't return normally
-                        # Just execute the command and assume success if no exception
-                        result = subprocess.run(cmd, timeout=15)
-                        # If we get here, the command executed (though it may not have completed)
-                        logger.info(f"Shutdown command executed successfully: {' '.join(cmd)}")
-                        return {
-                            'success': True,
-                            'message': f'Shutdown initiated successfully with: {" ".join(cmd)}',
-                            'command_used': ' '.join(cmd)
-                        }
-                    except subprocess.TimeoutExpired:
-                        # Command timed out, but this is expected for shutdown commands
-                        logger.info(f"Shutdown command timed out (expected): {' '.join(cmd)}")
-                        return {
-                            'success': True,
-                            'message': f'Shutdown command timed out (expected for shutdown): {" ".join(cmd)}',
-                            'command_used': ' '.join(cmd)
-                        }
-                    except FileNotFoundError:
-                        logger.info(f"Command not found: {' '.join(cmd)}")
-                        continue
-                    except PermissionError:
-                        logger.info(f"Permission denied for: {' '.join(cmd)}")
-                        continue
-                    except Exception as e:
-                        logger.info(f"Error executing shutdown command {' '.join(cmd)}: {str(e)}")
-                        continue
-                
-                # If all commands failed, provide detailed error information
-                logger.error("All shutdown commands failed")
-                return {
-                    'success': False,
-                    'error': 'All shutdown commands failed - check system logs for details',
-                    'command_used': 'multiple_attempts',
-                    'debug_info': {
-                        'platform': platform.system(),
-                        'user_id': os.geteuid() if hasattr(os, 'geteuid') else 'unknown',
-                        'commands_tried': [cmd for cmd in shutdown_commands],
-                        'suggestion': 'Check if shutdown commands are available in PATH and system permissions'
+                cmd = ['sudo', 'shutdown', '-h', 'now']
+                try:
+                    subprocess.run(cmd, timeout=15)
+                    logger.info(f"Shutdown command executed: {' '.join(cmd)}")
+                    return {
+                        'success': True,
+                        'message': 'Shutdown initiated',
+                        'command_used': ' '.join(cmd)
                     }
-                }
-                
+                except subprocess.TimeoutExpired:
+                    logger.info(f"Shutdown command timed out (expected): {' '.join(cmd)}")
+                    return {
+                        'success': True,
+                        'message': 'Shutdown initiated (timeout expected)',
+                        'command_used': ' '.join(cmd)
+                    }
+                except Exception as e:
+                    logger.error(f"Shutdown failed: {str(e)}")
+                    return {
+                        'success': False,
+                        'error': str(e),
+                        'command_used': ' '.join(cmd)
+                    }
         except Exception as e:
             logger.error(f"Shutdown execution error: {str(e)}")
             return {
@@ -2671,104 +2532,35 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
     def _execute_restart(self):
         """Execute restart command using simple, reliable methods"""
         try:
-            logger.info("🔄 Attempting system restart using simple methods...")
-            
-            # Method 1: Simple reboot command
+            logger.info("🔄 Attempting system restart...")
+            cmd = ['sudo', 'reboot']
             try:
-                logger.info("  🔧 Trying simple reboot command...")
-                reboot_result = os.system('reboot')
-                
-                if reboot_result == 0:
-                    logger.info("✅ Reboot command executed successfully")
-                    return {
-                        'success': True,
-                        'message': 'Restart initiated successfully using reboot command',
-                        'command_used': 'reboot',
-                        'method': 'simple_reboot'
-                    }
-                else:
-                    logger.info(f"❌ Reboot failed with exit code: {reboot_result}")
-            except Exception as e:
-                logger.info(f"❌ Reboot exception: {str(e)}")
-            
-            # Method 2: Shutdown command with restart flag
-            try:
-                logger.info("  🔧 Trying shutdown -r now...")
-                shutdown_result = os.system('shutdown -r now')
-                
-                if shutdown_result == 0:
-                    logger.info("✅ Shutdown restart command executed successfully")
-                    return {
-                        'success': True,
-                        'message': 'Restart initiated successfully using shutdown command',
-                        'command_used': 'shutdown -r now',
-                        'method': 'shutdown_restart'
-                    }
-                else:
-                    logger.info(f"❌ Shutdown restart failed with exit code: {shutdown_result}")
-            except Exception as e:
-                logger.info(f"❌ Shutdown restart exception: {str(e)}")
-            
-            # Method 3: Init system restart
-            try:
-                logger.info("  🔧 Trying init 6...")
-                init_result = os.system('init 6')
-                
-                if init_result == 0:
-                    logger.info("✅ Init restart command executed successfully")
-                    return {
-                        'success': True,
-                        'message': 'Restart initiated successfully using init system',
-                        'command_used': 'init 6',
-                        'method': 'init_restart'
-                    }
-                else:
-                    logger.info(f"❌ Init restart failed with exit code: {init_result}")
-            except Exception as e:
-                logger.info(f"❌ Init restart exception: {str(e)}")
-            
-            # Method 4: Systemctl restart (if available)
-            try:
-                logger.info("  🔧 Trying systemctl reboot...")
-                systemctl_result = os.system('systemctl reboot')
-                
-                if systemctl_result == 0:
-                    logger.info("✅ Systemctl restart command executed successfully")
-                    return {
-                        'success': True,
-                        'message': 'Restart initiated successfully using systemctl',
-                        'command_used': 'systemctl reboot',
-                        'method': 'systemctl_restart'
-                    }
-                else:
-                    logger.info(f"❌ Systemctl restart failed with exit code: {systemctl_result}")
-            except Exception as e:
-                logger.info(f"❌ Systemctl restart exception: {str(e)}")
-            
-            # If all methods failed, provide error information
-            logger.error("❌ All restart methods failed")
-            return {
-                'success': False,
-                'error': 'All restart methods failed - system may not support restart operations',
-                'command_used': 'multiple_simple_methods',
-                'debug_info': {
-                    'platform': platform.system(),
-                    'user_id': os.geteuid() if hasattr(os, 'geteuid') else 'unknown',
-                    'methods_tried': [
-                        'simple_reboot',
-                        'shutdown_restart',
-                        'init_restart',
-                        'systemctl_restart'
-                    ],
-                    'suggestion': 'Check system logs and ensure restart commands are available. Try manual restart from console.'
+                subprocess.run(cmd, timeout=15)
+                logger.info(f"Restart command executed: {' '.join(cmd)}")
+                return {
+                    'success': True,
+                    'message': 'Restart initiated',
+                    'command_used': ' '.join(cmd)
                 }
-            }
-                
+            except subprocess.TimeoutExpired:
+                logger.info(f"Restart command timed out (expected): {' '.join(cmd)}")
+                return {
+                    'success': True,
+                    'message': 'Restart initiated (timeout expected)',
+                    'command_used': ' '.join(cmd)
+                }
+            except Exception as e:
+                logger.error(f"Restart failed: {str(e)}")
+                return {
+                    'success': False,
+                    'error': str(e),
+                    'command_used': ' '.join(cmd)
+                }
         except Exception as e:
             logger.error(f"Restart execution error: {str(e)}")
             return {
                 'success': False,
-                'error': f'Restart execution error: {str(e)}',
+                'error': str(e),
                 'command_used': 'error'
             }
     

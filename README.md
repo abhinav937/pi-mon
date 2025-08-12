@@ -9,6 +9,7 @@ A dead simple Raspberry Pi monitoring system that replaces complex frameworks wi
 - **JSON configuration** - All settings in one file
 - **Minimal dependencies** - Only psutil for system monitoring
 - **Simple deployment** - One script to rule them all
+- **Subdomain support** - Easy custom domain setup
 
 ## 🚀 Enhanced Features (RPi-Monitor Inspired)
 
@@ -34,7 +35,7 @@ nano config.json
 ### 2. Deploy Everything (No Docker)
 
 ```bash
-# Deploy backend and frontend
+# Deploy backend, frontend, and subdomain
 ./deploy.sh
 ```
 
@@ -43,6 +44,66 @@ nano config.json
 - **Backend API**: http://localhost:5001
 - **Frontend Dashboard**: http://localhost:80
 - **Health Check**: http://localhost:5001/health
+
+## 🌐 Subdomain Configuration
+
+Pi Monitor automatically configures your custom subdomain `pi.cabhinav.com` to point to your Raspberry Pi's static IP `65.36.123.68:80`.
+
+### What the Deploy Script Does
+
+The `./deploy.sh` script automatically:
+- ✅ Sets up Nginx configuration for `pi.cabhinav.com`
+- ✅ Builds and deploys your React frontend
+- ✅ Configures API proxying to your backend
+- ✅ Sets up firewall rules (port 80 open)
+- ✅ Creates systemd services
+- ✅ Tests the configuration
+
+### DNS Setup Required
+
+**You still need to configure DNS manually:**
+
+1. **Log into your domain registrar** (e.g., Namecheap, GoDaddy, Cloudflare)
+2. **Navigate to DNS management** for `cabhinav.com`
+3. **Add an A record**:
+   ```
+   Type: A
+   Name: pi
+   Value: 65.36.123.68
+   TTL: 300
+   ```
+
+### After DNS Configuration
+
+Once DNS propagates (usually 15 minutes to 2 hours), your site will be accessible at:
+**http://pi.cabhinav.com**
+
+### Testing Your Setup
+
+```bash
+# Test local access
+curl -I http://localhost
+
+# Test subdomain locally
+curl -H "Host: pi.cabhinav.com" http://127.0.0.1
+
+# Test from external network
+curl -I http://pi.cabhinav.com
+```
+
+### Useful Commands
+
+```bash
+# View Nginx logs
+sudo tail -f /var/log/nginx/pi.cabhinav.com.access.log
+
+# Check Nginx status
+sudo systemctl status nginx
+
+# Restart services
+sudo systemctl restart nginx
+sudo systemctl restart pi-monitor-backend.service
+```
 
 ## 📁 Project Structure
 

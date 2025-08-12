@@ -243,7 +243,13 @@ const SettingsPanel = ({ isDarkMode, setIsDarkMode, onClose }) => {
                 settings.accentColor === color 
                   ? 'border-gray-900 dark:border-white' 
                   : 'border-gray-300 dark:border-gray-600'
-              } bg-${color}-500`}
+              } ${
+                color === 'blue' ? 'bg-blue-500' :
+                color === 'green' ? 'bg-green-500' :
+                color === 'purple' ? 'bg-purple-500' :
+                color === 'red' ? 'bg-red-500' :
+                'bg-yellow-500'
+              }`}
               onClick={() => handleSettingChange('accentColor', color)}
             />
           ))}

@@ -37,8 +37,19 @@ class UnifiedClient {
   constructor(options = {}) {
     logDebug('Initializing UnifiedClient', { options });
     
-    // Use domain-based URL if available, otherwise fall back to localhost
-    const domainUrl = process.env.REACT_APP_API_BASE_URL || `https://${window.location.hostname}`;
+    // Resolve API base URL. Prefer explicit env, else infer http://host:5001 (dev) or same-origin (prod)
+    const envUrl = process.env.REACT_APP_SERVER_URL || process.env.REACT_APP_API_BASE_URL;
+    const inferredUrl = (() => {
+      const host = window.location.hostname;
+      const isHttps = window.location.protocol === 'https:';
+      // If running under CRA dev server (localhost:3000), default backend 5001
+      if (host === 'localhost' || host === '127.0.0.1') {
+        return `http://${host}:5001`;
+      }
+      // In production behind proxy, hit same-origin
+      return `${isHttps ? 'https' : 'http'}://${host}`;
+    })();
+    const domainUrl = envUrl || inferredUrl;
     this.serverUrl = options.serverUrl || domainUrl;
     this.onConnectionChange = options.onConnectionChange || (() => {});
     this.onDataUpdate = options.onDataUpdate || (() => {});
@@ -54,7 +65,7 @@ class UnifiedClient {
     });
     
     this.httpClient = axios.create({
-      baseURL: this.serverUrl,
+      baseURL: this.serverUrl.replace(/\/$/, ''),
       timeout: 10000
     });
     
@@ -440,7 +451,7 @@ class UnifiedClient {
   // Utility methods
   async refresh() {
     try {
-      const response = await this.httpClient.post('/api/refresh');
+      const response = await this.httpClient.get('/api/refresh');
       return response.data;
     } catch (error) {
       throw error;

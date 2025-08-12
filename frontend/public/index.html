@@ -99,7 +99,8 @@
       });
       
       // Mobile-specific optimizations
-      if ('serviceWorker' in navigator) {
+      // Register SW only outside localhost to avoid dev caching issues
+      if ('serviceWorker' in navigator && !/^(localhost|127\.0\.0\.1)$/i.test(window.location.hostname)) {
         window.addEventListener('load', function() {
           navigator.serviceWorker.register('/sw.js')
             .then(function(registration) {

@@ -4,7 +4,7 @@ module.exports = {
     "./src/**/*.{js,jsx,ts,tsx}",
     "./public/index.html"
   ],
-  darkMode: 'media', // Use system preference
+  darkMode: 'class', // Use class-based dark mode to match App.js toggling
   theme: {
     extend: {
       screens: {

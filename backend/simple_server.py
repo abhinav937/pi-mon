@@ -577,21 +577,29 @@ class EnhancedMetricsCollector:
             # Cap the max we will ever return to avoid oversized payloads
             limit = min(max(expected_points, 200), 10000)
 
+            logger.info(f"Getting metrics history: {minutes} minutes, expected: {expected_points} points, limit: {limit}")
+
             # Try to get from database first
             db_metrics = metrics_db.get_metrics_history(minutes, limit)
             if db_metrics:
+                logger.info(f"Retrieved {len(db_metrics)} metrics from database")
                 return db_metrics
 
             # Fallback to memory cache if database fails
+            logger.info("Database retrieval failed, falling back to memory cache")
             cutoff_time = time.time() - (minutes * 60)
             with self.collection_lock:
-                return [m for m in self.recent_cache if m.get('timestamp', 0) > cutoff_time]
+                memory_metrics = [m for m in self.recent_cache if m.get('timestamp', 0) > cutoff_time]
+                logger.info(f"Retrieved {len(memory_metrics)} metrics from memory cache")
+                return memory_metrics
         except Exception as e:
             logger.error(f"Failed to get metrics history: {e}")
             # Final fallback to memory cache
             cutoff_time = time.time() - (minutes * 60)
             with self.collection_lock:
-                return [m for m in self.recent_cache if m.get('timestamp', 0) > cutoff_time]
+                fallback_metrics = [m for m in self.recent_cache if m.get('timestamp', 0) > cutoff_time]
+                logger.info(f"Final fallback: retrieved {len(fallback_metrics)} metrics from memory cache")
+                return fallback_metrics
     
     def get_latest_metrics(self):
         """Get the most recent metrics from memory cache or database"""
@@ -1294,8 +1302,12 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
             minutes = 60
             include_date = minutes > 60
         
+        logger.info(f"Metrics history requested: {minutes} minutes, include_date: {include_date}")
+        
         # Get metrics from database
         metrics_list = metrics_collector.get_metrics_history(minutes)
+        
+        logger.info(f"Retrieved {len(metrics_list)} metrics from database for {minutes} minutes")
         
         # Enhance with formatted timestamps if requested
         enhanced_metrics = []
@@ -1319,6 +1331,9 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                 'formatted': include_date
             }
         }
+        
+        logger.info(f"Sending response with {len(enhanced_metrics)} metrics, collection active: {metrics_collector.is_collecting}")
+        
         self.wfile.write(json.dumps(response).encode())
     
     def _handle_database_stats(self):
@@ -3168,6 +3183,8 @@ class MetricsDatabase:
         try:
             cutoff_time = time.time() - (minutes * 60)
             
+            logger.info(f"Database query: minutes={minutes}, cutoff_time={cutoff_time}, limit={limit}")
+            
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 
@@ -3182,6 +3199,7 @@ class MetricsDatabase:
                 ''', (cutoff_time, limit))
                 
                 rows = cursor.fetchall()
+                logger.info(f"Database returned {len(rows)} rows")
                 
                 # Convert to the format expected by frontend
                 metrics = []
@@ -3206,6 +3224,7 @@ class MetricsDatabase:
                         }
                     })
                 
+                logger.info(f"Converted {len(metrics)} metrics for frontend")
                 return metrics
                 
         except Exception as e:

@@ -2361,100 +2361,100 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
             }
     
     def _execute_restart(self):
-        """Execute restart command with proper permissions and fallbacks"""
+        """Execute restart command using simple, reliable methods"""
         try:
-            if platform.system() == 'Windows':
-                # Windows restart
-                restart_cmd = 'shutdown /r /t 5'
-                result = subprocess.run(restart_cmd, shell=True, capture_output=True, text=True, timeout=10)
-                if result.returncode == 0:
+            logger.info("🔄 Attempting system restart using simple methods...")
+            
+            # Method 1: Simple reboot command
+            try:
+                logger.info("  🔧 Trying simple reboot command...")
+                reboot_result = os.system('reboot')
+                
+                if reboot_result == 0:
+                    logger.info("✅ Reboot command executed successfully")
                     return {
                         'success': True,
-                        'message': 'Windows restart initiated successfully',
-                        'command_used': restart_cmd
+                        'message': 'Restart initiated successfully using reboot command',
+                        'command_used': 'reboot',
+                        'method': 'simple_reboot'
                     }
                 else:
+                    logger.info(f"❌ Reboot failed with exit code: {reboot_result}")
+            except Exception as e:
+                logger.info(f"❌ Reboot exception: {str(e)}")
+            
+            # Method 2: Shutdown command with restart flag
+            try:
+                logger.info("  🔧 Trying shutdown -r now...")
+                shutdown_result = os.system('shutdown -r now')
+                
+                if shutdown_result == 0:
+                    logger.info("✅ Shutdown restart command executed successfully")
                     return {
-                        'success': False,
-                        'error': f'Windows restart failed: {result.stderr}',
-                        'command_used': restart_cmd
+                        'success': True,
+                        'message': 'Restart initiated successfully using shutdown command',
+                        'command_used': 'shutdown -r now',
+                        'method': 'shutdown_restart'
                     }
-            else:
-                # Linux/Raspberry Pi restart with multiple fallback methods
-                # First check which commands are available
-                available_commands = []
-                potential_commands = [
-                    ['systemctl', 'reboot'],
-                    ['sudo', 'reboot'],
-                    ['sudo', 'shutdown', '-r', 'now'],
-                    ['reboot'],
-                    ['shutdown', '-r', 'now']
-                ]
-                
-                # Check which commands exist in PATH
-                for cmd in potential_commands:
-                    try:
-                        result = subprocess.run(['which', cmd[0]], capture_output=True, text=True, timeout=5)
-                        if result.returncode == 0:
-                            available_commands.append(cmd)
-                    except:
-                        # If 'which' command fails, assume command might be available
-                        available_commands.append(cmd)
-                
-                # Use available commands, or fall back to all if none detected
-                if available_commands:
-                    restart_commands = available_commands
-                    logger.info(f"Available restart commands: {[cmd[0] for cmd in available_commands]}")
                 else:
-                    restart_commands = potential_commands
-                    logger.info("No restart commands detected in PATH, trying all potential commands")
+                    logger.info(f"❌ Shutdown restart failed with exit code: {shutdown_result}")
+            except Exception as e:
+                logger.info(f"❌ Shutdown restart exception: {str(e)}")
+            
+            # Method 3: Init system restart
+            try:
+                logger.info("  🔧 Trying init 6...")
+                init_result = os.system('init 6')
                 
-                # Try each command with proper error handling
-                for cmd in restart_commands:
-                    try:
-                        logger.info(f"Attempting restart with: {' '.join(cmd)}")
-                        
-                        # For restart commands, don't capture output as they don't return normally
-                        # Just execute the command and assume success if no exception
-                        result = subprocess.run(cmd, timeout=15)
-                        # If we get here, the command executed (though it may not have completed)
-                        logger.info(f"Restart command executed successfully: {' '.join(cmd)}")
-                        return {
-                            'success': True,
-                            'message': f'Restart initiated successfully with: {" ".join(cmd)}',
-                            'command_used': ' '.join(cmd)
-                        }
-                    except subprocess.TimeoutExpired:
-                        # Command timed out, but this is expected for restart commands
-                        logger.info(f"Restart command timed out (expected): {' '.join(cmd)}")
-                        return {
-                            'success': True,
-                            'message': f'Restart command timed out (expected for restart): {" ".join(cmd)}',
-                            'command_used': ' '.join(cmd)
-                        }
-                    except FileNotFoundError:
-                        logger.info(f"Command not found: {' '.join(cmd)}")
-                        continue
-                    except PermissionError:
-                        logger.info(f"Permission denied for: {' '.join(cmd)}")
-                        continue
-                    except Exception as e:
-                        logger.info(f"Error executing restart command {' '.join(cmd)}: {str(e)}")
-                        continue
-                
-                # If all commands failed, provide detailed error information
-                logger.error("All restart commands failed")
-                return {
-                    'success': False,
-                    'error': 'All restart commands failed - check system logs for details',
-                    'command_used': 'multiple_attempts',
-                    'debug_info': {
-                        'platform': platform.system(),
-                        'user_id': os.geteuid() if hasattr(os, 'geteuid') else 'unknown',
-                        'commands_tried': [cmd for cmd in restart_commands],
-                        'suggestion': 'Check if restart commands are available in PATH and system permissions'
+                if init_result == 0:
+                    logger.info("✅ Init restart command executed successfully")
+                    return {
+                        'success': True,
+                        'message': 'Restart initiated successfully using init system',
+                        'command_used': 'init 6',
+                        'method': 'init_restart'
                     }
+                else:
+                    logger.info(f"❌ Init restart failed with exit code: {init_result}")
+            except Exception as e:
+                logger.info(f"❌ Init restart exception: {str(e)}")
+            
+            # Method 4: Systemctl restart (if available)
+            try:
+                logger.info("  🔧 Trying systemctl reboot...")
+                systemctl_result = os.system('systemctl reboot')
+                
+                if systemctl_result == 0:
+                    logger.info("✅ Systemctl restart command executed successfully")
+                    return {
+                        'success': True,
+                        'message': 'Restart initiated successfully using systemctl',
+                        'command_used': 'systemctl reboot',
+                        'method': 'systemctl_restart'
+                    }
+                else:
+                    logger.info(f"❌ Systemctl restart failed with exit code: {systemctl_result}")
+            except Exception as e:
+                logger.info(f"❌ Systemctl restart exception: {str(e)}")
+            
+            # If all methods failed, provide error information
+            logger.error("❌ All restart methods failed")
+            return {
+                'success': False,
+                'error': 'All restart methods failed - system may not support restart operations',
+                'command_used': 'multiple_simple_methods',
+                'debug_info': {
+                    'platform': platform.system(),
+                    'user_id': os.geteuid() if hasattr(os, 'geteuid') else 'unknown',
+                    'methods_tried': [
+                        'simple_reboot',
+                        'shutdown_restart',
+                        'init_restart',
+                        'systemctl_restart'
+                    ],
+                    'suggestion': 'Check system logs and ensure restart commands are available. Try manual restart from console.'
                 }
+            }
                 
         except Exception as e:
             logger.error(f"Restart execution error: {str(e)}")

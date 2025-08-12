@@ -40,6 +40,7 @@ sudo -u "$APP_USER" mkdir -p "$APP_DIR"
 sudo -u "$APP_USER" python3 -m venv "$VENV_DIR"
 "$VENV_DIR/bin/pip" install --upgrade pip
 "$VENV_DIR/bin/pip" install -r "$BACKEND_DIR/requirements.txt"
+echo "==> Backend dependencies installed"
 
 echo "==> Writing backend environment file ($ENV_FILE) if missing"
 if [[ ! -f "$ENV_FILE" ]]; then
@@ -49,6 +50,8 @@ PI_MONITOR_API_KEY=pi-monitor-api-key-2024
 EOF
   chown "$APP_USER":"$APP_GROUP" "$ENV_FILE"
 fi
+
+echo "==> Backend environment ready ($ENV_FILE)"
 
 echo "==> Building frontend"
 pushd "$FRONTEND_DIR" >/dev/null
@@ -136,6 +139,9 @@ EOF
 systemctl daemon-reload
 systemctl enable --now pi-monitor-backend.service
 systemctl status pi-monitor-backend.service | cat || true
+
+echo "==> Backend service installed and started (pi-monitor-backend.service)"
+echo "==> Backend setup complete"
 
 echo "==> Configuring passwordless sudo for pi-monitor commands"
 SUDOERS_FILE="/etc/sudoers.d/pi-monitor"

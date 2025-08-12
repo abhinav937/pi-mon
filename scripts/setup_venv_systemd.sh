@@ -90,9 +90,28 @@ NGINX
 fi
 ln -sf "$NGINX_SITE_AVAILABLE" "$NGINX_SITE_ENABLED"
 if [[ -f /etc/nginx/sites-enabled/default ]]; then rm -f /etc/nginx/sites-enabled/default; fi
+
+# If port 80 is already in use, try to stop common web servers
+if ss -ltnp 2>/dev/null | grep -q ":80 "; then
+  echo "==> Port 80 is in use. Attempting to stop conflicting services (apache2, httpd, lighttpd, nginx)"
+  systemctl stop apache2 2>/dev/null || true
+  systemctl disable apache2 2>/dev/null || true
+  systemctl stop httpd 2>/dev/null || true
+  systemctl disable httpd 2>/dev/null || true
+  systemctl stop lighttpd 2>/dev/null || true
+  systemctl disable lighttpd 2>/dev/null || true
+  systemctl stop nginx 2>/dev/null || true
+  # Re-check after stopping
+  if ss -ltnp 2>/dev/null | grep -q ":80 "; then
+    echo "WARNING: Port 80 still occupied. Please run 'sudo ss -lntp | grep :80' to identify the process, stop/disable it, then run 'sudo systemctl restart nginx'."
+  fi
+fi
+
 nginx -t
-systemctl enable --now nginx
+set +e
+systemctl enable nginx
 systemctl restart nginx
+set -e
 
 echo "==> Installing systemd service for backend ($SYSTEMD_SERVICE)"
 cat > "$SYSTEMD_SERVICE" <<EOF

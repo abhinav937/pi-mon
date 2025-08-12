@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Pi Monitor - API Data Dumper
 # Dumps all API responses with detailed formatting
 
@@ -14,9 +14,9 @@ echo -e "${BLUE}🥧 Pi Monitor - API Data Dumper${NC}"
 echo "=========================================="
 
 # Configuration
-PI_IP="192.168.0.201"
-BACKEND_PORT="5001"
-FRONTEND_PORT="80"
+PI_IP="${PI_IP:-127.0.0.1}"
+BACKEND_PORT="${BACKEND_PORT:-5001}"
+FRONTEND_PORT="${FRONTEND_PORT:-80}"
 
 echo -e "${YELLOW}Target:${NC}"
 echo "  Pi IP: $PI_IP"
@@ -113,26 +113,13 @@ dump_api() {
     echo ""
 }
 
-# Get authentication token first
 echo -e "${BLUE}🔐 Getting Authentication Token...${NC}"
-auth_response=$(curl -s -X POST -H "Content-Type: application/json" -d '{"username":"abhinav","password":"kavachi"}' "http://$PI_IP:$BACKEND_PORT/api/auth/token" 2>/dev/null || echo "{}")
+auth_response=$(curl -s -X POST -H "Content-Type: application/json" -d '{"api_key":"pi-monitor-api-key-2024"}' "http://$PI_IP:$BACKEND_PORT/api/auth/token" 2>/dev/null || echo "{}")
 
-# Extract token
 AUTH_TOKEN=""
-if echo "$auth_response" | grep -q "access_token"; then
-    AUTH_TOKEN=$(echo "$auth_response" | sed 's/.*"access_token":\s*"\([^"]*\)".*/\1/' | head -1)
-    
-    if [ "$AUTH_TOKEN" = "$auth_response" ] || [ ${#AUTH_TOKEN} -gt 200 ]; then
-        AUTH_TOKEN=$(echo "$auth_response" | grep -o '"access_token":\s*"[^"]*"' | sed 's/.*"access_token":\s*"\([^"]*\)".*/\1/')
-    fi
-    
-    if [ -n "$AUTH_TOKEN" ] && [ "$AUTH_TOKEN" != "$auth_response" ] && [ ${#AUTH_TOKEN} -lt 200 ]; then
-        echo -e "${GREEN}✅ Token received: ${AUTH_TOKEN:0:30}...${NC}"
-    else
-        echo -e "${RED}❌ Failed to extract token${NC}"
-        echo "Response: $auth_response"
-        exit 1
-    fi
+if echo "$auth_response" | grep -q "\"success\": true"; then
+    AUTH_TOKEN="pi-monitor-api-key-2024"
+    echo -e "${GREEN}✅ Token accepted (using default dev API key)${NC}"
 else
     echo -e "${RED}❌ Authentication failed${NC}"
     echo "Response: $auth_response"

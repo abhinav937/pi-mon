@@ -1,11 +1,18 @@
 [Unit]
-Description=Pi Monitor Backend
+Description=Pi Monitor Backend (venv)
 After=network.target
 
 [Service]
-User=abhinav
-WorkingDirectory=/home/abhinav/pi-mon/backend
-ExecStart=/usr/bin/python3 simple_server.py
+Type=simple
+# Change this to the user that owns the repo on your device
+User=pi
+# Change this path to where your repo lives
+WorkingDirectory=/home/pi/pi-mon/backend
+Environment=PYTHONUNBUFFERED=1
+# Optional .env file with PI_MONITOR_API_KEY
+EnvironmentFile=/home/pi/pi-mon/backend/.env
+# Run using project's venv; adjust path if needed
+ExecStart=/home/pi/pi-mon/.venv/bin/python simple_server.py
 Restart=always
 RestartSec=5
 

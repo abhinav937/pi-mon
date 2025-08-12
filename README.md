@@ -1,11 +1,11 @@
 # Pi Monitor - Simple Raspberry Pi Monitoring
 
-A **dead simple** Raspberry Pi monitoring system that replaces complex FastAPI setups with basic Python HTTP servers and Docker containers.
+A dead simple Raspberry Pi monitoring system that replaces complex frameworks with a basic Python HTTP server, systemd, and nginx.
 
 ## ✨ What's New in v2.0
 
 - **No FastAPI** - Just basic Python HTTP server
-- **No system services** - Docker containers only
+- **No Docker required** - systemd service + nginx (Docker optional in legacy branch)
 - **JSON configuration** - All settings in one file
 - **Minimal dependencies** - Only psutil for system monitoring
 - **Simple deployment** - One script to rule them all
@@ -31,14 +31,11 @@ python config.py
 nano config.json
 ```
 
-### 2. Deploy Everything
+### 2. Deploy Everything (No Docker)
 
 ```bash
 # Deploy backend and frontend
 ./deploy.sh
-
-# Or use Docker Compose
-docker-compose up -d
 ```
 
 ### 3. Access Your System
@@ -51,16 +48,20 @@ docker-compose up -d
 
 ```
 pi-mon/
-├── config.json              # All configuration settings
-├── config.py                # Configuration loader
-├── deploy.sh                # Simple deployment script
-├── docker-compose.yml       # Production setup
-├── docker-compose.dev.yml   # Development setup
+├── config.json               # All configuration settings
+├── config.py                 # Configuration loader
+├── deploy.sh                 # One-shot deploy (venv + systemd + nginx)
+├── deploy_pi.sh              # Backend-only deploy (venv + systemd)
+├── deploy_domain.sh          # Domain + SSL (nginx + certbot)
+├── scripts/
+│   └── setup_venv_systemd.sh # Helper for no-Docker setup
+├── nginx/
+│   └── pi-monitor.conf       # nginx site config (HTTP)
 ├── backend/
-│   ├── simple_server.py     # Simple HTTP server
-│   ├── Dockerfile          # Backend container
-│   └── requirements.txt    # Python dependencies
-└── frontend/               # React frontend
+│   ├── simple_server.py      # Simple HTTP server
+│   ├── env.example           # Example env (.env)
+│   └── requirements.txt      # Python dependencies
+└── frontend/                 # React frontend
 ```
 
 ## ⚙️ Configuration
@@ -126,24 +127,17 @@ For development/testing, the system uses a default API key: `pi-monitor-api-key-
 | `/api/power` | GET | Power status | Yes |
 | `/api/power` | POST | Power actions | Yes |
 
-## 🐳 Docker Commands
+## 🔄 Managing Services
 
 ```bash
-# View running containers
-docker ps
+# Backend service
+sudo systemctl status pi-monitor-backend
+sudo systemctl restart pi-monitor-backend
+sudo journalctl -u pi-monitor-backend -n 100 -f
 
-# View logs
-docker logs pi-monitor-backend
-docker logs pi-monitor-frontend
-
-# Stop all
-docker stop pi-monitor-backend pi-monitor-frontend
-
-# Start all
-docker start pi-monitor-backend pi-monitor-frontend
-
-# Restart all
-docker restart pi-monitor-backend pi-monitor-frontend
+# nginx
+sudo systemctl status nginx
+sudo systemctl restart nginx
 ```
 
 ## 🧪 Testing
@@ -160,10 +154,8 @@ curl -X POST http://localhost:5001/api/auth/token
 ## 🔄 Updates
 
 ```bash
-# Update backend only
-./update_backend_docker.sh
-
-# Full redeploy
+# Pull latest changes and redeploy
+git pull
 ./deploy.sh
 ```
 
@@ -177,10 +169,10 @@ curl -X POST http://localhost:5001/api/auth/token
    sudo fuser -k 5001/tcp
    ```
 
-2. **Container won't start**
+2. **Service won't start**
    ```bash
-   docker logs pi-monitor-backend
-   docker run --rm pi-monitor-backend
+   sudo systemctl status pi-monitor-backend
+   sudo journalctl -u pi-monitor-backend -n 200 -f
    ```
 
 3. **Health check failing**
@@ -191,11 +183,8 @@ curl -X POST http://localhost:5001/api/auth/token
 ### Logs
 
 ```bash
-# Follow logs in real-time
-docker logs -f pi-monitor-backend
-
-# View last 50 lines
-docker logs --tail 50 pi-monitor-backend
+# Follow backend logs in real-time
+sudo journalctl -u pi-monitor-backend -f
 ```
 
 ## 🏗️ Development
@@ -214,14 +203,11 @@ npm install
 npm start
 ```
 
-### Docker Development
+### Frontend Development
 
 ```bash
-# Development mode
-docker-compose -f docker-compose.dev.yml up -d
-
-# Production mode
-docker-compose -f docker-compose.prod.yml up -d
+cd frontend
+npm start
 ```
 
 ## 🔒 Security Notes
@@ -282,7 +268,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ## 🙏 Acknowledgments
 
 - Built with Python's built-in `http.server`
-- Containerized with Docker
+- Served with nginx
 - Frontend powered by React
 - System monitoring with psutil
 
@@ -296,3 +282,53 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - **No virtual environments** - Direct Python execution
 - **Easy debugging** - Simple code, clear flow
 - **Fast startup** - No heavy framework initialization
+
+## 🧰 Running Without Docker (venv + systemd + nginx)
+
+You can run the backend and frontend without containers. A helper script sets up a Python venv, builds the React app, installs nginx, and creates a systemd service.
+
+### One‑shot setup
+
+```bash
+cd /home/pi/pi-mon
+sudo bash scripts/setup_venv_systemd.sh
+```
+
+What it does:
+- Creates venv in `.venv` and installs `backend/requirements.txt`
+- Builds the frontend and deploys it to `/var/www/pi-monitor`
+- Installs nginx, serves the static site, and proxies `/api` to `127.0.0.1:5001`
+- Installs and enables `pi-monitor-backend.service` using the venv
+
+### Manual steps (if you prefer)
+
+1. Backend venv:
+```bash
+cd backend
+python3 -m venv ../.venv
+source ../.venv/bin/activate
+pip install -r requirements.txt
+cp env.example .env  # set PI_MONITOR_API_KEY
+```
+
+2. Systemd service (edit paths/user as needed):
+Place `pi-monitor.service` in `/etc/systemd/system/pi-monitor-backend.service` and run:
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now pi-monitor-backend.service
+```
+
+3. Frontend build and nginx:
+```bash
+cd frontend
+npm ci && npm run build
+sudo mkdir -p /var/www/pi-monitor
+sudo rsync -a build/ /var/www/pi-monitor/
+sudo cp nginx/pi-monitor.conf /etc/nginx/sites-available/pi-monitor
+sudo ln -sf /etc/nginx/sites-available/pi-monitor /etc/nginx/sites-enabled/pi-monitor
+sudo rm -f /etc/nginx/sites-enabled/default
+sudo nginx -t && sudo systemctl restart nginx && sudo systemctl enable nginx
+```
+
+Access: `http://<host>/` (frontend), API proxied at `http://<host>/api/*`.
+

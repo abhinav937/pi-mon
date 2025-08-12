@@ -10,7 +10,9 @@ import {
   Tooltip,
   Legend,
   Filler,
+  TimeScale  // Add this
 } from 'chart.js';
+import 'chartjs-adapter-date-fns';  // Add date adapter
 import { TrendingUp, BarChart as BarChart3, Timeline as Activity, Storage as HardDrive, DataObject as Database } from '@mui/icons-material';
 
 // Register Chart.js components
@@ -22,7 +24,8 @@ ChartJS.register(
   Title,
   Tooltip,
   Legend,
-  Filler
+  Filler,
+  TimeScale  // Register time scale
 );
 
 const ResourceChart = ({ unifiedClient }) => {
@@ -235,7 +238,8 @@ const ResourceChart = ({ unifiedClient }) => {
               displayFormats: {
                 minute: 'HH:mm',
                 hour: 'MMM d, HH:mm'
-              }
+              },
+              parser: 'yyyy-MM-dd HH:mm:ss'  // Ensure consistent parsing
             },
             ticks: {
               maxTicksLimit: 10,
@@ -379,14 +383,10 @@ const ResourceChart = ({ unifiedClient }) => {
                 };
                 return <Line ref={chartRef} {...validatedData} />;
               } catch (error) {
-                console.error('Error rendering chart:', error);
+                console.error('Chart rendering error:', error);
                 return (
-                  <div className="h-96 flex items-center justify-center text-red-500">
-                    <div className="text-center">
-                      <Activity className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                      <p className="text-lg font-medium mb-2">Chart Error</p>
-                      <p className="text-sm">Failed to render chart data</p>
-                    </div>
+                  <div className="h-full flex items-center justify-center text-red-500">
+                    Chart failed to load: {error.message}. Please refresh.
                   </div>
                 );
               }

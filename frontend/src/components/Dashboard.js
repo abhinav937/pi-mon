@@ -244,13 +244,13 @@ const Dashboard = ({ unifiedClient }) => {
           </div>
           <div className="text-sm text-gray-500 dark:text-gray-400">
             {currentData.temperature !== null && currentData.temperature !== undefined && !isNaN(currentData.temperature) && currentData.temperature > 80 && (
-              <span className="status-badge-error">🔥 High Temperature</span>
+              <span className="status-badge-error">High Temperature</span>
             )}
             {currentData.temperature !== null && currentData.temperature !== undefined && !isNaN(currentData.temperature) && currentData.temperature <= 80 && currentData.temperature > 70 && (
-              <span className="status-badge-warning">⚠️ Warm</span>
+              <span className="status-badge-warning">Warm</span>
             )}
             {currentData.temperature !== null && currentData.temperature !== undefined && !isNaN(currentData.temperature) && currentData.temperature <= 70 && (
-              <span className="status-badge-success">✅ Normal</span>
+              <span className="status-badge-success">Normal</span>
             )}
           </div>
         </div>
@@ -324,7 +324,11 @@ const Dashboard = ({ unifiedClient }) => {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
             <div className="text-center p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
               <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">
-                {metricsHistory.collection_status?.active ? '🟢' : '🔴'}
+                {metricsHistory.collection_status?.active ? (
+                  <div className="w-3 h-3 sm:w-4 sm:h-4 rounded-full bg-green-500" />
+                ) : (
+                  <div className="w-3 h-3 sm:w-4 sm:h-4 rounded-full bg-red-500" />
+                )}
               </div>
               <div className="text-sm font-medium text-gray-700 dark:text-gray-300">
                 Collection Status

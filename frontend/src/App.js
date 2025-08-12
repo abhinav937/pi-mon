@@ -50,14 +50,14 @@ const queryClient = new QueryClient({
 
 // Enhanced navigation tabs with more features
 const TABS = [
-  { id: 'dashboard', name: 'Dashboard', icon: '📊', description: 'System overview and key metrics' },
-  { id: 'system', name: 'System Status', icon: '💻', description: 'Detailed system information' },
-  { id: 'charts', name: 'Charts', icon: '📈', description: 'Performance graphs and trends' },
-  { id: 'power', name: 'Power', icon: '⚡', description: 'Power management and monitoring' },
-  { id: 'services', name: 'Services', icon: '🔧', description: 'System service management' },
-  { id: 'network', name: 'Network', icon: '🌐', description: 'Network monitoring and diagnostics' },
-  { id: 'logs', name: 'Logs', icon: '📋', description: 'System and application logs' },
-  { id: 'settings', name: 'Settings', icon: '⚙️', description: 'Configuration and preferences' },
+  { id: 'dashboard', name: 'Dashboard', icon: 'dashboard', description: 'System overview and key metrics' },
+  { id: 'system', name: 'System Status', icon: 'computer', description: 'Detailed system information' },
+  { id: 'charts', name: 'Charts', icon: 'show_chart', description: 'Performance graphs and trends' },
+  { id: 'power', name: 'Power', icon: 'bolt', description: 'Power management and monitoring' },
+  { id: 'services', name: 'Services', icon: 'build', description: 'System service management' },
+  { id: 'network', name: 'Network', icon: 'public', description: 'Network monitoring and diagnostics' },
+  { id: 'logs', name: 'Logs', icon: 'description', description: 'System and application logs' },
+  { id: 'settings', name: 'Settings', icon: 'settings', description: 'Configuration and preferences' },
 ];
 
 function App() {
@@ -210,7 +210,7 @@ function App() {
               <div className="flex items-center">
                 <div className="flex-shrink-0">
                   <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-white">
-                    🥧 Pi Monitor
+                    Pi Monitor
                   </h1>
                 </div>
               </div>
@@ -311,7 +311,7 @@ function App() {
                     }`}
                   >
                     <div className="flex items-center space-x-3">
-                      <span className="text-xl">{tab.icon}</span>
+                      <i className="material-icons text-2xl">{tab.icon}</i>
                       <div>
                         <div className="font-medium">{tab.name}</div>
                         <div className="text-sm text-gray-500 dark:text-gray-400">{tab.description}</div>
@@ -384,7 +384,7 @@ function App() {
                   }`}
                   title={tab.description}
                 >
-                  <span className="mr-2">{tab.icon}</span>
+                  <i className="material-icons text-xl mr-2">{tab.icon}</i>
                   {tab.name}
                 </button>
               ))}

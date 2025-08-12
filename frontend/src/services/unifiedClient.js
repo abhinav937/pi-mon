@@ -17,7 +17,7 @@ const logDebug = (message, data = null, type = 'info') => {
     data
   };
   
-  console.log(`🔍 [UnifiedClient Debug] ${message}`, logEntry);
+  console.log(`[UnifiedClient Debug] ${message}`, logEntry);
   
   // Also log to localStorage for persistence across page reloads
   try {

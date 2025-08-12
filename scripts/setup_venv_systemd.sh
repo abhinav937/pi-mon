@@ -137,6 +137,23 @@ systemctl daemon-reload
 systemctl enable --now pi-monitor-backend.service
 systemctl status pi-monitor-backend.service | cat || true
 
+echo "==> Configuring passwordless sudo for pi-monitor commands"
+SUDOERS_FILE="/etc/sudoers.d/pi-monitor"
+if [[ ! -f "$SUDOERS_FILE" ]]; then
+  cat > "$SUDOERS_FILE" <<EOF
+$APP_USER ALL=(ALL) NOPASSWD: /sbin/reboot, /sbin/shutdown, /bin/systemctl, /usr/bin/tail
+EOF
+  chmod 0440 "$SUDOERS_FILE"
+  if visudo -c -f "$SUDOERS_FILE"; then
+    echo "Sudoers configuration validated and installed."
+  else
+    echo "WARNING: Sudoers validation failed. Please check $SUDOERS_FILE manually."
+    rm -f "$SUDOERS_FILE"
+  fi
+else
+  echo "Sudoers file already exists, skipping."
+fi
+
 echo "==> Done. Frontend on http://<host>/, backend on http://127.0.0.1:5001 (proxied at /api)"
 
 

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { QueryClient, QueryClientProvider } from 'react-query';
 import { Toaster } from 'react-hot-toast';
-import { AlertCircle, Wifi, WifiOff, Sun, Moon, Settings, RefreshCw, Menu, X } from 'lucide-react';
+import { AlertCircle, Wifi, WifiOff, Sun, Moon, Settings, RefreshCw, Menu, X, LayoutDashboard, Monitor, BarChart, Zap, Wrench, Globe, FileText } from 'lucide-react';
 
 import { UnifiedClient } from './services/unifiedClient';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -10,7 +10,6 @@ import ConnectionStatus from './components/ConnectionStatus';
 
 // Tailwind CSS imports
 import './index.css';
-import 'material-symbols/outlined.css';
 
 // Lazy load components for better performance
 const Dashboard = lazy(() => import('./components/Dashboard'));
@@ -51,14 +50,14 @@ const queryClient = new QueryClient({
 
 // Enhanced navigation tabs with more features
 const TABS = [
-  { id: 'dashboard', name: 'Dashboard', icon: 'dashboard', description: 'System overview and key metrics' },
-  { id: 'system', name: 'System Status', icon: 'computer', description: 'Detailed system information' },
-  { id: 'charts', name: 'Charts', icon: 'show_chart', description: 'Performance graphs and trends' },
-  { id: 'power', name: 'Power', icon: 'bolt', description: 'Power management and monitoring' },
-  { id: 'services', name: 'Services', icon: 'build', description: 'System service management' },
-  { id: 'network', name: 'Network', icon: 'public', description: 'Network monitoring and diagnostics' },
-  { id: 'logs', name: 'Logs', icon: 'description', description: 'System and application logs' },
-  { id: 'settings', name: 'Settings', icon: 'settings', description: 'Configuration and preferences' },
+  { id: 'dashboard', name: 'Dashboard', icon: LayoutDashboard, description: 'System overview and key metrics' },
+  { id: 'system', name: 'System Status', icon: Monitor, description: 'Detailed system information' },
+  { id: 'charts', name: 'Charts', icon: BarChart, description: 'Performance graphs and trends' },
+  { id: 'power', name: 'Power', icon: Zap, description: 'Power management and monitoring' },
+  { id: 'services', name: 'Services', icon: Wrench, description: 'System service management' },
+  { id: 'network', name: 'Network', icon: Globe, description: 'Network monitoring and diagnostics' },
+  { id: 'logs', name: 'Logs', icon: FileText, description: 'System and application logs' },
+  { id: 'settings', name: 'Settings', icon: Settings, description: 'Configuration and preferences' },
 ];
 
 function App() {
@@ -312,7 +311,7 @@ function App() {
                     }`}
                   >
                     <div className="flex items-center space-x-3">
-                      <span className="material-symbols-outlined text-2xl">{tab.icon}</span>
+                      <tab.icon className="h-6 w-6" />
                       <div>
                         <div className="font-medium">{tab.name}</div>
                         <div className="text-sm text-gray-500 dark:text-gray-400">{tab.description}</div>
@@ -385,7 +384,7 @@ function App() {
                   }`}
                   title={tab.description}
                 >
-                  <span className="material-symbols-outlined text-xl mr-2">{tab.icon}</span>
+                  <tab.icon className="inline-block h-5 w-5 mr-2" />
                   {tab.name}
                 </button>
               ))}

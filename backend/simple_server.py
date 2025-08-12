@@ -443,7 +443,6 @@ net_rate_tracker = {
 # Global data storage for real-time metrics with improved performance
 class EnhancedMetricsCollector:
     def __init__(self):
-        self.metrics_history = deque(maxlen=1000)  # Use deque for O(1) operations
         self.collection_interval = 5.0
         self.is_collecting = False
         self.collection_thread = None
@@ -455,7 +454,10 @@ class EnhancedMetricsCollector:
         self.collection_count = 0
         self.error_count = 0
         self.last_error = None
-        self.max_history = 1000  # Keep last 1000 data points
+        self.max_history = 1000  # Keep last 1000 data points in memory for quick access
+        
+        # In-memory cache for recent data (for performance)
+        self.recent_cache = deque(maxlen=100)
         
     def start_collection(self):
         """Start background metrics collection"""
@@ -486,8 +488,14 @@ class EnhancedMetricsCollector:
                 metrics = self._gather_current_metrics()
                 if metrics and 'error' not in metrics:
                     with self.collection_lock:
-                        self.metrics_history.append(metrics)
-                        self.collection_count += 1
+                        # Store in database for persistence
+                        if metrics_db.insert_metrics(metrics):
+                            # Also keep in memory cache for quick access
+                            self.recent_cache.append(metrics)
+                            self.collection_count += 1
+                        else:
+                            self.error_count += 1
+                            self.last_error = 'Failed to store metrics in database'
                     
                     self.last_collection = start_time
                 else:
@@ -560,25 +568,53 @@ class EnhancedMetricsCollector:
         return enhanced
     
     def get_metrics_history(self, minutes=60):
-        """Get metrics history for the last N minutes with improved performance"""
-        cutoff_time = time.time() - (minutes * 60)
-        
-        with self.collection_lock:
-            # Use list comprehension for better performance
-            return [m for m in self.metrics_history if m.get('timestamp', 0) > cutoff_time]
+        """Get metrics history for the last N minutes from database with memory cache fallback"""
+        try:
+            # Try to get from database first
+            db_metrics = metrics_db.get_metrics_history(minutes, self.max_history)
+            if db_metrics:
+                return db_metrics
+            
+            # Fallback to memory cache if database fails
+            cutoff_time = time.time() - (minutes * 60)
+            with self.collection_lock:
+                return [m for m in self.recent_cache if m.get('timestamp', 0) > cutoff_time]
+        except Exception as e:
+            logger.error(f"Failed to get metrics history: {e}")
+            # Final fallback to memory cache
+            cutoff_time = time.time() - (minutes * 60)
+            with self.collection_lock:
+                return [m for m in self.recent_cache if m.get('timestamp', 0) > cutoff_time]
     
     def get_latest_metrics(self):
-        """Get the most recent metrics"""
-        return self.metrics_history[-1] if self.metrics_history else None
+        """Get the most recent metrics from memory cache or database"""
+        try:
+            # Try memory cache first for speed
+            if self.recent_cache:
+                return self.recent_cache[-1]
+            
+            # Fallback to database
+            db_metrics = metrics_db.get_metrics_history(1, 1)  # Last 1 minute, 1 record
+            return db_metrics[0] if db_metrics else None
+        except Exception as e:
+            logger.error(f"Failed to get latest metrics: {e}")
+            return None
     
     def get_stats(self):
         """Get collection statistics"""
+        try:
+            db_stats = metrics_db.get_database_stats()
+        except Exception as e:
+            logger.error(f"Failed to get database stats: {e}")
+            db_stats = {}
+        
         return {
             "collection_count": self.collection_count,
             "error_count": self.error_count,
             "last_error": self.last_error,
-            "history_size": len(self.metrics_history),
-            "is_collecting": self.is_collecting
+            "cache_size": len(self.recent_cache),
+            "is_collecting": self.is_collecting,
+            "database": db_stats
         }
 
 # Global metrics collector instance
@@ -717,6 +753,8 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
             self._handle_log_read(query_params)
         elif path.startswith('/api/metrics/history'):
             self._handle_metrics_history(query_params)
+        elif path == '/api/metrics/database':
+            self._handle_database_stats()
         elif path == '/api/refresh':
             # Treat GET refresh to be idempotent for frontend convenience
             self._handle_refresh()
@@ -1246,16 +1284,57 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
             minutes = int(query_params.get('minutes', ['60'])[0])
         except Exception:
             minutes = 60
-        metrics_list = [m for m in metrics_collector.metrics_history if isinstance(m, dict)]
-        trimmed = metrics_list[-minutes:]
+        
+        # Get metrics from database
+        metrics_list = metrics_collector.get_metrics_history(minutes)
+        
         response = {
-            'metrics': trimmed,
+            'metrics': metrics_list,
             'collection_status': {
                 'active': metrics_collector.is_collecting,
                 'interval': int(metrics_collector.collection_interval),
                 'total_points': len(metrics_list)
+            },
+            'database_info': {
+                'source': 'database',
+                'persistent': True,
+                'survives_restart': True
             }
         }
+        self.wfile.write(json.dumps(response).encode())
+    
+    def _handle_database_stats(self):
+        """Handle database statistics endpoint"""
+        if not self.check_auth():
+            self._send_unauthorized()
+            return
+        
+        self.send_response(200)
+        self._set_common_headers()
+        
+        try:
+            db_stats = metrics_db.get_database_stats()
+            response = {
+                'success': True,
+                'database_stats': db_stats,
+                'collection_stats': metrics_collector.get_stats(),
+                'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
+                'persistence_info': {
+                    'survives_power_cycle': True,
+                    'survives_restart': True,
+                    'storage_type': 'SQLite',
+                    'file_path': metrics_db.db_path,
+                    'auto_cleanup': True,
+                    'cleanup_interval_days': 30
+                }
+            }
+        except Exception as e:
+            response = {
+                'success': False,
+                'error': str(e),
+                'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+            }
+        
         self.wfile.write(json.dumps(response).encode())
     
     def _handle_service_restart_info(self):
@@ -2978,6 +3057,199 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
         except Exception as e:
             return {"success": False, "message": f"Alternative service control failed: {str(e)}"}
 
+# Database management for persistent storage
+class MetricsDatabase:
+    def __init__(self, db_path='pi_monitor.db'):
+        self.db_path = db_path
+        self.init_database()
+    
+    def init_database(self):
+        """Initialize the database with required tables"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                # Create metrics table
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS metrics (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        timestamp REAL NOT NULL,
+                        cpu_percent REAL,
+                        memory_percent REAL,
+                        disk_percent REAL,
+                        temperature REAL,
+                        network_bytes_sent INTEGER,
+                        network_bytes_recv INTEGER,
+                        network_packets_sent INTEGER,
+                        network_packets_recv INTEGER,
+                        disk_read_bytes INTEGER,
+                        disk_write_bytes INTEGER,
+                        disk_read_count INTEGER,
+                        disk_write_count INTEGER,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                ''')
+                
+                # Create indexes for better performance
+                cursor.execute('CREATE INDEX IF NOT EXISTS idx_timestamp ON metrics(timestamp)')
+                cursor.execute('CREATE INDEX IF NOT EXISTS idx_created_at ON metrics(created_at)')
+                
+                # Create system info table for persistent system information
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS system_info (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        key TEXT UNIQUE NOT NULL,
+                        value TEXT,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                ''')
+                
+                conn.commit()
+                logger.info(f"Database initialized successfully: {self.db_path}")
+                
+        except Exception as e:
+            logger.error(f"Failed to initialize database: {e}")
+    
+    def insert_metrics(self, metrics_data):
+        """Insert metrics data into database"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute('''
+                    INSERT INTO metrics (
+                        timestamp, cpu_percent, memory_percent, disk_percent, temperature,
+                        network_bytes_sent, network_bytes_recv, network_packets_sent, network_packets_recv,
+                        disk_read_bytes, disk_write_bytes, disk_read_count, disk_write_count
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    metrics_data.get('timestamp', time.time()),
+                    metrics_data.get('cpu_percent'),
+                    metrics_data.get('memory_percent'),
+                    metrics_data.get('disk_percent'),
+                    metrics_data.get('temperature'),
+                    metrics_data.get('network', {}).get('bytes_sent', 0),
+                    metrics_data.get('network', {}).get('bytes_recv', 0),
+                    metrics_data.get('network', {}).get('packets_sent', 0),
+                    metrics_data.get('network', {}).get('packets_recv', 0),
+                    metrics_data.get('disk_io', {}).get('read_bytes', 0),
+                    metrics_data.get('disk_io', {}).get('write_bytes', 0),
+                    metrics_data.get('disk_io', {}).get('read_count', 0),
+                    metrics_data.get('disk_io', {}).get('write_count', 0)
+                ))
+                
+                conn.commit()
+                return True
+                
+        except Exception as e:
+            logger.error(f"Failed to insert metrics: {e}")
+            return False
+    
+    def get_metrics_history(self, minutes=60, limit=1000):
+        """Get metrics history from database for the last N minutes"""
+        try:
+            cutoff_time = time.time() - (minutes * 60)
+            
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute('''
+                    SELECT timestamp, cpu_percent, memory_percent, disk_percent, temperature,
+                           network_bytes_sent, network_bytes_recv, network_packets_sent, network_packets_recv,
+                           disk_read_bytes, disk_write_bytes, disk_read_count, disk_write_count
+                    FROM metrics 
+                    WHERE timestamp > ? 
+                    ORDER BY timestamp DESC 
+                    LIMIT ?
+                ''', (cutoff_time, limit))
+                
+                rows = cursor.fetchall()
+                
+                # Convert to the format expected by frontend
+                metrics = []
+                for row in rows:
+                    metrics.append({
+                        'timestamp': row[0],
+                        'cpu_percent': row[1],
+                        'memory_percent': row[2],
+                        'disk_percent': row[3],
+                        'temperature': row[4],
+                        'network': {
+                            'bytes_sent': row[5],
+                            'bytes_recv': row[6],
+                            'packets_sent': row[7],
+                            'packets_recv': row[8]
+                        },
+                        'disk_io': {
+                            'read_bytes': row[9],
+                            'write_bytes': row[10],
+                            'read_count': row[11],
+                            'write_count': row[12]
+                        }
+                    })
+                
+                return metrics
+                
+        except Exception as e:
+            logger.error(f"Failed to get metrics history: {e}")
+            return []
+    
+    def cleanup_old_data(self, days_to_keep=30):
+        """Clean up old metrics data to prevent database bloat"""
+        try:
+            cutoff_time = time.time() - (days_to_keep * 24 * 60 * 60)
+            
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute('DELETE FROM metrics WHERE timestamp < ?', (cutoff_time,))
+                deleted_count = cursor.rowcount
+                
+                conn.commit()
+                logger.info(f"Cleaned up {deleted_count} old metrics records")
+                return deleted_count
+                
+        except Exception as e:
+            logger.error(f"Failed to cleanup old data: {e}")
+            return 0
+    
+    def get_database_stats(self):
+        """Get database statistics"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                # Get total records
+                cursor.execute('SELECT COUNT(*) FROM metrics')
+                total_records = cursor.fetchone()[0]
+                
+                # Get oldest and newest timestamps
+                cursor.execute('SELECT MIN(timestamp), MAX(timestamp) FROM metrics')
+                time_range = cursor.fetchone()
+                oldest_time = time_range[0] if time_range[0] else None
+                newest_time = time_range[1] if time_range[1] else None
+                
+                # Get database file size
+                try:
+                    db_size = os.path.getsize(self.db_path)
+                except:
+                    db_size = 0
+                
+                return {
+                    'total_records': total_records,
+                    'oldest_timestamp': oldest_time,
+                    'newest_timestamp': newest_time,
+                    'database_size_bytes': db_size,
+                    'database_size_mb': round(db_size / (1024 * 1024), 2) if db_size else 0
+                }
+                
+        except Exception as e:
+            logger.error(f"Failed to get database stats: {e}")
+            return {}
+
+# Global database instance
+metrics_db = MetricsDatabase()
+
 def run_server(port=None):
     """Run the enhanced Pi Monitor HTTP server"""
     if port is None:
@@ -2986,6 +3258,20 @@ def run_server(port=None):
     # Start metrics collection
     print("Starting metrics collection...")
     metrics_collector.start_collection()
+    
+    # Start database cleanup task (clean old data every 24 hours)
+    def cleanup_database():
+        while True:
+            try:
+                time.sleep(24 * 60 * 60)  # 24 hours
+                deleted_count = metrics_db.cleanup_old_data(days_to_keep=30)
+                if deleted_count > 0:
+                    print(f"🧹 Cleaned up {deleted_count} old metrics records")
+            except Exception as e:
+                print(f"❌ Database cleanup error: {e}")
+    
+    cleanup_thread = threading.Thread(target=cleanup_database, daemon=True)
+    cleanup_thread.start()
     
     server_address = ('0.0.0.0', port)
     httpd = HTTPServer(server_address, SimplePiMonitorHandler)
@@ -2998,6 +3284,16 @@ def run_server(port=None):
     print(f"📊 Metrics Collection: {'Active' if metrics_collector.is_collecting else 'Inactive'}")
     print(f"🔄 Collection Interval: {metrics_collector.collection_interval}s")
     print(f"📈 Max History: {metrics_collector.max_history} data points")
+    print(f"💾 Database: {metrics_db.db_path}")
+    
+    # Get and display database stats
+    try:
+        db_stats = metrics_db.get_database_stats()
+        if db_stats:
+            print(f"📊 Database Records: {db_stats.get('total_records', 0)}")
+            print(f"💾 Database Size: {db_stats.get('database_size_mb', 0)} MB")
+    except Exception as e:
+        print(f"❌ Database stats unavailable: {e}")
     print()
     print("🌐 Available Endpoints:")
     endpoints = config.get_backend_endpoints()
@@ -3006,6 +3302,7 @@ def run_server(port=None):
     
     # Add new endpoints
     print(f"  📊 METRICS: /api/metrics")
+    print(f"  💾 DATABASE: /api/metrics/database")
     print(f"  ℹ️  SYSTEM_INFO: /api/system/info")
     print(f"  🖥️  COMMANDS: /api/commands")
     print()

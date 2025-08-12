@@ -35,7 +35,17 @@ const ResourceChart = ({ unifiedClient }) => {
     network: { labels: [], data: [] },
   });
   const maxDataPoints = 100; // Increased for better visualization
-  const [timeRange, setTimeRange] = useState(60); // 60 minutes default
+  
+  // Load time range from localStorage or default to 60 minutes
+  const [timeRange, setTimeRange] = useState(() => {
+    const saved = localStorage.getItem('pi-monitor-time-range');
+    return saved ? parseInt(saved) : 60;
+  });
+
+  // Save time range to localStorage whenever it changes
+  useEffect(() => {
+    localStorage.setItem('pi-monitor-time-range', timeRange.toString());
+  }, [timeRange]);
 
   // Listen for real-time updates
   useEffect(() => {
@@ -85,7 +95,7 @@ const ResourceChart = ({ unifiedClient }) => {
     };
   }, [unifiedClient]);
 
-  // Fetch historical metrics data
+  // Fetch historical metrics data - only when timeRange changes or component mounts
   useEffect(() => {
     if (!unifiedClient) return;
 
@@ -120,11 +130,12 @@ const ResourceChart = ({ unifiedClient }) => {
 
     fetchHistoricalData();
     
-    // Set up interval to refresh historical data
-    const interval = setInterval(fetchHistoricalData, 30000); // Every 30 seconds
+    // Set up interval to refresh historical data based on selected time range
+    const refreshInterval = Math.max(30000, timeRange * 1000 / 10); // Refresh every 30s or 1/10th of time range, whichever is larger
+    const interval = setInterval(fetchHistoricalData, refreshInterval);
     
     return () => clearInterval(interval);
-  }, [unifiedClient, timeRange]);
+  }, [unifiedClient, timeRange]); // Only re-run when timeRange changes
 
   const getChartConfig = (metric) => {
     const isDarkMode = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
@@ -444,6 +455,12 @@ const ResourceChart = ({ unifiedClient }) => {
           Charts show real-time system metrics over the last {maxDataPoints} data points. 
           Data is automatically updated as new system information becomes available.
         </p>
+        <div className="mt-2 p-2 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded">
+          <Database className="inline h-4 w-4 mr-1 text-green-600" />
+          <span className="text-green-700 dark:text-green-300">
+            Data persistence: Enabled - Metrics are stored in SQLite database and survive power cycles and restarts.
+          </span>
+        </div>
       </div>
     </div>
   );

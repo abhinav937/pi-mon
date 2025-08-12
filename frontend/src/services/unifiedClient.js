@@ -261,6 +261,15 @@ class UnifiedClient {
     }
   }
 
+  async getDatabaseStats() {
+    try {
+      const response = await this.httpClient.get('/api/metrics/database');
+      return response.data;
+    } catch (error) {
+      throw error;
+    }
+  }
+
   // Network monitoring methods
   async getNetworkInfo() {
     try {

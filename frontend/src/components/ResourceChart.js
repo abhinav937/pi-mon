@@ -12,7 +12,6 @@ import {
   Filler,
   TimeScale  // Add this
 } from 'chart.js';
-import 'chartjs-adapter-date-fns';  // Add date adapter
 import { TrendingUp, BarChart as BarChart3, Timeline as Activity, Storage as HardDrive, DataObject as Database } from '@mui/icons-material';
 
 // Register Chart.js components
@@ -231,21 +230,17 @@ const ResourceChart = ({ unifiedClient }) => {
         },
         scales: {
           x: {
-            // Improved x-axis config
-            type: 'time',  // Use time scale for better handling
-            time: {
-              unit: timeRange > 60 ? 'hour' : 'minute',  // Adjust units based on range
-              displayFormats: {
-                minute: 'HH:mm',
-                hour: 'MMM d, HH:mm'
-              },
-              parser: 'yyyy-MM-dd HH:mm:ss'  // Ensure consistent parsing
-            },
+            type: 'category',  // Back to category (no adapter needed)
             ticks: {
               maxTicksLimit: 10,
               autoSkip: true,
               maxRotation: 45,
-              minRotation: 0
+              minRotation: 0,
+              callback: function(value, index, ticks) {
+                // Custom label formatting
+                const label = this.getLabelForValue(value);
+                return timeRange > 60 ? label : label.split(' ')[1];  // Show full or time-only
+              }
             },
             title: {
               display: true,

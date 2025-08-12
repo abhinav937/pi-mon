@@ -697,18 +697,9 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                 response = self._get_enhanced_system_stats()
                 self.wfile.write(json.dumps(response).encode())
                 
-        elif path == '/api/metrics':
-            # Metrics endpoint for historical data
-            if not self.check_auth():
-                self.send_response(401)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-                self.end_headers()
-                response = {"error": "Unauthorized"}
-                self.wfile.write(json.dumps(response).encode())
-            else:
+        elif path == '/api/service/restart':
+            # Safe service restart endpoint (GET method shows info, POST executes restart)
+            if self.command == 'GET':
                 self.send_response(200)
                 self.send_header('Content-type', 'application/json')
                 self.send_header('Access-Control-Allow-Origin', '*')
@@ -716,29 +707,47 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                 self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
                 self.end_headers()
                 
-                minutes = int(query_params.get('minutes', ['60'])[0])
                 response = {
-                    "metrics": metrics_collector.get_metrics_history(minutes),
-                    "collection_status": {
-                        "active": metrics_collector.is_collecting,
-                        "interval": metrics_collector.collection_interval,
-                        "total_points": len(metrics_collector.metrics_history)
-                    }
+                    "endpoint": "/api/service/restart",
+                    "description": "Safe service restart endpoint",
+                    "methods": {
+                        "GET": "Get endpoint information",
+                        "POST": "Execute safe service restart"
+                    },
+                    "safety_features": [
+                        "No system shutdown/restart",
+                        "Service restart only",
+                        "Multiple fallback methods",
+                        "Graceful process handling"
+                    ],
+                    "available_methods": [
+                        "systemctl restart",
+                        "service restart", 
+                        "docker restart",
+                        "process restart (kill + start)"
+                    ],
+                    "usage": {
+                        "method": "POST",
+                        "headers": "Authorization: Bearer <token>",
+                        "body": "{} (no body required)"
+                    },
+                    "timestamp": time.strftime('%Y-%m-%d %H:%M:%S')
                 }
                 self.wfile.write(json.dumps(response).encode())
-                
-        elif path == '/api/metrics/history':
-            # Metrics history endpoint for historical data
-            if not self.check_auth():
-                self.send_response(401)
+            else:
+                # POST method handled in do_POST
+                self.send_response(405)
                 self.send_header('Content-type', 'application/json')
                 self.send_header('Access-Control-Allow-Origin', '*')
                 self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
                 self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
                 self.end_headers()
-                response = {"error": "Unauthorized"}
+                response = {"error": "Method not allowed", "allowed_methods": ["GET"]}
                 self.wfile.write(json.dumps(response).encode())
-            else:
+                
+        elif path == '/api/service/manage':
+            # Service management endpoint (GET shows info, POST executes actions)
+            if self.command == 'GET':
                 self.send_response(200)
                 self.send_header('Content-type', 'application/json')
                 self.send_header('Access-Control-Allow-Origin', '*')
@@ -746,19 +755,45 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                 self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
                 self.end_headers()
                 
-                minutes = int(query_params.get('minutes', ['60'])[0])
                 response = {
-                    "metrics": metrics_collector.get_metrics_history(minutes),
-                    "collection_status": {
-                        "active": metrics_collector.is_collecting,
-                        "collection_interval": metrics_collector.collection_interval,
-                        "total_points": len(metrics_collector.metrics_history)
-                    }
+                    "endpoint": "/api/service/manage",
+                    "description": "Service management endpoint",
+                    "methods": {
+                        "GET": "Get endpoint information",
+                        "POST": "Execute service management actions"
+                    },
+                    "available_actions": ["start", "stop", "status"],
+                    "safety_features": [
+                        "Service-level operations only",
+                        "No system impact",
+                        "Standard systemctl/service commands"
+                    ],
+                    "usage": {
+                        "method": "POST",
+                        "headers": "Authorization: Bearer <token>",
+                        "body": '{"action": "start|stop|status"}'
+                    },
+                    "examples": {
+                        "start": '{"action": "start"}',
+                        "stop": '{"action": "stop"}',
+                        "status": '{"action": "status"}'
+                    },
+                    "timestamp": time.strftime('%Y-%m-%d %H:%M:%S')
                 }
                 self.wfile.write(json.dumps(response).encode())
+            else:
+                # POST method handled in do_POST
+                self.send_response(405)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+                self.end_headers()
+                response = {"error": "Method not allowed", "allowed_methods": ["GET"]}
+                self.wfile.write(json.dumps(response).encode())
                 
-        elif path == '/api/services':
-            # Services endpoint
+        elif path == '/api/service/info':
+            # Service management information endpoint
             if not self.check_auth():
                 self.send_response(401)
                 self.send_header('Content-type', 'application/json')
@@ -775,465 +810,39 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                 self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
                 self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
                 self.end_headers()
-                response = self._get_services_status()
+                
+                try:
+                    # Get service management information
+                    service_info = self._get_service_management_info()
+                    response = {
+                        "success": True,
+                        "service_management": service_info,
+                        "timestamp": time.strftime('%Y-%m-%d %H:%M:%S'),
+                        "endpoint_info": {
+                            "description": "Service management information and recommendations",
+                            "available_endpoints": [
+                                "/api/service/restart - Safe service restart",
+                                "/api/service/manage - Service start/stop/status",
+                                "/api/service/info - Service management info"
+                            ]
+                        }
+                    }
+                    
+                except Exception as e:
+                    response = {"success": False, "message": f"Failed to get service info: {str(e)}"}
+                
                 self.wfile.write(json.dumps(response).encode())
                 
-        elif path == '/api/power':
-            # Power management endpoint
-            if not self.check_auth():
-                self.send_response(401)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-                self.end_headers()
-                response = {"error": "Unauthorized"}
-                self.wfile.write(json.dumps(response).encode())
-            else:
-                self.send_response(200)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-                self.end_headers()
-                response = self._get_power_status()
-                self.wfile.write(json.dumps(response).encode())
-                
-        elif path == '/api/system/info':
-            # Detailed system information
-            self.send_response(200)
+        elif path == '/health':
+            # Health endpoint doesn't support POST
+            self.send_response(405)
             self.send_header('Content-type', 'application/json')
             self.send_header('Access-Control-Allow-Origin', '*')
             self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
             self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
             self.end_headers()
-            response = self._get_detailed_system_info()
+            response = {"error": "Method not allowed"}
             self.wfile.write(json.dumps(response).encode())
-                
-        elif path == '/api/network':
-            # Network information endpoint
-            if not self.check_auth():
-                self.send_response(401)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-                self.end_headers()
-                response = {"error": "Unauthorized"}
-                self.wfile.write(json.dumps(response).encode())
-            else:
-                self.send_response(200)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-                self.end_headers()
-                
-                try:
-                    # Get network interface information
-                    network_info = {}
-                    for interface, addrs in psutil.net_if_addrs().items():
-                        network_info[interface] = {
-                            'addresses': [addr.address for addr in addrs if addr.family == socket.AF_INET],
-                            'mac': [addr.address for addr in addrs if addr.family == socket.AF_LINK]
-                        }
-                    
-                    response = {
-                        "interfaces": network_info,
-                        "default_gateway": self._run_command_with_fallback('gateway', 'ip route | grep default | head -1', ['route -n | grep "^0.0.0.0" | head -1']),
-                        "dns_servers": self._run_command_with_fallback('dns', 'cat /etc/resolv.conf | grep nameserver', ['cat /etc/resolv.conf']),
-                        "timestamp": time.strftime('%Y-%m-%d %H:%M:%S')
-                    }
-                except Exception as e:
-                    response = {"error": f"Failed to get network info: {str(e)}"}
-                
-                self.wfile.write(json.dumps(response).encode())
-                
-        elif path == '/api/network/stats':
-            # Network statistics endpoint
-            if not self.check_auth():
-                self.send_response(401)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-                self.end_headers()
-                response = {"error": "Unauthorized"}
-                self.wfile.write(json.dumps(response).encode())
-            else:
-                self.send_response(200)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-                self.end_headers()
-                
-                try:
-                    # Get network I/O statistics
-                    net_io = psutil.net_io_counters()
-                    response = {
-                        "bytes_sent": net_io.bytes_sent,
-                        "bytes_recv": net_io.bytes_recv,
-                        "packets_sent": net_io.packets_sent,
-                        "packets_recv": net_io.packets_recv,
-                        "errin": net_io.errin,
-                        "errout": net_io.errout,
-                        "dropin": net_io.dropin,
-                        "dropout": net_io.dropout,
-                        "timestamp": time.strftime('%Y-%m-%d %H:%M:%S')
-                    }
-                except Exception as e:
-                    response = {"error": f"Failed to get network stats: {str(e)}"}
-                
-                self.wfile.write(json.dumps(response).encode())
-                
-        elif path == '/api/logs':
-            # Available logs endpoint
-            if not self.check_auth():
-                self.send_response(401)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-                self.end_headers()
-                response = {"error": "Unauthorized"}
-                self.wfile.write(json.dumps(response).encode())
-            else:
-                self.send_response(200)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-                self.end_headers()
-                
-                try:
-                    # Get available log files - try multiple log directories
-                    log_dirs = ['/var/log', '/tmp', './logs', 'logs']
-                    available_logs = []
-                    
-                    for log_dir in log_dirs:
-                        if os.path.exists(log_dir):
-                            try:
-                                for filename in os.listdir(log_dir):
-                                    if filename.endswith('.log') or filename in ['syslog', 'messages', 'auth.log', 'system.log']:
-                                        filepath = os.path.join(log_dir, filename)
-                                        if os.path.isfile(filepath):
-                                            try:
-                                                stat = os.stat(filepath)
-                                                available_logs.append({
-                                                    'name': filename,
-                                                    'size': f"{stat.st_size / 1024:.1f} KB",
-                                                    'modified': datetime.fromtimestamp(stat.st_mtime).isoformat(),
-                                                    'path': log_dir
-                                                })
-                                            except (OSError, PermissionError):
-                                                # Skip files we can't access
-                                                continue
-                            except (OSError, PermissionError):
-                                # Skip directories we can't access
-                                continue
-                    
-                    # If no logs found, create a sample log for testing
-                    if not available_logs:
-                        sample_log_path = './logs/system.log'
-                        os.makedirs('./logs', exist_ok=True)
-                        with open(sample_log_path, 'w') as f:
-                            f.write(f"{datetime.now().strftime('%b %d %H:%M:%S')} INFO: Pi Monitor started\n")
-                            f.write(f"{datetime.now().strftime('%b %d %H:%M:%S')} INFO: System monitoring active\n")
-                        
-                        stat = os.stat(sample_log_path)
-                        available_logs.append({
-                            'name': 'system.log',
-                            'size': f"{stat.st_size / 1024:.1f} KB",
-                            'modified': datetime.fromtimestamp(stat.st_mtime).isoformat(),
-                            'path': './logs'
-                        })
-                    
-                    response = {
-                        "logs": available_logs,
-                        "log_directory": log_dirs[0] if available_logs else './logs',
-                        "total_logs": len(available_logs)
-                    }
-                except Exception as e:
-                    response = {"error": f"Failed to get available logs: {str(e)}"}
-                
-                self.wfile.write(json.dumps(response).encode())
-                
-        elif path.startswith('/api/logs/') and '/download' not in path:
-            # Log content endpoint
-            if not self.check_auth():
-                self.send_response(401)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-                self.end_headers()
-                response = {"error": "Unauthorized"}
-                self.wfile.write(json.dumps(response).encode())
-            else:
-                try:
-                    # Extract log name from path
-                    log_name = path.split('/')[-1]
-                    max_lines = int(query_params.get('lines', ['100'])[0])
-                    
-                    # Try to find the log file in available directories
-                    log_file = None
-                    log_dirs = ['/var/log', '/tmp', './logs', 'logs']
-                    
-                    for log_dir in log_dirs:
-                        potential_path = os.path.join(log_dir, log_name)
-                        if os.path.exists(potential_path):
-                            log_file = potential_path
-                            break
-                    
-                    if not log_file:
-                        self.send_response(404)
-                        self.send_header('Content-type', 'application/json')
-                        self.send_header('Access-Control-Allow-Origin', '*')
-                        self.end_headers()
-                        response = {"error": f"Log file {log_name} not found"}
-                        self.wfile.write(json.dumps(response).encode())
-                        return
-                    
-                    # Read log content
-                    with open(log_file, 'r', encoding='utf-8', errors='ignore') as f:
-                        lines = f.readlines()
-                        recent_lines = lines[-max_lines:] if len(lines) > max_lines else lines
-                        
-                        # Parse log entries
-                        entries = []
-                        for line in recent_lines:
-                            # Simple log parsing (can be enhanced)
-                            entry = {
-                                'message': line.strip(),
-                                'timestamp': None,
-                                'level': 'info',
-                                'source': log_name
-                            }
-                            
-                            # Try to extract timestamp and level
-                            if ' ' in line:
-                                parts = line.split(' ', 2)
-                                if len(parts) >= 2:
-                                    try:
-                                        # Try to parse timestamp
-                                        timestamp_str = f"{parts[0]} {parts[1]}"
-                                        datetime.strptime(timestamp_str, '%b %d %H:%M:%S')
-                                        entry['timestamp'] = timestamp_str
-                                        entry['message'] = parts[2] if len(parts) > 2 else line.strip()
-                                    except ValueError:
-                                        pass
-                                    
-                                    # Try to detect log level
-                                    if any(level in line.lower() for level in ['error', 'err', 'fail', 'critical']):
-                                        entry['level'] = 'error'
-                                    elif any(level in line.lower() for level in ['warn', 'warning']):
-                                        entry['level'] = 'warning'
-                                    elif any(level in line.lower() for level in ['debug']):
-                                        entry['level'] = 'debug'
-                            
-                            entries.append(entry)
-                    
-                    self.send_response(200)
-                    self.send_header('Content-type', 'application/json')
-                    self.send_header('Access-Control-Allow-Origin', '*')
-                    self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-                    self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-                    self.end_headers()
-                    
-                    response = {
-                        "log_name": log_name,
-                        "entries": entries,
-                        "total_entries": len(entries),
-                        "max_lines": max_lines,
-                        "size": f"{os.path.getsize(log_file) / 1024:.1f} KB"
-                    }
-                    
-                    self.wfile.write(json.dumps(response).encode())
-                    
-                except Exception as e:
-                    self.send_response(500)
-                    self.send_header('Content-type', 'application/json')
-                    self.send_header('Access-Control-Allow-Origin', '*')
-                    self.end_headers()
-                    response = {"error": f"Failed to read log: {str(e)}"}
-                    self.wfile.write(json.dumps(response).encode())
-                
-        elif path == '/api/power/status':
-            # Power status endpoint
-            if not self.check_auth():
-                self.send_response(401)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-                self.end_headers()
-                response = {"error": "Unauthorized"}
-                self.wfile.write(json.dumps(response).encode())
-            else:
-                self.send_response(200)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-                self.end_headers()
-                
-                try:
-                    response = self._get_power_status()
-                except Exception as e:
-                    response = {"error": f"Failed to get power status: {str(e)}"}
-                
-                self.wfile.write(json.dumps(response).encode())
-                
-        elif path == '/api/refresh':
-            # Refresh endpoint
-            if not self.check_auth():
-                self.send_response(401)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-                self.end_headers()
-                response = {"error": "Unauthorized"}
-                self.wfile.write(json.dumps(response).encode())
-            else:
-                self.send_response(200)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-                self.end_headers()
-                
-                try:
-                    # Force refresh of metrics
-                    if hasattr(metrics_collector, 'refresh'):
-                        metrics_collector.refresh()
-                    
-                    response = {
-                        "message": "System data refreshed successfully",
-                        "timestamp": time.strftime('%Y-%m-%d %H:%M:%S'),
-                        "status": "success"
-                    }
-                except Exception as e:
-                    response = {"error": f"Failed to refresh: {str(e)}"}
-                
-                self.wfile.write(json.dumps(response).encode())
-                
-        elif path == '/api/commands':
-            # System commands endpoint
-            if not self.check_auth():
-                self.send_response(401)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-                self.end_headers()
-                response = {"error": "Unauthorized"}
-                self.wfile.write(json.dumps(response).encode())
-            else:
-                self.send_response(200)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-                self.end_headers()
-                
-                # Get available commands or run a specific command
-                if 'command' in query_params:
-                    command_name = query_params['command'][0]
-                    response = {
-                        "command": command_name,
-                        "result": metrics_collector.run_system_command(command_name)
-                    }
-                else:
-                    response = {
-                        "available_commands": metrics_collector.get_available_commands(),
-                        "total_commands": len(SYSTEM_COMMANDS),
-                        "categories": {
-                            "system_info": [cmd for cmd in SYSTEM_COMMANDS.keys() if 'info' in cmd or 'version' in cmd],
-                            "hardware": [cmd for cmd in SYSTEM_COMMANDS.keys() if 'memory' in cmd or 'cpu' in cmd or 'disk' in cmd],
-                            "network": [cmd for cmd in SYSTEM_COMMANDS.keys() if 'network' in cmd or 'ip' in cmd],
-                            "raspberry_pi": [cmd for cmd in SYSTEM_COMMANDS.keys() if 'vcgencmd' in SYSTEM_COMMANDS[cmd]],
-                            "performance": [cmd for cmd in SYSTEM_COMMANDS.keys() if 'stats' in cmd or 'load' in cmd],
-                            "services": [cmd for cmd in SYSTEM_COMMANDS.keys() if 'service' in cmd or 'status' in cmd]
-                        }
-                    }
-                
-                self.wfile.write(json.dumps(response).encode())
-                
-        elif path == '/api/status':
-            # Quick status overview endpoint
-            if not self.check_auth():
-                self.send_response(401)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-                self.end_headers()
-                response = {"error": "Unauthorized"}
-                self.wfile.write(json.dumps(response).encode())
-            else:
-                self.send_response(200)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-                self.end_headers()
-                
-                # Get quick status overview
-                try:
-                    # Get basic system info
-                    cpu_percent = psutil.cpu_percent(interval=0.1)
-                    memory = psutil.virtual_memory()
-                    disk = psutil.disk_usage('/')
-                    temperature = metrics_collector._get_temperature()
-                    
-                    # Determine overall system health
-                    health_score = 100
-                    warnings = []
-                    
-                    if cpu_percent > 80:
-                        health_score -= 20
-                        warnings.append("High CPU usage")
-                    if memory.percent > 85:
-                        health_score -= 20
-                        warnings.append("High memory usage")
-                    if disk.percent > 85:
-                        health_score -= 20
-                        warnings.append("High disk usage")
-                    if temperature > 70:
-                        health_score -= 20
-                        warnings.append("High temperature")
-                    
-                    health_status = "healthy" if health_score >= 80 else "warning" if health_score >= 60 else "critical"
-                    
-                    response = {
-                        "timestamp": time.time(),
-                        "overall_status": health_status,
-                        "health_score": health_score,
-                        "warnings": warnings,
-                        "quick_stats": {
-                            "cpu": round(cpu_percent, 1),
-                            "memory": round(memory.percent, 1),
-                            "disk": round(disk.percent, 1),
-                            "temperature": temperature
-                        },
-                        "uptime": self._get_uptime(),
-                        "last_update": time.strftime('%Y-%m-%d %H:%M:%S'),
-                        "enhanced_monitoring": True
-                    }
-                except Exception as e:
-                    response = {
-                        "timestamp": time.time(),
-                        "overall_status": "error",
-                        "health_score": 0,
-                        "warnings": [f"Failed to get status: {str(e)}"],
-                        "quick_stats": {},
-                        "uptime": "Unknown",
-                        "last_update": time.strftime('%Y-%m-%d %H:%M:%S')
-                    }
-                
-                self.wfile.write(json.dumps(response).encode())
                 
         else:
             # 404 for unknown paths
@@ -1450,6 +1059,140 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                     }
                 except Exception as e:
                     response = {"success": False, "message": f"Sleep failed: {str(e)}"}
+                
+                self.wfile.write(json.dumps(response).encode())
+                
+        elif path == '/api/service/restart':
+            # Safe service restart endpoint
+            if not self.check_auth():
+                self.send_response(401)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+                self.end_headers()
+                response = {"error": "Unauthorized"}
+                self.wfile.write(json.dumps(response).encode())
+            else:
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+                self.end_headers()
+                
+                try:
+                    # Use the safe service restart method
+                    restart_result = self._safe_restart_pi_monitor_service()
+                    response = {
+                        "success": restart_result['success'],
+                        "message": restart_result.get('message', ''),
+                        "method": restart_result.get('method', ''),
+                        "command_used": restart_result.get('command_used', ''),
+                        "safety_level": restart_result.get('safety_level', ''),
+                        "description": restart_result.get('description', ''),
+                        "timestamp": time.strftime('%Y-%m-%d %H:%M:%S')
+                    }
+                    
+                    if not restart_result['success']:
+                        response["error"] = restart_result.get('error', '')
+                        response["methods_tried"] = restart_result.get('methods_tried', [])
+                        response["suggestions"] = restart_result.get('suggestions', [])
+                        
+                except Exception as e:
+                    response = {"success": False, "message": f"Service restart failed: {str(e)}"}
+                
+                self.wfile.write(json.dumps(response).encode())
+                
+        elif path == '/api/service/manage':
+            # Service management endpoint (start/stop/status)
+            if not self.check_auth():
+                self.send_response(401)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+                self.end_headers()
+                response = {"error": "Unauthorized"}
+                self.wfile.write(json.dumps(response).encode())
+            else:
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+                self.end_headers()
+                
+                try:
+                    # Get action from POST data
+                    content_length = int(self.headers.get('Content-Length', 0))
+                    if content_length > 0:
+                        post_data = self.rfile.read(content_length)
+                        data = json.loads(post_data.decode('utf-8'))
+                        action = data.get('action', 'status')
+                    else:
+                        action = 'status'
+                    
+                    # Use the safe service management method
+                    manage_result = self._safe_manage_pi_monitor_service(action)
+                    response = {
+                        "success": manage_result['success'],
+                        "action": manage_result.get('action', ''),
+                        "message": manage_result.get('message', ''),
+                        "method": manage_result.get('method', ''),
+                        "timestamp": time.strftime('%Y-%m-%d %H:%M:%S')
+                    }
+                    
+                    if manage_result['success'] and action == 'status':
+                        response["status"] = manage_result.get('status', '')
+                        response["detailed_status"] = manage_result.get('detailed_status', '')
+                    elif not manage_result['success']:
+                        response["error"] = manage_result.get('error', '')
+                        response["available_actions"] = manage_result.get('available_actions', [])
+                        
+                except Exception as e:
+                    response = {"success": False, "message": f"Service management failed: {str(e)}"}
+                
+                self.wfile.write(json.dumps(response).encode())
+                
+        elif path == '/api/service/info':
+            # Service management information endpoint
+            if not self.check_auth():
+                self.send_response(401)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+                self.end_headers()
+                response = {"error": "Unauthorized"}
+                self.wfile.write(json.dumps(response).encode())
+            else:
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+                self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+                self.end_headers()
+                
+                try:
+                    # Get service management information
+                    service_info = self._get_service_management_info()
+                    response = {
+                        "success": True,
+                        "service_management": service_info,
+                        "timestamp": time.strftime('%Y-%m-%d %H:%M:%S'),
+                        "endpoint_info": {
+                            "description": "Service management information and recommendations",
+                            "available_endpoints": [
+                                "/api/service/restart - Safe service restart",
+                                "/api/service/manage - Service start/stop/status",
+                                "/api/service/info - Service management info"
+                            ]
+                        }
+                    }
+                    
+                except Exception as e:
+                    response = {"success": False, "message": f"Failed to get service info: {str(e)}"}
                 
                 self.wfile.write(json.dumps(response).encode())
                 
@@ -2841,6 +2584,293 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
                 'success': False,
                 'error': f'Restart execution error: {str(e)}',
                 'command_used': 'error'
+            }
+    
+    def _safe_restart_pi_monitor_service(self):
+        """Safely restart the pi-monitor service without system restart"""
+        try:
+            print("🔄 Attempting safe restart of pi-monitor service...")
+            
+            # Method 1: Try systemctl first (most reliable)
+            try:
+                print("  🔧 Trying systemctl restart...")
+                result = subprocess.run(['systemctl', 'restart', 'pi-monitor'], 
+                                      capture_output=True, text=True, timeout=30)
+                if result.returncode == 0:
+                    print("  ✅ systemctl restart successful")
+                    return {
+                        'success': True,
+                        'message': 'Pi-monitor service restarted successfully using systemctl',
+                        'method': 'systemctl',
+                        'command_used': 'systemctl restart pi-monitor',
+                        'safety_level': 'high',
+                        'description': 'Service restart only - no system impact'
+                    }
+                else:
+                    print(f"  ❌ systemctl restart failed: {result.stderr}")
+            except Exception as e:
+                print(f"  ❌ systemctl restart exception: {str(e)}")
+            
+            # Method 2: Try service command (fallback)
+            try:
+                print("  🔧 Trying service restart...")
+                result = subprocess.run(['service', 'pi-monitor', 'restart'], 
+                                      capture_output=True, text=True, timeout=30)
+                if result.returncode == 0:
+                    print("  ✅ service restart successful")
+                    return {
+                        'success': True,
+                        'message': 'Pi-monitor service restarted successfully using service command',
+                        'method': 'service',
+                        'command_used': 'service pi-monitor restart',
+                        'safety_level': 'high',
+                        'description': 'Service restart only - no system impact'
+                    }
+                else:
+                    print(f"  ❌ service restart failed: {result.stderr}")
+            except Exception as e:
+                print(f"  ❌ service restart exception: {str(e)}")
+            
+            # Method 3: Try Docker restart if running in container
+            try:
+                print("  🔧 Trying Docker restart...")
+                result = subprocess.run(['docker', 'restart', 'pi-monitor'], 
+                                      capture_output=True, text=True, timeout=30)
+                if result.returncode == 0:
+                    print("  ✅ Docker restart successful")
+                    return {
+                        'success': True,
+                        'message': 'Pi-monitor container restarted successfully using Docker',
+                        'method': 'docker',
+                        'command_used': 'docker restart pi-monitor',
+                        'safety_level': 'high',
+                        'description': 'Container restart only - no system impact'
+                    }
+                else:
+                    print(f"  ❌ Docker restart failed: {result.stderr}")
+            except Exception as e:
+                print(f"  ❌ Docker restart exception: {str(e)}")
+            
+            # Method 4: Try process restart (kill and restart)
+            try:
+                print("  🔧 Trying process restart...")
+                # Find pi-monitor processes
+                result = subprocess.run(['pgrep', '-f', 'pi-monitor'], 
+                                      capture_output=True, text=True, timeout=10)
+                if result.returncode == 0:
+                    pids = result.stdout.strip().split('\n')
+                    print(f"  📍 Found {len(pids)} pi-monitor processes: {pids}")
+                    
+                    # Kill processes gracefully
+                    for pid in pids:
+                        if pid.strip():
+                            try:
+                                subprocess.run(['kill', '-TERM', pid.strip()], 
+                                             capture_output=True, timeout=5)
+                                print(f"  🛑 Sent TERM signal to PID {pid}")
+                            except Exception as e:
+                                print(f"  ❌ Failed to kill PID {pid}: {str(e)}")
+                    
+                    # Wait a moment for graceful shutdown
+                    time.sleep(2)
+                    
+                    # Try to start the service again
+                    start_result = subprocess.run(['systemctl', 'start', 'pi-monitor'], 
+                                                capture_output=True, text=True, timeout=30)
+                    if start_result.returncode == 0:
+                        print("  ✅ Process restart successful")
+                        return {
+                            'success': True,
+                            'message': 'Pi-monitor service restarted successfully using process restart',
+                            'method': 'process_restart',
+                            'command_used': f'kill -TERM {len(pids)} processes + systemctl start',
+                            'safety_level': 'medium',
+                            'description': 'Process restart - minimal system impact'
+                        }
+                    else:
+                        print(f"  ❌ Process restart failed: {start_result.stderr}")
+                else:
+                    print("  ❌ No pi-monitor processes found")
+            except Exception as e:
+                print(f"  ❌ Process restart exception: {str(e)}")
+            
+            # If all methods failed
+            print("  ❌ All safe restart methods failed")
+            return {
+                'success': False,
+                'error': 'All safe restart methods failed',
+                'methods_tried': ['systemctl', 'service', 'docker', 'process_restart'],
+                'suggestions': [
+                    'Check if pi-monitor service is properly configured',
+                    'Verify systemctl/service commands are available',
+                    'Check Docker if running in container',
+                    'Review system logs for errors',
+                    'Consider manual restart as last resort'
+                ],
+                'safety_level': 'high',
+                'description': 'No restart attempted - system remains stable'
+            }
+            
+        except Exception as e:
+            print(f"❌ Safe restart error: {str(e)}")
+            return {
+                'success': False,
+                'error': f'Safe restart error: {str(e)}',
+                'safety_level': 'high',
+                'description': 'Exception occurred - no restart attempted'
+            }
+    
+    def _safe_manage_pi_monitor_service(self, action):
+        """Safely manage the pi-monitor service (start/stop/status)"""
+        try:
+            print(f"🔧 Attempting {action} of pi-monitor service...")
+            
+            if action == 'start':
+                # Try to start the service
+                try:
+                    result = subprocess.run(['systemctl', 'start', 'pi-monitor'], 
+                                          capture_output=True, text=True, timeout=30)
+                    if result.returncode == 0:
+                        return {
+                            'success': True,
+                            'message': 'Pi-monitor service started successfully',
+                            'method': 'systemctl',
+                            'action': 'start'
+                        }
+                    else:
+                        return {
+                            'success': False,
+                            'error': f'Failed to start service: {result.stderr}',
+                            'action': 'start'
+                        }
+                except Exception as e:
+                    return {
+                        'success': False,
+                        'error': f'Exception starting service: {str(e)}',
+                        'action': 'start'
+                    }
+                    
+            elif action == 'stop':
+                # Try to stop the service
+                try:
+                    result = subprocess.run(['systemctl', 'stop', 'pi-monitor'], 
+                                          capture_output=True, text=True, timeout=30)
+                    if result.returncode == 0:
+                        return {
+                            'success': True,
+                            'message': 'Pi-monitor service stopped successfully',
+                            'method': 'systemctl',
+                            'action': 'stop'
+                        }
+                    else:
+                        return {
+                            'success': False,
+                            'error': f'Failed to stop service: {result.stderr}',
+                            'action': 'stop'
+                        }
+                except Exception as e:
+                    return {
+                        'success': False,
+                        'error': f'Exception stopping service: {str(e)}',
+                        'action': 'stop'
+                    }
+                    
+            elif action == 'status':
+                # Check service status
+                try:
+                    result = subprocess.run(['systemctl', 'is-active', 'pi-monitor'], 
+                                          capture_output=True, text=True, timeout=10)
+                    status = result.stdout.strip() if result.returncode == 0 else 'unknown'
+                    
+                    # Get more detailed status
+                    detailed_result = subprocess.run(['systemctl', 'status', 'pi-monitor', '--no-pager'], 
+                                                  capture_output=True, text=True, timeout=15)
+                    detailed_status = detailed_result.stdout if detailed_result.returncode == 0 else 'Status unavailable'
+                    
+                    return {
+                        'success': True,
+                        'status': status,
+                        'detailed_status': detailed_status,
+                        'action': 'status'
+                    }
+                except Exception as e:
+                    return {
+                        'success': False,
+                        'error': f'Exception checking status: {str(e)}',
+                        'action': 'status'
+                    }
+                    
+            else:
+                return {
+                    'success': False,
+                    'error': f'Unknown action: {action}',
+                    'available_actions': ['start', 'stop', 'status']
+                }
+                
+        except Exception as e:
+            return {
+                'success': False,
+                'error': f'Service management error: {str(e)}',
+                'action': action
+            }
+    
+    def _get_service_management_info(self):
+        """Get information about available service management methods"""
+        try:
+            info = {
+                'available_methods': [],
+                'systemctl_available': False,
+                'service_available': False,
+                'docker_available': False,
+                'recommendations': []
+            }
+            
+            # Check systemctl availability
+            try:
+                result = subprocess.run(['systemctl', '--version'], 
+                                      capture_output=True, text=True, timeout=5)
+                if result.returncode == 0:
+                    info['systemctl_available'] = True
+                    info['available_methods'].append('systemctl')
+                    info['recommendations'].append('Use systemctl for service management (most reliable)')
+            except:
+                pass
+            
+            # Check service command availability
+            try:
+                result = subprocess.run(['service', '--help'], 
+                                      capture_output=True, text=True, timeout=5)
+                if result.returncode == 0:
+                    info['service_available'] = True
+                    info['available_methods'].append('service')
+                    info['recommendations'].append('Use service command as fallback')
+            except:
+                pass
+            
+            # Check Docker availability
+            try:
+                result = subprocess.run(['docker', '--version'], 
+                                      capture_output=True, text=True, timeout=5)
+                if result.returncode == 0:
+                    info['docker_available'] = True
+                    info['available_methods'].append('docker')
+                    info['recommendations'].append('Use Docker commands if running in container')
+            except:
+                pass
+            
+            # Add safety recommendations
+            info['safety_recommendations'] = [
+                'Service restart is safer than system restart',
+                'Use systemctl/service commands when possible',
+                'Avoid direct shutdown/reboot commands',
+                'Monitor service logs for issues'
+            ]
+            
+            return info
+            
+        except Exception as e:
+            return {
+                'error': f'Failed to get service management info: {str(e)}'
             }
     
     def log_message(self, format, *args):

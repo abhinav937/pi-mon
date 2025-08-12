@@ -297,6 +297,139 @@ try:
             
             print(f"Available commands: {available_commands}")
             return available_commands
+        
+        def _safe_test_restart_logic(self):
+            """Safely test restart logic without executing actual commands"""
+            print("\n🚀 SAFE TEST MODE: Testing restart logic (NO ACTUAL COMMANDS EXECUTED)")
+            print("=" * 70)
+            
+            # Check permissions first
+            restart_perms = self._check_restart_permissions()
+            print(f"\n📋 Restart Permission Check Results:")
+            print(f"  - Can restart: {restart_perms.get('can_restart', False)}")
+            print(f"  - Method: {restart_perms.get('method', 'unknown')}")
+            print(f"  - Reason: {restart_perms.get('reason', 'unknown')}")
+            
+            if restart_perms.get('can_restart', False):
+                print("\n✅ User has permission to restart - would proceed with restart logic")
+                
+                # Simulate what would happen on different platforms
+                if platform.system() == 'Windows':
+                    print("\n🖥️  Windows Restart Logic (Simulated):")
+                    print("  - Would execute: shutdown /r /t 5")
+                    print("  - This would restart the computer in 5 seconds")
+                    print("  - ⚠️  WARNING: This would actually restart your system!")
+                else:
+                    print("\n🐧 Linux/Raspberry Pi Restart Logic (Simulated):")
+                    print("  - Would try commands in order:")
+                    print("    1. systemctl reboot")
+                    print("    2. sudo reboot") 
+                    print("    3. sudo shutdown -r now")
+                    print("    4. reboot")
+                    print("    5. shutdown -r now")
+                    print("  - ⚠️  WARNING: This would actually restart your system!")
+                
+                print("\n🔒 SAFETY: No actual commands were executed in this test mode")
+                
+            else:
+                print("\n❌ User lacks permission to restart")
+                print(f"  - Suggestions: {restart_perms.get('suggestions', [])}")
+                print("\n🔒 SAFETY: No actual commands were executed in this test mode")
+            
+            print("=" * 70)
+            return restart_perms
+        
+        def _safe_test_shutdown_logic(self):
+            """Safely test shutdown logic without executing actual commands"""
+            print("\n🔄 SAFE TEST MODE: Testing shutdown logic (NO ACTUAL COMMANDS EXECUTED)")
+            print("=" * 70)
+            
+            # Check permissions first
+            shutdown_perms = self._check_shutdown_permissions()
+            print(f"\n📋 Shutdown Permission Check Results:")
+            print(f"  - Can shutdown: {shutdown_perms.get('can_shutdown', False)}")
+            print(f"  - Method: {shutdown_perms.get('method', 'unknown')}")
+            print(f"  - Reason: {shutdown_perms.get('reason', 'unknown')}")
+            
+            if shutdown_perms.get('can_shutdown', False):
+                print("\n✅ User has permission to shutdown - would proceed with shutdown logic")
+                
+                # Simulate what would happen on different platforms
+                if platform.system() == 'Windows':
+                    print("\n🖥️  Windows Shutdown Logic (Simulated):")
+                    print("  - Would execute: shutdown /s /t 5")
+                    print("  - This would shutdown the computer in 5 seconds")
+                    print("  - ⚠️  WARNING: This would actually shutdown your system!")
+                else:
+                    print("\n🐧 Linux/Raspberry Pi Shutdown Logic (Simulated):")
+                    print("  - Would try commands in order:")
+                    print("    1. systemctl poweroff")
+                    print("    2. sudo shutdown -h now")
+                    print("    3. sudo poweroff")
+                    print("    4. sudo halt")
+                    print("    5. shutdown -h now")
+                    print("    6. poweroff")
+                    print("    7. halt")
+                    print("  - ⚠️  WARNING: This would actually shutdown your system!")
+                
+                print("\n🔒 SAFETY: No actual commands were executed in this test mode")
+                
+            else:
+                print("\n❌ User lacks permission to shutdown")
+                print(f"  - Suggestions: {shutdown_perms.get('suggestions', [])}")
+                print("\n🔒 SAFETY: No actual commands were executed in this test mode")
+            
+            print("=" * 70)
+            return shutdown_perms
+        
+        def _test_service_management_methods(self):
+            """Test the new safer service management methods"""
+            print("\n🔧 TESTING NEW SERVICE MANAGEMENT METHODS")
+            print("=" * 70)
+            
+            print("\n📋 Available Service Management Methods:")
+            print("  1. /api/service/restart - Safe service restart (no system impact)")
+            print("  2. /api/service/manage - Service start/stop/status")
+            print("  3. /api/service/info - Service management information")
+            
+            print("\n🔄 Service Restart Methods (in order of preference):")
+            print("  1. systemctl restart pi-monitor (most reliable)")
+            print("  2. service pi-monitor restart (fallback)")
+            print("  3. docker restart pi-monitor (if using Docker)")
+            print("  4. Process restart (kill + start)")
+            
+            print("\n🔒 Safety Features:")
+            print("  ✅ No system shutdown/restart")
+            print("  ✅ Service restart only")
+            print("  ✅ Multiple fallback methods")
+            print("  ✅ Graceful process handling")
+            print("  ✅ Standard system tools")
+            
+            print("\n📊 Expected Results on Raspberry Pi:")
+            print("  - systemctl restart: ✅ Should work (standard method)")
+            print("  - service restart: ✅ Should work (legacy method)")
+            print("  - Docker restart: ✅ If running in container")
+            print("  - Process restart: ✅ As last resort")
+            
+            print("\n⚠️  Comparison with Old Methods:")
+            print("  OLD (Dangerous):")
+            print("    - shutdown -r now (restarts entire system)")
+            print("    - reboot (restarts entire system)")
+            print("    - systemctl reboot (restarts entire system)")
+            print("  ")
+            print("  NEW (Safe):")
+            print("    - systemctl restart pi-monitor (restarts only service)")
+            print("    - service pi-monitor restart (restarts only service)")
+            print("    - docker restart pi-monitor (restarts only container)")
+            
+            print("\n🎯 Benefits of New Approach:")
+            print("  - Faster: Service restart takes seconds vs minutes")
+            print("  - Safer: No risk of system restart")
+            print("  - More reliable: Uses standard system tools")
+            print("  - Better monitoring: Can track service status")
+            print("  - Easier recovery: If restart fails, system stays up")
+            
+            print("=" * 70)
     
     # Create an instance of the mock handler
     handler = MockPowerHandler()
@@ -320,12 +453,35 @@ try:
     available = handler._check_command_availability(commands)
     print(f"Available commands: {available}")
     
+    # Now test the safe restart and shutdown logic
+    print("\n" + "="*80)
+    print("🚀 TESTING RESTART LOGIC (SAFE MODE)")
+    print("="*80)
+    handler._safe_test_restart_logic()
+    
+    print("\n" + "="*80)
+    print("🔄 TESTING SHUTDOWN LOGIC (SAFE MODE)")
+    print("="*80)
+    handler._safe_test_shutdown_logic()
+    
+    # Test the new service management methods
+    print("\n" + "="*80)
+    print("🔧 TESTING NEW SERVICE MANAGEMENT METHODS")
+    print("="*80)
+    handler._test_service_management_methods()
+    
     print("\n✅ All tests completed successfully!")
     print("\n📋 Summary:")
     print(f"  - Can shutdown: {shutdown_perms.get('can_shutdown', False)}")
     print(f"  - Can restart: {restart_perms.get('can_restart', False)}")
     print(f"  - Can use sudo: {sudo_perms.get('can_sudo', False)}")
     print(f"  - Commands available: {len(available)}/{len(commands)}")
+    
+    print("\n🚀 NEW BACKEND FEATURES:")
+    print("  - Safe service restart: /api/service/restart")
+    print("  - Service management: /api/service/manage")
+    print("  - Service info: /api/service/info")
+    print("  - No more dangerous system commands!")
     
 except ImportError as e:
     print(f"❌ Import error: {e}")

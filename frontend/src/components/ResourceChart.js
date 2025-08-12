@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Line } from 'react-chartjs-2';
 import {
   Chart as ChartJS,
@@ -35,6 +35,8 @@ const ResourceChart = ({ unifiedClient }) => {
     network: { labels: [], data: [] },
   });
   const maxDataPoints = 100; // Increased for better visualization
+  
+  const chartRef = useRef(null);  // Ref to chart instance
   
   // Load time range from localStorage or default to 60 minutes
   const [timeRange, setTimeRange] = useState(() => {
@@ -105,23 +107,27 @@ const ResourceChart = ({ unifiedClient }) => {
         if (response && response.metrics) {
           const metrics = response.metrics;
           
-          setChartData(prevData => {
-            const newData = { ...prevData };
-            
-            // Process historical data
-            const labels = metrics.map(m => new Date(m.timestamp * 1000).toLocaleTimeString());
-            const cpuData = metrics.map(m => m.cpu_percent || 0);
-            const memoryData = metrics.map(m => m.memory_percent || 0);
-            const temperatureData = metrics.map(m => m.temperature || 0);
-            const diskData = metrics.map(m => m.disk_percent || 0);
-            
-            newData.cpu = { labels, data: cpuData };
-            newData.memory = { labels, data: memoryData };
-            newData.temperature = { labels, data: temperatureData };
-            newData.disk = { labels, data: diskData };
-            
-            return newData;
+          // Process historical data with better timestamp handling
+          const labels = metrics.map(m => {
+            const date = new Date(m.timestamp * 1000);
+            return timeRange > 60 ? date.toLocaleString() : date.toLocaleTimeString();  // Full date-time for longer ranges
           });
+          const cpuData = metrics.map(m => m.cpu_percent || 0);
+          const memoryData = metrics.map(m => m.memory_percent || 0);
+          const temperatureData = metrics.map(m => m.temperature || 0);
+          const diskData = metrics.map(m => m.disk_percent || 0);
+          
+          setChartData({ 
+            cpu: { labels, data: cpuData },
+            memory: { labels, data: memoryData },
+            temperature: { labels, data: temperatureData },
+            disk: { labels, data: diskData }
+          });
+          
+          // Smooth update if chart exists
+          if (chartRef.current) {
+            chartRef.current.update();
+          }
         }
       } catch (error) {
         console.error('Failed to fetch historical metrics:', error);
@@ -130,12 +136,11 @@ const ResourceChart = ({ unifiedClient }) => {
 
     fetchHistoricalData();
     
-    // Set up interval to refresh historical data based on selected time range
-    const refreshInterval = Math.max(30000, timeRange * 1000 / 10); // Refresh every 30s or 1/10th of time range, whichever is larger
+    const refreshInterval = Math.max(30000, timeRange * 1000 / 10);
     const interval = setInterval(fetchHistoricalData, refreshInterval);
     
     return () => clearInterval(interval);
-  }, [unifiedClient, timeRange]); // Only re-run when timeRange changes
+  }, [unifiedClient, timeRange]);
 
   const getChartConfig = (metric) => {
     const isDarkMode = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
@@ -223,19 +228,25 @@ const ResourceChart = ({ unifiedClient }) => {
         },
         scales: {
           x: {
-            display: true,
-            title: {
-              display: true,
-              text: 'Time',
-              color: isDarkMode ? '#9ca3af' : '#6b7280',
+            // Improved x-axis config
+            type: 'time',  // Use time scale for better handling
+            time: {
+              unit: timeRange > 60 ? 'hour' : 'minute',  // Adjust units based on range
+              displayFormats: {
+                minute: 'HH:mm',
+                hour: 'MMM d, HH:mm'
+              }
             },
             ticks: {
-              color: isDarkMode ? '#9ca3af' : '#6b7280',
               maxTicksLimit: 10,
+              autoSkip: true,
+              maxRotation: 45,
+              minRotation: 0
             },
-            grid: {
-              color: isDarkMode ? '#374151' : '#e5e7eb',
-            },
+            title: {
+              display: true,
+              text: 'Time'
+            }
           },
           y: {
             display: true,
@@ -262,7 +273,8 @@ const ResourceChart = ({ unifiedClient }) => {
           },
         },
         animation: {
-          duration: 300,
+          duration: 500,  // Shorter animation for refreshes
+          easing: 'easeOutCubic'
         },
       },
     };
@@ -365,7 +377,7 @@ const ResourceChart = ({ unifiedClient }) => {
                     }))
                   }
                 };
-                return <Line {...validatedData} />;
+                return <Line ref={chartRef} {...validatedData} />;
               } catch (error) {
                 console.error('Error rendering chart:', error);
                 return (

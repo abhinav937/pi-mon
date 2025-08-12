@@ -1282,23 +1282,34 @@ class SimplePiMonitorHandler(BaseHTTPRequestHandler):
         self._set_common_headers()
         try:
             minutes = int(query_params.get('minutes', ['60'])[0])
+            include_date = query_params.get('include_date', ['true' if minutes > 60 else 'false'])[0].lower() == 'true'
         except Exception:
             minutes = 60
+            include_date = minutes > 60
         
         # Get metrics from database
         metrics_list = metrics_collector.get_metrics_history(minutes)
         
+        # Enhance with formatted timestamps if requested
+        enhanced_metrics = []
+        for metric in metrics_list:
+            timestamp = metric['timestamp']
+            formatted_time = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(timestamp)) if include_date else time.strftime('%H:%M:%S', time.localtime(timestamp))
+            enhanced_metric = {**metric, 'formatted_time': formatted_time}
+            enhanced_metrics.append(enhanced_metric)
+        
         response = {
-            'metrics': metrics_list,
+            'metrics': enhanced_metrics,
             'collection_status': {
                 'active': metrics_collector.is_collecting,
                 'interval': int(metrics_collector.collection_interval),
-                'total_points': len(metrics_list)
+                'total_points': len(enhanced_metrics)
             },
             'database_info': {
                 'source': 'database',
                 'persistent': True,
-                'survives_restart': True
+                'survives_restart': True,
+                'formatted': include_date
             }
         }
         self.wfile.write(json.dumps(response).encode())

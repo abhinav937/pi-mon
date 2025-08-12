@@ -10,6 +10,7 @@ import ConnectionStatus from './components/ConnectionStatus';
 
 // Tailwind CSS imports
 import './index.css';
+import 'material-symbols/outlined.css';
 
 // Lazy load components for better performance
 const Dashboard = lazy(() => import('./components/Dashboard'));
@@ -311,7 +312,7 @@ function App() {
                     }`}
                   >
                     <div className="flex items-center space-x-3">
-                      <i className="material-icons text-2xl">{tab.icon}</i>
+                      <span className="material-symbols-outlined text-2xl">{tab.icon}</span>
                       <div>
                         <div className="font-medium">{tab.name}</div>
                         <div className="text-sm text-gray-500 dark:text-gray-400">{tab.description}</div>
@@ -384,7 +385,7 @@ function App() {
                   }`}
                   title={tab.description}
                 >
-                  <i className="material-icons text-xl mr-2">{tab.icon}</i>
+                  <span className="material-symbols-outlined text-xl mr-2">{tab.icon}</span>
                   {tab.name}
                 </button>
               ))}

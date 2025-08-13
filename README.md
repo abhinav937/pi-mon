@@ -10,6 +10,7 @@ A dead simple Raspberry Pi monitoring system that replaces complex frameworks wi
 - **Minimal dependencies** - Only psutil for system monitoring
 - **Simple deployment** - One script to rule them all
 - **Subdomain support** - Easy custom domain setup
+- **🔒 Enhanced Security** - HTTPS/SSL, security headers, threat detection
 
 ## 🚀 Enhanced Features (RPi-Monitor Inspired)
 
@@ -19,6 +20,42 @@ A dead simple Raspberry Pi monitoring system that replaces complex frameworks wi
 - **Advanced Charts** - Time-range selectable historical charts
 - **Detailed System Information** - CPU details, memory breakdown, network interfaces
 - **Live Dashboard Updates** - Real-time metrics without page refresh
+
+## 🔒 Security Features
+
+Pi Monitor now includes enterprise-grade security features:
+
+- **HTTPS/SSL Encryption** - Self-signed certificates for development, production-ready for CA certificates
+- **Security Headers** - XSS protection, clickjacking prevention, content security policy
+- **Rate Limiting** - Configurable request limits with IP-based tracking
+- **Threat Detection** - XSS, SQL injection, path traversal, and header injection protection
+- **Input Validation** - Content length limits, file type restrictions, input sanitization
+- **Authentication Security** - Failed attempt tracking, IP lockouts, CSRF protection
+
+### Running the Secure Server
+
+```bash
+# Quick deployment with SSL certificates
+cd scripts
+./deploy_secure.sh          # Linux/macOS
+deploy_secure.bat           # Windows
+
+# Or manual setup
+cd backend
+python secure_server.py
+```
+
+### Security Configuration
+
+```bash
+# View security settings
+cat backend/security_config.json
+
+# Test security features
+python test_security.py
+```
+
+For detailed security information, see [SECURITY_README.md](SECURITY_README.md).
 
 ## 🚀 Quick Start
 
@@ -37,12 +74,15 @@ nano config.json
 ```bash
 # Deploy backend, frontend, and subdomain
 ./deploy.sh
+
+# Or deploy with enhanced security
+./scripts/deploy_secure.sh
 ```
 
 ### 3. Access Your System
 
-- **Backend API**: http://localhost:5001
-- **Frontend Dashboard**: http://localhost:80
+- **Backend API**: http://localhost:5001 (or https://localhost:5001 for secure server)
+- **Frontend Dashboard**: http://localhost:80 (or https://localhost:443 for secure deployment)
 - **Health Check**: http://localhost:5001/health
 
 ## 🌐 Subdomain Configuration
@@ -58,6 +98,12 @@ The `./deploy.sh` script automatically:
 - ✅ Sets up firewall rules (port 80 open)
 - ✅ Creates systemd services
 - ✅ Tests the configuration
+
+**Enhanced Security Deployment** (`./scripts/deploy_secure.sh`):
+- ✅ Generates SSL certificates
+- ✅ Configures HTTPS with security headers
+- ✅ Sets up threat detection and rate limiting
+- ✅ Creates secure backend service
 
 ### DNS Setup Required
 
@@ -76,7 +122,8 @@ The `./deploy.sh` script automatically:
 ### After DNS Configuration
 
 Once DNS propagates (usually 15 minutes to 2 hours), your site will be accessible at:
-**http://pi.cabhinav.com**
+- **HTTP**: http://pi.cabhinav.com
+- **HTTPS**: https://pi.cabhinav.com (with secure deployment)
 
 ### Testing Your Setup
 
@@ -84,11 +131,15 @@ Once DNS propagates (usually 15 minutes to 2 hours), your site will be accessibl
 # Test local access
 curl -I http://localhost
 
+# Test HTTPS (secure deployment)
+curl -I -k https://localhost
+
 # Test subdomain locally
 curl -H "Host: pi.cabhinav.com" http://127.0.0.1
 
 # Test from external network
 curl -I http://pi.cabhinav.com
+curl -I -k https://pi.cabhinav.com
 ```
 
 ### Useful Commands

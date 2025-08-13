@@ -4,14 +4,11 @@
 
 set -euo pipefail
 
-BLUE='\033[0;34m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-RED='\033[0;31m'
-NC='\033[0m'
-
-echo -e "${BLUE}🥧 Pi Monitor - Smart Deployment Script${NC}"
-echo "=============================================="
+BLUE=''
+GREEN=''
+YELLOW=''
+RED=''
+NC=''
 
 # Configuration
 DOMAIN="pi.cabhinav.com"
@@ -34,29 +31,26 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Check if running as root or with sudo
 if [[ "$EUID" -ne 0 ]]; then
-  echo -e "${RED}❌ This script must be run with sudo${NC}"
+  echo "ERROR: This script must be run with sudo"
   exit 1
 fi
 
-echo -e "${BLUE}📋 Configuration:${NC}"
-echo "   Domain: $DOMAIN"
-echo "   Static IP: $STATIC_IP"
-echo "   Web Root: $WEB_ROOT"
-echo "   Pi Mon Dir: $PI_MON_DIR"
-echo "   Virtual Env: $VENV_DIR"
+# Quiet mode: suppress stdout. Use FD 3 for minimal notices (version updates), stderr for errors.
+exec 3>&1
+exec 1>/dev/null
 
 # =============================================================================
 # 1. CHECK CURRENT STATE
 # =============================================================================
-echo -e "\n${BLUE}🔍 Checking current system state...${NC}"
+echo "Checking state..." >&3
 
 # Check if user exists
 USER_EXISTS=false
 if id "abhinav" &>/dev/null; then
-    echo -e "${GREEN}✅ User 'abhinav' exists${NC}"
+    :
     USER_EXISTS=true
 else
-    echo -e "${YELLOW}⚠️  User 'abhinav' does not exist${NC}"
+    echo "WARN: User 'abhinav' does not exist" >&2
 fi
 
 # Ensure deploy state directory exists
@@ -105,16 +99,16 @@ fi
 if [ "$FRONTEND_PRESENT" = false ]; then
 	NEED_FRONTEND_BUILD=true
 elif [ -n "$SOURCE_FRONTEND_VERSION" ] && [ -n "$DEPLOYED_FRONTEND_VERSION" ] && [ "$SOURCE_FRONTEND_VERSION" != "$DEPLOYED_FRONTEND_VERSION" ]; then
-	echo -e "${YELLOW}ℹ️  Frontend version change detected: $DEPLOYED_FRONTEND_VERSION -> $SOURCE_FRONTEND_VERSION${NC}"
+    echo "UPDATE: Frontend version $DEPLOYED_FRONTEND_VERSION -> $SOURCE_FRONTEND_VERSION" >&3
 	NEED_FRONTEND_BUILD=true
 elif [ -n "$SOURCE_FRONTEND_VERSION" ] && [ -z "$DEPLOYED_FRONTEND_VERSION" ]; then
-    echo -e "${YELLOW}ℹ️  Frontend version file missing in deployment; will build version $SOURCE_FRONTEND_VERSION${NC}"
+    echo "UPDATE: Frontend version file missing; building $SOURCE_FRONTEND_VERSION" >&3
     NEED_FRONTEND_BUILD=true
 elif [ -n "$CURRENT_FRONTEND_CHECKSUM" ]; then
     if [ -f "$FRONTEND_CHECKSUM_FILE" ]; then
         PREV_FRONTEND_CHECKSUM=$(cat "$FRONTEND_CHECKSUM_FILE" 2>/dev/null || true)
         if [ "$CURRENT_FRONTEND_CHECKSUM" != "$PREV_FRONTEND_CHECKSUM" ]; then
-            echo -e "${YELLOW}ℹ️  Frontend source changes detected (checksum updated)${NC}"
+            echo "UPDATE: Frontend source changes detected (checksum)" >&3
             NEED_FRONTEND_BUILD=true
         fi
     else
@@ -128,7 +122,7 @@ if [ -n "$CURRENT_FRONTEND_ENV_SIG" ]; then
     if [ -f "$FRONTEND_ENV_SIG_FILE" ]; then
         PREV_FRONTEND_ENV_SIG=$(cat "$FRONTEND_ENV_SIG_FILE" 2>/dev/null || true)
         if [ "$CURRENT_FRONTEND_ENV_SIG" != "$PREV_FRONTEND_ENV_SIG" ]; then
-            echo -e "${YELLOW}ℹ️  Frontend environment changed; rebuild required${NC}"
+            echo "UPDATE: Frontend environment changed; rebuild required" >&3
             NEED_FRONTEND_BUILD=true
         fi
     else
@@ -149,7 +143,7 @@ if [ -d "$PI_MON_DIR/backend" ]; then
         if [ -f "$BACKEND_CHECKSUM_FILE" ]; then
             PREV_BACKEND_CHECKSUM=$(cat "$BACKEND_CHECKSUM_FILE" 2>/dev/null || true)
             if [ "$CURRENT_BACKEND_CHECKSUM" != "$PREV_BACKEND_CHECKSUM" ]; then
-                echo -e "${YELLOW}ℹ️  Backend changes detected (checksum updated)${NC}"
+                echo "UPDATE: Backend changes detected (checksum)" >&3
                 NEED_BACKEND_RESTART=true
             fi
         else
@@ -206,28 +200,19 @@ fi
 # Check if Nginx is configured
 NGINX_CONFIGURED=false
 if [ -f "$NGINX_SITES_AVAILABLE/$DOMAIN" ] && [ -L "$NGINX_SITES_ENABLED/$DOMAIN" ]; then
-    echo -e "${GREEN}✅ Nginx site is configured for $DOMAIN${NC}"
     NGINX_CONFIGURED=true
-else
-    echo -e "${YELLOW}⚠️  Nginx site is not configured for $DOMAIN${NC}"
 fi
 
 # Check if frontend is built
 FRONTEND_BUILT=false
 if [ -f "$WEB_ROOT/index.html" ]; then
-    echo -e "${GREEN}✅ Frontend is built in $WEB_ROOT${NC}"
     FRONTEND_BUILT=true
-else
-    echo -e "${YELLOW}⚠️  Frontend is not built${NC}"
 fi
 
 # Check if backend is accessible
 BACKEND_ACCESSIBLE=false
 if curl -fsS http://127.0.0.1:5001/health &>/dev/null; then
-    echo -e "${GREEN}✅ Backend is accessible on port 5001${NC}"
     BACKEND_ACCESSIBLE=true
-else
-    echo -e "${YELLOW}⚠️  Backend is not accessible on port 5001${NC}"
 fi
 
 # =============================================================================
@@ -363,22 +348,22 @@ EOF
         
         # Check if service started successfully
         if systemctl is-active --quiet pi-monitor-backend.service; then
-            echo -e "${GREEN}✅ Backend service started successfully${NC}"
+            echo "Backend service started" >&3
         else
-            echo -e "${RED}❌ Backend service failed to start${NC}"
+            echo "ERROR: Backend service failed to start" >&2
             systemctl status pi-monitor-backend.service
             exit 1
         fi
     fi
 else
-    echo -e "\n${BLUE}✅ Backend service is already running${NC}"
+    :
 fi
 
 # =============================================================================
 # 4.1 APPLY BACKEND UPDATES IF CHANGED
 # =============================================================================
 if [ "$NEED_BACKEND_RESTART" = true ]; then
-    echo -e "\n${BLUE}♻️  Applying backend updates (restart required)...${NC}"
+    echo "UPDATE: Restarting backend (changes detected)" >&3
     if [ -f "$PI_MON_DIR/backend/requirements.txt" ]; then
         echo "Updating Python dependencies (if needed)..."
         "$VENV_DIR/bin/pip" install -r "$PI_MON_DIR/backend/requirements.txt" --upgrade
@@ -387,24 +372,24 @@ if [ "$NEED_BACKEND_RESTART" = true ]; then
     systemctl restart pi-monitor-backend.service || true
     sleep 3
     if systemctl is-active --quiet pi-monitor-backend.service; then
-        echo -e "${GREEN}✅ Backend service restarted${NC}"
+        echo "Backend service restarted" >&3
         echo "$CURRENT_BACKEND_CHECKSUM" > "$BACKEND_CHECKSUM_FILE"
         chown abhinav:abhinav "$BACKEND_CHECKSUM_FILE"
     else
-        echo -e "${RED}❌ Backend service failed to restart${NC}"
+        echo "ERROR: Backend service failed to restart" >&2
         systemctl status pi-monitor-backend.service --no-pager -l || true
         journalctl -u pi-monitor-backend.service --no-pager -n 20 || true
         exit 1
     fi
 else
-    echo -e "\n${BLUE}✅ No backend changes detected; restart not required${NC}"
+    :
 fi
 
 # =============================================================================
 # 5. BUILD FRONTEND (if needed)
 # =============================================================================
 if [ "$NEED_FRONTEND_BUILD" = true ]; then
-    echo -e "\n${BLUE}🔨 Building frontend...${NC}"
+    echo "UPDATE: Building frontend" >&3
     
     # Install Node.js if not available
     if ! command -v npm &>/dev/null; then
@@ -434,7 +419,7 @@ EOF
     chown -R www-data:www-data "$WEB_ROOT"
     
     cd "$SCRIPT_DIR"
-    echo -e "${GREEN}✅ Frontend built and deployed${NC}"
+    echo "Frontend built and deployed" >&3
     # Persist frontend checksum if available
     if [ -n "$CURRENT_FRONTEND_CHECKSUM" ]; then
         echo "$CURRENT_FRONTEND_CHECKSUM" > "$FRONTEND_CHECKSUM_FILE"
@@ -445,14 +430,14 @@ EOF
         chown abhinav:abhinav "$FRONTEND_ENV_SIG_FILE"
     fi
 else
-    echo -e "\n${BLUE}✅ Frontend build up-to-date (no rebuild needed)${NC}"
+    :
 fi
 
 # =============================================================================
 # 6. SETUP NGINX (if needed)
 # =============================================================================
 if [ "$NGINX_CONFIGURED" = false ]; then
-    echo -e "\n${BLUE}🌐 Setting up Nginx...${NC}"
+    echo "Setting up Nginx..." >&3
     
     # Install Nginx if not available
     if ! command -v nginx &>/dev/null; then
@@ -512,92 +497,88 @@ EOF
     # Test and restart Nginx
     nginx -t
     systemctl restart nginx
-    echo -e "${GREEN}✅ Nginx configured and started${NC}"
+    echo "Nginx configured and started" >&3
 else
-    echo -e "\n${BLUE}✅ Nginx is already configured${NC}"
+    :
 fi
 
 # =============================================================================
 # 7. FINAL VERIFICATION
 # =============================================================================
-echo -e "\n${BLUE}🧪 Final verification...${NC}"
+echo "Verifying..." >&3
 sleep 5
 
 # Check backend service
 if systemctl is-active --quiet pi-monitor-backend.service; then
-    echo -e "${GREEN}✅ Backend service is running${NC}"
+    :
 else
-    echo -e "${RED}❌ Backend service is not running${NC}"
-    echo -e "${YELLOW}📋 Service status:${NC}"
+    echo "ERROR: Backend service is not running" >&2
+    echo "Service status:" >&2
     systemctl status pi-monitor-backend.service --no-pager -l
-    echo -e "${YELLOW}📋 Recent logs:${NC}"
+    echo "Recent logs:" >&2
     journalctl -u pi-monitor-backend.service --no-pager -n 10
-    echo -e "${RED}❌ Backend service failed to start properly${NC}"
+    echo "ERROR: Backend service failed to start properly" >&2
     exit 1
 fi
 
 # Check backend health
-echo -e "\n${BLUE}🏥 Testing backend health...${NC}"
+echo "Checking backend health..." >&3
 if curl -fsS http://127.0.0.1:5001/health &>/dev/null; then
-    echo -e "${GREEN}✅ Backend health check passed${NC}"
-    echo "Health response:"
-    curl -s http://127.0.0.1:5001/health | head -5
+    :
 else
-    echo -e "${RED}❌ Backend health check failed${NC}"
-    echo -e "${YELLOW}🔍 Checking what's happening on port 5001...${NC}"
+    echo "ERROR: Backend health check failed" >&2
+    echo "Checking what's happening on port 5001..." >&2
     if netstat -tlnp 2>/dev/null | grep :5001; then
-        echo -e "${YELLOW}⚠️  Port 5001 is listening but health check failed${NC}"
+        echo "WARN: Port 5001 is listening but health check failed" >&2
     else
-        echo -e "${RED}❌ Port 5001 is not listening${NC}"
+        echo "ERROR: Port 5001 is not listening" >&2
     fi
     exit 1
 fi
 
 # Check Nginx
-echo -e "\n${BLUE}🌐 Checking Nginx...${NC}"
+echo "Checking Nginx..." >&3
 if systemctl is-active --quiet nginx; then
-    echo -e "${GREEN}✅ Nginx is running${NC}"
+    :
 else
-    echo -e "${RED}❌ Nginx is not running${NC}"
+    echo "ERROR: Nginx is not running" >&2
     systemctl status nginx --no-pager -l
     exit 1
 fi
 
 # Check frontend
-echo -e "\n${BLUE}🎨 Testing frontend...${NC}"
+echo "Testing frontend..." >&3
 if curl -fsS http://localhost/ &>/dev/null; then
-    echo -e "${GREEN}✅ Frontend is accessible${NC}"
-    echo "Frontend response:"
-    curl -s http://localhost/ | grep -E "(title|Pi Monitor|React)" | head -3
+    :
 else
-    echo -e "${YELLOW}⚠️  Frontend test failed (may be starting)${NC}"
-    echo -e "${YELLOW}🔍 Checking Nginx configuration...${NC}"
+    echo "WARN: Frontend test failed (may be starting)" >&2
+    echo "Checking Nginx configuration..." >&2
     nginx -t
 fi
 
 # Check all services are properly configured
-echo -e "\n${BLUE}🔧 Service configuration check...${NC}"
+echo "Checking service enablement..." >&3
 
 # Check if service is enabled
 if systemctl is-enabled --quiet pi-monitor-backend.service; then
-    echo -e "${GREEN}✅ Backend service is enabled (auto-start on boot)${NC}"
+    :
 else
-    echo -e "${RED}❌ Backend service is not enabled${NC}"
+    echo "WARN: Backend service is not enabled" >&2
     systemctl enable pi-monitor-backend.service
-    echo -e "${GREEN}✅ Backend service now enabled${NC}"
+    echo "Backend service now enabled" >&3
 fi
 
 # Check if Nginx is enabled
 if systemctl is-enabled --quiet nginx; then
-    echo -e "${GREEN}✅ Nginx is enabled (auto-start on boot)${NC}"
+    :
 else
-    echo -e "${RED}❌ Nginx is not enabled${NC}"
+    echo "WARN: Nginx is not enabled" >&2
     systemctl enable nginx
-    echo -e "${GREEN}✅ Nginx now enabled${NC}"
+    echo "Nginx now enabled" >&3
 fi
 
 # Final comprehensive test
-echo -e "\n${BLUE}🎯 Running comprehensive system test...${NC}"
+echo "Running API checks..." >&3
 
 # Prepare auth header from .env if available
 API_KEY=""
@@ -610,62 +591,34 @@ if [ -n "$API_KEY" ]; then
 fi
 
 # Test API endpoints (use auth where required)
-echo "Testing API endpoints:"
+:
 ENDPOINTS=("/health" "/api/system" "/api/metrics/history?minutes=5" "/api/metrics/database")
 for endpoint in "${ENDPOINTS[@]}"; do
     if [ "$endpoint" = "/health" ]; then
         if curl -fsS "http://127.0.0.1:5001$endpoint" &>/dev/null; then
-            echo -e "  ${GREEN}✅ $endpoint${NC}"
+            :
         else
-            echo -e "  ${RED}❌ $endpoint${NC}"
+            echo "ERROR: $endpoint failed" >&2
         fi
     else
         if [ -n "$AUTH_HEADER" ]; then
             if curl -fsS -H "$AUTH_HEADER" "http://127.0.0.1:5001$endpoint" &>/dev/null; then
-                echo -e "  ${GREEN}✅ $endpoint${NC}"
+                :
             else
-                echo -e "  ${RED}❌ $endpoint${NC}"
+                echo "ERROR: $endpoint failed" >&2
             fi
         else
-            echo -e "  ${YELLOW}⚠️  Skipping $endpoint (no API key available)${NC}"
+            echo "WARN: Skipping $endpoint (no API key available)" >&2
         fi
     fi
 done
 
 # Test Nginx proxy to health
-echo "Testing Nginx proxy:"
-if curl -fsS "http://localhost/health" &>/dev/null; then
-    echo -e "  ${GREEN}✅ Nginx proxy to /health${NC}"
-else
-    echo -e "  ${RED}❌ Nginx proxy to /health${NC}"
-fi
+echo "Checking Nginx proxy..." >&3
+if curl -fsS "http://localhost/health" &>/dev/null; then :; else echo "ERROR: Nginx proxy to /health failed" >&2; fi
 
 # Check system resources
-echo -e "\n${BLUE}💾 System resource check...${NC}"
-echo "Memory usage: $(free -h | grep Mem | awk '{print $3"/"$2}')"
-echo "Disk usage: $(df -h / | tail -1 | awk '{print $5}')"
-echo "Load average: $(uptime | awk -F'load average:' '{print $2}')"
+:
 
 # Success summary
-echo -e "\n${GREEN}🎉 All systems operational!${NC}"
-
-echo -e "\n${GREEN}🎉 Deployment complete!${NC}"
-echo ""
-echo -e "${BLUE}🌐 Access URLs:${NC}"
-echo "   Local: http://localhost/"
-echo "   Subdomain: http://$DOMAIN/"
-echo "   Production IP: $PRODUCTION_URL"
-echo "   Backend API: $PRODUCTION_URL:$BACKEND_PORT"
-echo ""
-echo -e "${BLUE}👤 User:${NC} abhinav (password: raspberry - change this!)"
-echo -e "${BLUE}📁 Directory:${NC} $PI_MON_DIR"
-echo -e "${BLUE}🔧 Service:${NC} pi-monitor-backend.service"
-echo -e "${BLUE}🌐 Web Root:${NC} $WEB_ROOT"
-echo -e "${BLUE}🔌 Backend Port:${NC} $BACKEND_PORT"
-echo ""
-echo -e "${YELLOW}🔧 Useful commands:${NC}"
-echo "   Check backend: systemctl status pi-monitor-backend.service"
-echo "   View backend logs: journalctl -u pi-monitor-backend.service -f"
-echo "   Test API health: curl http://127.0.0.1:5001/health"
-echo "   Check Nginx: systemctl status nginx"
-echo "   Test Nginx config: nginx -t"
+echo "Done." >&3

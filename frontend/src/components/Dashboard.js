@@ -393,33 +393,7 @@ const Dashboard = ({ unifiedClient }) => {
         </div>
       )}
 
-      {/* System Status Summary */}
-      <div className="metric-card">
-        <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-          System Status
-        </h3>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div className="flex items-center space-x-3">
-            <div className={`w-3 h-3 rounded-full ${(currentData.cpu_percent || 0) > 80 ? 'bg-red-500' : (currentData.cpu_percent || 0) > 60 ? 'bg-yellow-500' : 'bg-green-500'}`}></div>
-            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">CPU</span>
-          </div>
-          <div className="flex items-center space-x-3">
-            <div className={`w-3 h-3 rounded-full ${(currentData.memory_percent || 0) > 80 ? 'bg-red-500' : (currentData.memory_percent || 0) > 60 ? 'bg-yellow-500' : 'bg-green-500'}`}></div>
-            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Memory</span>
-          </div>
-          <div className="flex items-center space-x-3">
-            <div className={`w-3 h-3 rounded-full ${(currentData.disk_percent || 0) > 90 ? 'bg-red-500' : (currentData.disk_percent || 0) > 70 ? 'bg-yellow-500' : 'bg-green-500'}`}></div>
-            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Storage</span>
-          </div>
-          <div className="flex items-center space-x-3">
-            <div className={`w-3 h-3 rounded-full ${(currentData.temperature || 0) > 70 ? 'bg-red-500' : (currentData.temperature || 0) > 60 ? 'bg-yellow-500' : 'bg-green-500'}`}></div>
-            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Temperature</span>
-          </div>
-        </div>
-        <div className="mt-4 text-sm text-gray-500 dark:text-gray-400">
-          Last updated: {currentData.timestamp ? new Date(currentData.timestamp).toLocaleString() : 'Unknown'}
-        </div>
-      </div>
+      
     </div>
   );
 };

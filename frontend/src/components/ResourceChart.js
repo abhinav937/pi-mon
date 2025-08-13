@@ -37,7 +37,11 @@ const ResourceChart = ({ unifiedClient }) => {
     network: { labels: [], data: [] },
   });
   const [isLoadingHistorical, setIsLoadingHistorical] = useState(true);
-  const maxDataPoints = 100; // Increased for better visualization
+  const SAMPLE_INTERVAL_SECONDS = 5; // Expected real-time sample interval
+  const [maxDataPoints, setMaxDataPoints] = useState(() => {
+    const estimated = Math.ceil((timeRange * 60) / SAMPLE_INTERVAL_SECONDS);
+    return Math.max(100, estimated);
+  });
   
   const chartRef = useRef(null);  // Ref to chart instance
   
@@ -47,9 +51,11 @@ const ResourceChart = ({ unifiedClient }) => {
     return saved ? parseInt(saved) : 120; // Default to last 2 hours
   });
 
-  // Save time range to localStorage whenever it changes
+  // Save time range to localStorage whenever it changes and recompute max points
   useEffect(() => {
     localStorage.setItem('pi-monitor-time-range', timeRange.toString());
+    const estimated = Math.ceil((timeRange * 60) / SAMPLE_INTERVAL_SECONDS);
+    setMaxDataPoints(Math.max(100, estimated));
   }, [timeRange]);
 
   // Listen for real-time updates
@@ -59,7 +65,8 @@ const ResourceChart = ({ unifiedClient }) => {
     const originalOnDataUpdate = unifiedClient.onDataUpdate;
     unifiedClient.onDataUpdate = (data) => {
       if (data.type === 'initial_stats' || data.type === 'periodic_update' || data.type === 'mqtt_update') {
-        const timestamp = new Date().toLocaleTimeString();
+        const now = new Date();
+        const timestamp = timeRange > 60 ? now.toLocaleString() : now.toLocaleTimeString();
         const systemData = data.data || data;
 
         setChartData(prevData => {
@@ -111,7 +118,7 @@ const ResourceChart = ({ unifiedClient }) => {
     return () => {
       unifiedClient.onDataUpdate = originalOnDataUpdate;
     };
-  }, [unifiedClient]);
+  }, [unifiedClient, timeRange, maxDataPoints]);
 
   // Fetch historical metrics data - only when timeRange changes or component mounts
   useEffect(() => {

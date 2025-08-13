@@ -119,7 +119,7 @@ class MetricsCollector:
                         # Keep in memory cache for quick access
                         self.recent_cache.append(metrics)
                         # Store in database for persistence
-                        from core.database import MetricsDatabase
+                        from database import MetricsDatabase
                         db = MetricsDatabase()
                         if db.insert_metrics(metrics):
                             self.collection_count += 1
@@ -218,7 +218,7 @@ class MetricsCollector:
         """Get metrics history for the last N minutes"""
         try:
             # Try to get from database first
-            from core.database import MetricsDatabase
+            from database import MetricsDatabase
             db = MetricsDatabase()
             db_metrics = db.get_metrics_history(minutes)
             if db_metrics:
@@ -281,7 +281,7 @@ class MetricsCollector:
                 return self.recent_cache[-1]
             
             # Fallback to database
-            from core.database import MetricsDatabase
+            from database import MetricsDatabase
             db = MetricsDatabase()
             db_metrics = db.get_metrics_history(1, 1)  # Last 1 minute, 1 record
             return db_metrics[0] if db_metrics else None
@@ -304,7 +304,7 @@ class MetricsCollector:
     def get_stats(self):
         """Get collection statistics"""
         try:
-            from core.database import MetricsDatabase
+            from database import MetricsDatabase
             db = MetricsDatabase()
             db_stats = db.get_database_stats()
         except Exception as e:

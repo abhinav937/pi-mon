@@ -10,8 +10,8 @@ import os
 # Add the backend directory to the path (parent of core/)
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from services.server import PiMonitorServer
-from config.config import config
+from server import PiMonitorServer
+from config import config
 
 def main():
     """Main entry point for Pi Monitor"""

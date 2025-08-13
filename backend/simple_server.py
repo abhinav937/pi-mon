@@ -5,7 +5,7 @@ This file maintains backward compatibility by importing from the modular structu
 """
 
 # Import and run the main server
-from core.main import main
+from main import main
 
 if __name__ == '__main__':
     main()

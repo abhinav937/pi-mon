@@ -29,10 +29,10 @@ def main():
         
         # Test imports first
         print("🧪 Testing server components...")
-        from config.config import config
+        from config import config
         print("✅ Configuration loaded")
         
-        from services.server import PiMonitorServer
+        from server import PiMonitorServer
         print("✅ Server module loaded")
         
         # Create and start server

@@ -38,7 +38,7 @@ class UnifiedClient {
   constructor(options = {}) {
     logDebug('Initializing UnifiedClient', { options });
     
-    // Resolve API base URL. Prefer explicit env, else use Nginx proxy (port 80) in production
+    // Resolve API base URL. Prefer explicit env, else use Nginx proxy (port 443 for HTTPS) in production
     const envUrl = process.env.REACT_APP_SERVER_URL || process.env.REACT_APP_API_BASE_URL;
     const inferredUrl = (() => {
       const host = window.location.hostname;
@@ -47,7 +47,7 @@ class UnifiedClient {
       if (host === 'localhost' || host === '127.0.0.1') {
         return `http://${host}:5001`;
       }
-      // In production, use Nginx proxy on port 80 (no port number needed)
+      // In production, use Nginx proxy on port 443 for HTTPS (no port number needed)
       if (host !== 'localhost' && host !== '127.0.0.1') {
         return `${isHttps ? 'https' : 'http'}://${host}`;
       }

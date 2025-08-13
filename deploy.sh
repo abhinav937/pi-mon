@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Pi Monitor - Smart Deployment Script (efficient, state-aware)
+# Pi Monitor : Smart Deployment Script (efficient, state-aware)
 # Only sets up what's missing or needs updating
 
 set -euo pipefail

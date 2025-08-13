@@ -7,8 +7,8 @@ Wants=network.target
 Type=simple
 User=abhinav
 Group=abhinav
-WorkingDirectory=/home/abhinav/pi-mon
-ExecStart=/usr/bin/python3 /home/abhinav/pi-mon/backend/start_service.py
+WorkingDirectory=/home/abhinav/pi-mon/backend
+ExecStart=/home/abhinav/pi-mon/.venv/bin/python /home/abhinav/pi-mon/backend/start_service.py
 Restart=always
 RestartSec=10
 StandardOutput=journal
@@ -29,7 +29,7 @@ LimitNPROC=4096
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
-ProtectHome=true
+ProtectHome=read-only
 ReadWritePaths=/home/abhinav/pi-mon/backend /home/abhinav/pi-mon
 
 # Auto-restart on failure

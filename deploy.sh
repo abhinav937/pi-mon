@@ -229,7 +229,7 @@ LimitNPROC=4096
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
-ProtectHome=true
+ProtectHome=read-only
 ReadWritePaths=$PI_MON_DIR/backend $PI_MON_DIR
 
 # Auto-restart on failure

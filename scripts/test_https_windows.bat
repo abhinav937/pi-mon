@@ -2,12 +2,12 @@
 setlocal enabledelayedexpansion
 
 REM =============================================================================
-REM Pi Monitor HTTPS Testing & Debugging Script for Windows
+REM Pi Monitor HTTPS Testing Script for Windows
 REM This script tests HTTPS connectivity to your Raspberry Pi from Windows
 REM =============================================================================
 
 echo.
-echo Pi Monitor HTTPS Testing & Debugging Script
+echo Pi Monitor HTTPS Testing Script
 echo ==============================================
 echo.
 

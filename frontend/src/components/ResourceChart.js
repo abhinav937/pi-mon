@@ -37,6 +37,13 @@ const ResourceChart = ({ unifiedClient }) => {
     network: { labels: [], data: [] },
   });
   const [isLoadingHistorical, setIsLoadingHistorical] = useState(true);
+  
+  // Load time range from localStorage or default to 2 hours
+  const [timeRange, setTimeRange] = useState(() => {
+    const saved = localStorage.getItem('pi-monitor-time-range');
+    return saved ? parseInt(saved) : 120; // Default to last 2 hours
+  });
+  
   const SAMPLE_INTERVAL_SECONDS = 5; // Expected real-time sample interval
   const [maxDataPoints, setMaxDataPoints] = useState(() => {
     const estimated = Math.ceil((timeRange * 60) / SAMPLE_INTERVAL_SECONDS);
@@ -44,12 +51,6 @@ const ResourceChart = ({ unifiedClient }) => {
   });
   
   const chartRef = useRef(null);  // Ref to chart instance
-  
-  // Load time range from localStorage or default to 60 minutes
-  const [timeRange, setTimeRange] = useState(() => {
-    const saved = localStorage.getItem('pi-monitor-time-range');
-    return saved ? parseInt(saved) : 120; // Default to last 2 hours
-  });
 
   // Save time range to localStorage whenever it changes and recompute max points
   useEffect(() => {

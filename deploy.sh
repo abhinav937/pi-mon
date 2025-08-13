@@ -135,7 +135,7 @@ chown abhinav:abhinav "$STATE_DIR"
 # Optional: reset cached deploy state
 if [ "$RESET_STATE" = true ]; then
   echo "Resetting cached deploy state" >&3
-  rm -f "$STATE_DIR"/frontend_checksum "$STATE_DIR"/frontend_env_sig "$STATE_DIR"/backend_checksum "$STATE_DIR"/backend_version" 2>/dev/null || true
+  rm -f "$STATE_DIR"/frontend_checksum "$STATE_DIR"/frontend_env_sig "$STATE_DIR"/backend_checksum "$STATE_DIR"/backend_version 2>/dev/null || true
 fi
 
 # Determine if frontend needs rebuild based on version bump

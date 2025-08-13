@@ -463,22 +463,45 @@ fi
 # Final comprehensive test
 echo -e "\n${BLUE}🎯 Running comprehensive system test...${NC}"
 
-# Test API endpoints
+# Prepare auth header from .env if available
+API_KEY=""
+if [ -f "$PI_MON_DIR/backend/.env" ]; then
+    API_KEY=$(grep -E '^PI_MONITOR_API_KEY=' "$PI_MON_DIR/backend/.env" | cut -d'=' -f2 | tr -d '\r')
+fi
+AUTH_HEADER=""
+if [ -n "$API_KEY" ]; then
+    AUTH_HEADER="Authorization: Bearer $API_KEY"
+fi
+
+# Test API endpoints (use auth where required)
 echo "Testing API endpoints:"
-for endpoint in "/health" "/api/system" "/api/metrics"; do
-    if curl -fsS "http://127.0.0.1:5001$endpoint" &>/dev/null; then
-        echo -e "  ${GREEN}✅ $endpoint${NC}"
+ENDPOINTS=("/health" "/api/system" "/api/metrics/history?minutes=5" "/api/metrics/database")
+for endpoint in "${ENDPOINTS[@]}"; do
+    if [ "$endpoint" = "/health" ]; then
+        if curl -fsS "http://127.0.0.1:5001$endpoint" &>/dev/null; then
+            echo -e "  ${GREEN}✅ $endpoint${NC}"
+        else
+            echo -e "  ${RED}❌ $endpoint${NC}"
+        fi
     else
-        echo -e "  ${RED}❌ $endpoint${NC}"
+        if [ -n "$AUTH_HEADER" ]; then
+            if curl -fsS -H "$AUTH_HEADER" "http://127.0.0.1:5001$endpoint" &>/dev/null; then
+                echo -e "  ${GREEN}✅ $endpoint${NC}"
+            else
+                echo -e "  ${RED}❌ $endpoint${NC}"
+            fi
+        else
+            echo -e "  ${YELLOW}⚠️  Skipping $endpoint (no API key available)${NC}"
+        fi
     fi
 done
 
-# Test Nginx proxy
+# Test Nginx proxy to health
 echo "Testing Nginx proxy:"
-if curl -fsS "http://localhost/api/health" &>/dev/null; then
-    echo -e "  ${GREEN}✅ Nginx proxy to /api/health${NC}"
+if curl -fsS "http://localhost/health" &>/dev/null; then
+    echo -e "  ${GREEN}✅ Nginx proxy to /health${NC}"
 else
-    echo -e "  ${RED}❌ Nginx proxy to /api/health${NC}"
+    echo -e "  ${RED}❌ Nginx proxy to /health${NC}"
 fi
 
 # Check system resources

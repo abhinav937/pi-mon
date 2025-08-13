@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Pi Monitor - Log Management
+Pi Monitor - Log Managementt
 Handles log file operations like reading, downloading, and clearing
 """
 

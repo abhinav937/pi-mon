@@ -214,7 +214,7 @@ Environment=PYTHONUNBUFFERED=1
 Environment=PI_MONITOR_ENV=production
 Environment=PI_MONITOR_PRODUCTION_URL=$PRODUCTION_URL
 EnvironmentFile=$PI_MON_DIR/backend/.env
-ExecStart=$VENV_DIR/bin/python start_service.py
+ExecStart=$VENV_DIR/bin/python $PI_MON_DIR/backend/start_service.py
 Restart=always
 RestartSec=10
 StandardOutput=journal
@@ -392,29 +392,103 @@ if systemctl is-active --quiet pi-monitor-backend.service; then
     echo -e "${GREEN}✅ Backend service is running${NC}"
 else
     echo -e "${RED}❌ Backend service is not running${NC}"
-    systemctl status pi-monitor-backend.service
+    echo -e "${YELLOW}📋 Service status:${NC}"
+    systemctl status pi-monitor-backend.service --no-pager -l
+    echo -e "${YELLOW}📋 Recent logs:${NC}"
+    journalctl -u pi-monitor-backend.service --no-pager -n 10
+    echo -e "${RED}❌ Backend service failed to start properly${NC}"
+    exit 1
 fi
 
 # Check backend health
+echo -e "\n${BLUE}🏥 Testing backend health...${NC}"
 if curl -fsS http://127.0.0.1:5001/health &>/dev/null; then
     echo -e "${GREEN}✅ Backend health check passed${NC}"
+    echo "Health response:"
+    curl -s http://127.0.0.1:5001/health | head -5
 else
     echo -e "${RED}❌ Backend health check failed${NC}"
+    echo -e "${YELLOW}🔍 Checking what's happening on port 5001...${NC}"
+    if netstat -tlnp 2>/dev/null | grep :5001; then
+        echo -e "${YELLOW}⚠️  Port 5001 is listening but health check failed${NC}"
+    else
+        echo -e "${RED}❌ Port 5001 is not listening${NC}"
+    fi
+    exit 1
 fi
 
 # Check Nginx
+echo -e "\n${BLUE}🌐 Checking Nginx...${NC}"
 if systemctl is-active --quiet nginx; then
     echo -e "${GREEN}✅ Nginx is running${NC}"
 else
     echo -e "${RED}❌ Nginx is not running${NC}"
+    systemctl status nginx --no-pager -l
+    exit 1
 fi
 
 # Check frontend
+echo -e "\n${BLUE}🎨 Testing frontend...${NC}"
 if curl -fsS http://localhost/ &>/dev/null; then
     echo -e "${GREEN}✅ Frontend is accessible${NC}"
+    echo "Frontend response:"
+    curl -s http://localhost/ | grep -E "(title|Pi Monitor|React)" | head -3
 else
     echo -e "${YELLOW}⚠️  Frontend test failed (may be starting)${NC}"
+    echo -e "${YELLOW}🔍 Checking Nginx configuration...${NC}"
+    nginx -t
 fi
+
+# Check all services are properly configured
+echo -e "\n${BLUE}🔧 Service configuration check...${NC}"
+
+# Check if service is enabled
+if systemctl is-enabled --quiet pi-monitor-backend.service; then
+    echo -e "${GREEN}✅ Backend service is enabled (auto-start on boot)${NC}"
+else
+    echo -e "${RED}❌ Backend service is not enabled${NC}"
+    systemctl enable pi-monitor-backend.service
+    echo -e "${GREEN}✅ Backend service now enabled${NC}"
+fi
+
+# Check if Nginx is enabled
+if systemctl is-enabled --quiet nginx; then
+    echo -e "${GREEN}✅ Nginx is enabled (auto-start on boot)${NC}"
+else
+    echo -e "${RED}❌ Nginx is not enabled${NC}"
+    systemctl enable nginx
+    echo -e "${GREEN}✅ Nginx now enabled${NC}"
+fi
+
+# Final comprehensive test
+echo -e "\n${BLUE}🎯 Running comprehensive system test...${NC}"
+
+# Test API endpoints
+echo "Testing API endpoints:"
+for endpoint in "/health" "/api/system" "/api/metrics"; do
+    if curl -fsS "http://127.0.0.1:5001$endpoint" &>/dev/null; then
+        echo -e "  ${GREEN}✅ $endpoint${NC}"
+    else
+        echo -e "  ${RED}❌ $endpoint${NC}"
+    fi
+done
+
+# Test Nginx proxy
+echo "Testing Nginx proxy:"
+if curl -fsS "http://localhost/api/health" &>/dev/null; then
+    echo -e "  ${GREEN}✅ Nginx proxy to /api/health${NC}"
+else
+    echo -e "  ${RED}❌ Nginx proxy to /api/health${NC}"
+fi
+
+# Check system resources
+echo -e "\n${BLUE}💾 System resource check...${NC}"
+echo "Memory usage: $(free -h | grep Mem | awk '{print $3"/"$2}')"
+echo "Disk usage: $(df -h / | tail -1 | awk '{print $5}')"
+echo "Load average: $(uptime | awk -F'load average:' '{print $2}')"
+
+# Success summary
+echo -e "\n${GREEN}🎉 All systems operational!${NC}"
 
 echo -e "\n${GREEN}🎉 Deployment complete!${NC}"
 echo ""

@@ -305,10 +305,8 @@ const ResourceChart = ({ unifiedClient }) => {
             borderWidth: 2,
           },
         },
-        animation: {
-          duration: 500,  // Shorter animation for refreshes
-          easing: 'easeOutCubic'
-        },
+        // Disable animations so updates appear as a sideways shift rather than vertical morphing
+        animation: false,
       },
     };
   };

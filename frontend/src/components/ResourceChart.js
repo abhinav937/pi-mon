@@ -255,6 +255,15 @@ const ResourceChart = ({ unifiedClient }) => {
             bodyColor: isDarkMode ? '#e5e7eb' : '#374151',
             borderColor: isDarkMode ? '#4b5563' : '#d1d5db',
             borderWidth: 1,
+            callbacks: {
+              label: function(context) {
+                const value = context.parsed && context.parsed.y != null ? context.parsed.y : null;
+                const unit = metric === 'temperature' ? '°C' : '%';
+                const datasetLabel = context.dataset && context.dataset.label ? context.dataset.label : '';
+                if (value == null || isNaN(value)) return datasetLabel;
+                return `${datasetLabel}: ${Number(value).toFixed(2)}${unit}`;
+              }
+            }
           },
         },
         interaction: {
@@ -497,10 +506,7 @@ const ResourceChart = ({ unifiedClient }) => {
                chartData[selectedMetric].data[chartData[selectedMetric].data.length - 1] !== null &&
                chartData[selectedMetric].data[chartData[selectedMetric].data.length - 1] !== undefined &&
                !isNaN(chartData[selectedMetric].data[chartData[selectedMetric].data.length - 1])
-               ? `${selectedMetric === 'cpu' 
-                    ? chartData[selectedMetric].data[chartData[selectedMetric].data.length - 1]
-                    : chartData[selectedMetric].data[chartData[selectedMetric].data.length - 1].toFixed(1)
-                  }${selectedMetric === 'temperature' ? '°C' : '%'}`
+               ? `${Number(chartData[selectedMetric].data[chartData[selectedMetric].data.length - 1]).toFixed(2)}${selectedMetric === 'temperature' ? '°C' : '%'}`
                 : 'N/A'
               }
             </div>
@@ -518,7 +524,7 @@ const ResourceChart = ({ unifiedClient }) => {
                     );
                     if (validData.length === 0) return 'N/A';
                     const average = validData.reduce((a, b) => a + b, 0) / validData.length;
-                    return `${selectedMetric === 'cpu' ? average : average.toFixed(1)}${selectedMetric === 'temperature' ? '°C' : '%'}`;
+                    return `${Number(average).toFixed(2)}${selectedMetric === 'temperature' ? '°C' : '%'}`;
                   })()
                 : 'N/A'
               }
@@ -537,7 +543,7 @@ const ResourceChart = ({ unifiedClient }) => {
                     );
                     if (validData.length === 0) return 'N/A';
                     const maxValue = Math.max(...validData);
-                    return `${selectedMetric === 'cpu' ? maxValue : maxValue.toFixed(1)}${selectedMetric === 'temperature' ? '°C' : '%'}`;
+                    return `${Number(maxValue).toFixed(2)}${selectedMetric === 'temperature' ? '°C' : '%'}`;
                   })()
                 : 'N/A'
               }

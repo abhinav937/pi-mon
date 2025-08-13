@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/bash
 
 # Pi Monitor: setup without Docker (venv + systemd + nginx)
 # Usage: sudo ./scripts/setup_venv_systemd.sh [APP_DIR]
@@ -6,7 +6,14 @@
 
 set -euo pipefail
 
-APP_DIR="${1:-$(pwd)}"
+# Fix: If we're in a scripts subdirectory, go up to the parent
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ "$(basename "$SCRIPT_DIR")" == "scripts" ]]; then
+    APP_DIR="${1:-$(dirname "$SCRIPT_DIR")}"
+else
+    APP_DIR="${1:-$(pwd)}"
+fi
+
 BACKEND_DIR="$APP_DIR/backend"
 FRONTEND_DIR="$APP_DIR/frontend"
 VENV_DIR="$APP_DIR/.venv"
@@ -19,9 +26,12 @@ NGINX_SITE_AVAILABLE="/etc/nginx/sites-available/pi-monitor"
 NGINX_SITE_ENABLED="/etc/nginx/sites-enabled/pi-monitor"
 
 echo "==> Config"
+echo "SCRIPT_DIR=$SCRIPT_DIR"
 echo "APP_DIR=$APP_DIR"
 echo "APP_USER=$APP_USER"
 echo "VENV_DIR=$VENV_DIR"
+echo "BACKEND_DIR=$BACKEND_DIR"
+echo "FRONTEND_DIR=$FRONTEND_DIR"
 
 if [[ "$EUID" -ne 0 ]]; then
   echo "This script must be run as root (use sudo)." >&2

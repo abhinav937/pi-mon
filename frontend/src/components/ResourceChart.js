@@ -305,8 +305,12 @@ const ResourceChart = ({ unifiedClient }) => {
             borderWidth: 2,
           },
         },
-        // Disable animations so updates appear as a sideways shift rather than vertical morphing
-        animation: false,
+        // Smooth horizontal slide without vertical morphing
+        animation: { duration: 0 },
+        animations: {
+          y: { duration: 0 },
+          x: { duration: 400, easing: 'linear' }
+        },
       },
     };
   };

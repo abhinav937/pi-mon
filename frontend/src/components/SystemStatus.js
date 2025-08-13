@@ -47,17 +47,18 @@ const SystemStatus = ({ unifiedClient }) => {
   useEffect(() => {
     if (!unifiedClient) return;
 
-    const originalOnDataUpdate = unifiedClient.onDataUpdate;
-    unifiedClient.onDataUpdate = (data) => {
-      if (data.type === 'initial_stats' || data.type === 'periodic_update' || data.type === 'mqtt_update') {
-        setRealTimeData(data.data || data);
+    const handleUpdate = (payload) => {
+      if (payload.type === 'initial_stats' || payload.type === 'periodic_update' || payload.type === 'mqtt_update') {
+        setRealTimeData(payload.data || payload);
       }
-      originalOnDataUpdate(data);
     };
 
-    return () => {
-      unifiedClient.onDataUpdate = originalOnDataUpdate;
-    };
+    // seed from latest snapshot to avoid N/A on tab switch
+    const latest = unifiedClient.getLatestStats && unifiedClient.getLatestStats();
+    if (latest) setRealTimeData(latest);
+
+    const unsubscribe = unifiedClient.addDataListener(handleUpdate);
+    return () => { if (unsubscribe) unsubscribe(); };
   }, [unifiedClient]);
 
   const currentData = realTimeData || systemStats;

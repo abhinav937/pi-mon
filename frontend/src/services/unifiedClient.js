@@ -61,6 +61,9 @@ class UnifiedClient {
     this.onError = options.onError || (() => {});
     this.connectionState = CONNECTION_STATES.DISCONNECTED;
     this.apiKey = localStorage.getItem('pi-monitor-api-key');
+    // Support multiple listeners and cache the latest stats
+    this.dataListeners = new Set();
+    this.latestStats = null;
     
     logDebug('Client configuration', {
       serverUrl: this.serverUrl,
@@ -175,6 +178,11 @@ class UnifiedClient {
         logDebug('Version endpoint not available, will rely on headers', {}, 'error');
       }
       this.setConnectionState(CONNECTION_STATES.CONNECTED);
+      // Seed with an initial stats fetch so consumers have data immediately
+      try {
+        const initialStats = await this.getSystemStats();
+        this.emitDataUpdate({ type: 'initial_stats', data: initialStats });
+      } catch (_) {}
       this.startPolling();
     } catch (error) {
       console.error('Failed to initialize connection:', error);
@@ -215,7 +223,7 @@ class UnifiedClient {
       try {
         if (this.connectionState === CONNECTION_STATES.CONNECTED) {
           const stats = await this.getSystemStats();
-          this.onDataUpdate({ type: 'periodic_update', data: stats });
+          this.emitDataUpdate({ type: 'periodic_update', data: stats });
         }
       } catch (error) {
         console.error('Polling error:', error);
@@ -560,6 +568,42 @@ class UnifiedClient {
       clearInterval(this.pollingInterval);
     }
     this.setConnectionState(CONNECTION_STATES.DISCONNECTED);
+  }
+
+  // New: publish-subscribe for data updates so multiple components can listen
+  addDataListener(listener) {
+    if (typeof listener !== 'function') return () => {};
+    this.dataListeners.add(listener);
+    return () => {
+      try {
+        this.dataListeners.delete(listener);
+      } catch (_) {}
+    };
+  }
+
+  emitDataUpdate(payload) {
+    try {
+      // Cache latest stats for fast hydration on mount
+      const data = payload?.data ?? payload;
+      if (data && typeof data === 'object') {
+        this.latestStats = data;
+      }
+    } catch (_) {}
+    // Notify subscribers
+    try {
+      this.dataListeners.forEach((listener) => {
+        try { listener(payload); } catch (e) { /* noop */ }
+      });
+    } catch (_) {}
+    // Back-compat: also call single handler if someone set it
+    if (this.onDataUpdate && typeof this.onDataUpdate === 'function') {
+      try { this.onDataUpdate(payload); } catch (_) {}
+    }
+  }
+
+  // New: expose latest stats snapshot
+  getLatestStats() {
+    return this.latestStats;
   }
 }
 

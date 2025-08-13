@@ -63,8 +63,7 @@ const ResourceChart = ({ unifiedClient }) => {
   useEffect(() => {
     if (!unifiedClient) return;
 
-    const originalOnDataUpdate = unifiedClient.onDataUpdate;
-    unifiedClient.onDataUpdate = (data) => {
+    const handleUpdate = (data) => {
       if (data.type === 'initial_stats' || data.type === 'periodic_update' || data.type === 'mqtt_update') {
         const now = new Date();
         const timestamp = timeRange > 60 ? now.toLocaleString() : now.toLocaleTimeString();
@@ -75,14 +74,13 @@ const ResourceChart = ({ unifiedClient }) => {
           
           // Update CPU data - ensure value is a valid number and append to existing data
           if (systemData.cpu_percent !== undefined && systemData.cpu_percent !== null && !isNaN(systemData.cpu_percent)) {
-            // Only append if we don't already have this timestamp (avoid duplicates)
             if (!prevData.cpu.labels.includes(timestamp)) {
               newData.cpu.labels = [...prevData.cpu.labels, timestamp].slice(-maxDataPoints);
               newData.cpu.data = [...prevData.cpu.data, parseFloat(systemData.cpu_percent)].slice(-maxDataPoints);
             }
           }
           
-          // Update Memory data - ensure value is a valid number and append to existing data
+          // Update Memory data
           if (systemData.memory_percent !== undefined && systemData.memory_percent !== null && !isNaN(systemData.memory_percent)) {
             if (!prevData.memory.labels.includes(timestamp)) {
               newData.memory.labels = [...prevData.memory.labels, timestamp].slice(-maxDataPoints);
@@ -90,7 +88,7 @@ const ResourceChart = ({ unifiedClient }) => {
             }
           }
           
-          // Update Temperature data - ensure value is a valid number and append to existing data
+          // Update Temperature data
           if (systemData.temperature !== undefined && systemData.temperature !== null && !isNaN(systemData.temperature)) {
             if (!prevData.temperature.labels.includes(timestamp)) {
               newData.temperature.labels = [...prevData.temperature.labels, timestamp].slice(-maxDataPoints);
@@ -98,7 +96,7 @@ const ResourceChart = ({ unifiedClient }) => {
             }
           }
           
-          // Update Disk data - ensure value is a valid number and append to existing data
+          // Update Disk data
           if (systemData.disk_percent !== undefined && systemData.disk_percent !== null && !isNaN(systemData.disk_percent)) {
             if (!prevData.disk.labels.includes(timestamp)) {
               newData.disk.labels = [...prevData.disk.labels, timestamp].slice(-maxDataPoints);
@@ -109,16 +107,41 @@ const ResourceChart = ({ unifiedClient }) => {
           return newData;
         });
       }
-      
-      // Call the original handler if it exists
-      if (originalOnDataUpdate && typeof originalOnDataUpdate === 'function') {
-        originalOnDataUpdate(data);
-      }
     };
 
+    const unsubscribe = unifiedClient.addDataListener(handleUpdate);
     return () => {
-      unifiedClient.onDataUpdate = originalOnDataUpdate;
+      if (unsubscribe) unsubscribe();
     };
+  }, [unifiedClient, timeRange, maxDataPoints]);
+
+  // Seed with latest cached stats immediately on mount to avoid N/A
+  useEffect(() => {
+    if (!unifiedClient) return;
+    const latest = unifiedClient.getLatestStats && unifiedClient.getLatestStats();
+    if (!latest) return;
+    const now = new Date();
+    const timestamp = timeRange > 60 ? now.toLocaleString() : now.toLocaleTimeString();
+    setChartData(prevData => {
+      const newData = { ...prevData };
+      if (latest.cpu_percent != null && !isNaN(latest.cpu_percent) && !prevData.cpu.labels.includes(timestamp)) {
+        newData.cpu.labels = [...prevData.cpu.labels, timestamp].slice(-maxDataPoints);
+        newData.cpu.data = [...prevData.cpu.data, parseFloat(latest.cpu_percent)].slice(-maxDataPoints);
+      }
+      if (latest.memory_percent != null && !isNaN(latest.memory_percent) && !prevData.memory.labels.includes(timestamp)) {
+        newData.memory.labels = [...prevData.memory.labels, timestamp].slice(-maxDataPoints);
+        newData.memory.data = [...prevData.memory.data, parseFloat(latest.memory_percent)].slice(-maxDataPoints);
+      }
+      if (latest.temperature != null && !isNaN(latest.temperature) && !prevData.temperature.labels.includes(timestamp)) {
+        newData.temperature.labels = [...prevData.temperature.labels, timestamp].slice(-maxDataPoints);
+        newData.temperature.data = [...prevData.temperature.data, parseFloat(latest.temperature)].slice(-maxDataPoints);
+      }
+      if (latest.disk_percent != null && !isNaN(latest.disk_percent) && !prevData.disk.labels.includes(timestamp)) {
+        newData.disk.labels = [...prevData.disk.labels, timestamp].slice(-maxDataPoints);
+        newData.disk.data = [...prevData.disk.data, parseFloat(latest.disk_percent)].slice(-maxDataPoints);
+      }
+      return newData;
+    });
   }, [unifiedClient, timeRange, maxDataPoints]);
 
   // Fetch historical metrics data - only when timeRange changes or component mounts

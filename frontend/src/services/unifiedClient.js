@@ -218,6 +218,15 @@ class UnifiedClient {
     }
   }
 
+  async getSystemInfo() {
+    try {
+      const response = await this.httpClient.get('/api/system/info');
+      return response.data;
+    } catch (error) {
+      throw error;
+    }
+  }
+
   async getEnhancedSystemStats() {
     try {
       const response = await this.httpClient.get('/api/system/enhanced');

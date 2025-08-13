@@ -30,8 +30,8 @@ const SystemStatus = ({ unifiedClient }) => {
     async () => {
       if (!unifiedClient) return null;
       try {
-        const response = await fetch(`${unifiedClient.serverUrl}/api/system/info`);
-        return await response.json();
+        // Use unified client method for proper API routing
+        return await unifiedClient.getSystemInfo();
       } catch (error) {
         console.error('Failed to fetch detailed system info:', error);
         return null;

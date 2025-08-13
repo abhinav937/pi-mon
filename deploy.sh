@@ -23,6 +23,7 @@ PRODUCTION_URL="http://65.36.123.68"
 PI_MON_DIR="/home/abhinav/pi-mon"
 VENV_DIR="$PI_MON_DIR/.venv"
 SERVICE_FILE="/etc/systemd/system/pi-monitor-backend.service"
+STATE_DIR="$PI_MON_DIR/.deploy_state"
 
 # Port configuration
 PUBLIC_PORT="80"
@@ -56,6 +57,106 @@ if id "abhinav" &>/dev/null; then
     USER_EXISTS=true
 else
     echo -e "${YELLOW}⚠️  User 'abhinav' does not exist${NC}"
+fi
+
+# Ensure deploy state directory exists
+mkdir -p "$STATE_DIR"
+chown abhinav:abhinav "$STATE_DIR"
+
+# Determine if frontend needs rebuild based on version bump
+NEED_FRONTEND_BUILD=false
+SOURCE_FRONTEND_VERSION=""
+DEPLOYED_FRONTEND_VERSION=""
+FRONTEND_PRESENT=false
+FRONTEND_CHECKSUM_FILE="$STATE_DIR/frontend_checksum"
+CURRENT_FRONTEND_CHECKSUM=""
+FRONTEND_ENV_SIG_FILE="$STATE_DIR/frontend_env_sig"
+CURRENT_FRONTEND_ENV_SIG=""
+
+if [ -f "$PI_MON_DIR/frontend/public/version.json" ]; then
+    # Parse version without jq
+    SOURCE_FRONTEND_VERSION=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"\n]*\)".*/\1/p' "$PI_MON_DIR/frontend/public/version.json" | head -n1)
+fi
+
+# Fallback to package.json if public version.json not present
+if [ -z "$SOURCE_FRONTEND_VERSION" ] && [ -f "$PI_MON_DIR/frontend/package.json" ]; then
+    SOURCE_FRONTEND_VERSION=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"\n]*\)".*/\1/p' "$PI_MON_DIR/frontend/package.json" | head -n1)
+fi
+
+if [ -f "$WEB_ROOT/version.json" ]; then
+    DEPLOYED_FRONTEND_VERSION=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"\n]*\)".*/\1/p' "$WEB_ROOT/version.json" | head -n1)
+fi
+
+# Compute checksum of frontend sources to detect changes independent of version
+if [ -d "$PI_MON_DIR/frontend" ]; then
+    CURRENT_FRONTEND_CHECKSUM=$(find "$PI_MON_DIR/frontend" \
+        -path "$PI_MON_DIR/frontend/node_modules" -prune -o \
+        -path "$PI_MON_DIR/frontend/build" -prune -o \
+        -type f \( -name "*.js" -o -name "*.jsx" -o -name "*.ts" -o -name "*.tsx" -o -name "*.css" -o -name "*.json" -o -name "*.html" -o -name "*.config.js" -o -name "postcss.config.js" -o -name "tailwind.config.js" -o -name "package.json" \) -print0 | sort -z | xargs -0 sha256sum | sha256sum | awk '{print $1}')
+fi
+
+# Compute frontend env signature (values embedded at build time)
+CURRENT_FRONTEND_ENV_SIG=$(printf "%s|%s|%s" "$PRODUCTION_URL" "$BACKEND_PORT" "$NGINX_PORT" | sha256sum | awk '{print $1}')
+
+if [ -f "$WEB_ROOT/index.html" ]; then
+    FRONTEND_PRESENT=true
+fi
+
+if [ "$FRONTEND_PRESENT" = false ]; then
+	NEED_FRONTEND_BUILD=true
+elif [ -n "$SOURCE_FRONTEND_VERSION" ] && [ -n "$DEPLOYED_FRONTEND_VERSION" ] && [ "$SOURCE_FRONTEND_VERSION" != "$DEPLOYED_FRONTEND_VERSION" ]; then
+	echo -e "${YELLOW}ℹ️  Frontend version change detected: $DEPLOYED_FRONTEND_VERSION -> $SOURCE_FRONTEND_VERSION${NC}"
+	NEED_FRONTEND_BUILD=true
+elif [ -n "$SOURCE_FRONTEND_VERSION" ] && [ -z "$DEPLOYED_FRONTEND_VERSION" ]; then
+    echo -e "${YELLOW}ℹ️  Frontend version file missing in deployment; will build version $SOURCE_FRONTEND_VERSION${NC}"
+    NEED_FRONTEND_BUILD=true
+elif [ -n "$CURRENT_FRONTEND_CHECKSUM" ]; then
+    if [ -f "$FRONTEND_CHECKSUM_FILE" ]; then
+        PREV_FRONTEND_CHECKSUM=$(cat "$FRONTEND_CHECKSUM_FILE" 2>/dev/null || true)
+        if [ "$CURRENT_FRONTEND_CHECKSUM" != "$PREV_FRONTEND_CHECKSUM" ]; then
+            echo -e "${YELLOW}ℹ️  Frontend source changes detected (checksum updated)${NC}"
+            NEED_FRONTEND_BUILD=true
+        fi
+    else
+        # First-time record
+        NEED_FRONTEND_BUILD=true
+    fi
+fi
+
+# If env signature changed, require rebuild
+if [ -n "$CURRENT_FRONTEND_ENV_SIG" ]; then
+    if [ -f "$FRONTEND_ENV_SIG_FILE" ]; then
+        PREV_FRONTEND_ENV_SIG=$(cat "$FRONTEND_ENV_SIG_FILE" 2>/dev/null || true)
+        if [ "$CURRENT_FRONTEND_ENV_SIG" != "$PREV_FRONTEND_ENV_SIG" ]; then
+            echo -e "${YELLOW}ℹ️  Frontend environment changed; rebuild required${NC}"
+            NEED_FRONTEND_BUILD=true
+        fi
+    else
+        NEED_FRONTEND_BUILD=true
+    fi
+fi
+
+# Determine if backend changed using checksum
+NEED_BACKEND_RESTART=false
+BACKEND_CHECKSUM_FILE="$STATE_DIR/backend_checksum"
+CURRENT_BACKEND_CHECKSUM=""
+
+if [ -d "$PI_MON_DIR/backend" ]; then
+    # Compute checksum over backend Python sources and requirements
+    CURRENT_BACKEND_CHECKSUM=$(find "$PI_MON_DIR/backend" -type f \
+        \( -name "*.py" -o -name "requirements.txt" -o -name "*.sh" \) -print0 | sort -z | xargs -0 sha256sum | sha256sum | awk '{print $1}')
+    if [ -n "$CURRENT_BACKEND_CHECKSUM" ]; then
+        if [ -f "$BACKEND_CHECKSUM_FILE" ]; then
+            PREV_BACKEND_CHECKSUM=$(cat "$BACKEND_CHECKSUM_FILE" 2>/dev/null || true)
+            if [ "$CURRENT_BACKEND_CHECKSUM" != "$PREV_BACKEND_CHECKSUM" ]; then
+                echo -e "${YELLOW}ℹ️  Backend changes detected (checksum updated)${NC}"
+                NEED_BACKEND_RESTART=true
+            fi
+        else
+            # First-time record
+            NEED_BACKEND_RESTART=true
+        fi
+    fi
 fi
 
 # Check if pi-mon directory exists
@@ -274,9 +375,35 @@ else
 fi
 
 # =============================================================================
+# 4.1 APPLY BACKEND UPDATES IF CHANGED
+# =============================================================================
+if [ "$NEED_BACKEND_RESTART" = true ]; then
+    echo -e "\n${BLUE}♻️  Applying backend updates (restart required)...${NC}"
+    if [ -f "$PI_MON_DIR/backend/requirements.txt" ]; then
+        echo "Updating Python dependencies (if needed)..."
+        "$VENV_DIR/bin/pip" install -r "$PI_MON_DIR/backend/requirements.txt" --upgrade
+    fi
+    echo "Restarting backend service..."
+    systemctl restart pi-monitor-backend.service || true
+    sleep 3
+    if systemctl is-active --quiet pi-monitor-backend.service; then
+        echo -e "${GREEN}✅ Backend service restarted${NC}"
+        echo "$CURRENT_BACKEND_CHECKSUM" > "$BACKEND_CHECKSUM_FILE"
+        chown abhinav:abhinav "$BACKEND_CHECKSUM_FILE"
+    else
+        echo -e "${RED}❌ Backend service failed to restart${NC}"
+        systemctl status pi-monitor-backend.service --no-pager -l || true
+        journalctl -u pi-monitor-backend.service --no-pager -n 20 || true
+        exit 1
+    fi
+else
+    echo -e "\n${BLUE}✅ No backend changes detected; restart not required${NC}"
+fi
+
+# =============================================================================
 # 5. BUILD FRONTEND (if needed)
 # =============================================================================
-if [ "$FRONTEND_BUILT" = false ]; then
+if [ "$NEED_FRONTEND_BUILD" = true ]; then
     echo -e "\n${BLUE}🔨 Building frontend...${NC}"
     
     # Install Node.js if not available
@@ -308,8 +435,17 @@ EOF
     
     cd "$SCRIPT_DIR"
     echo -e "${GREEN}✅ Frontend built and deployed${NC}"
+    # Persist frontend checksum if available
+    if [ -n "$CURRENT_FRONTEND_CHECKSUM" ]; then
+        echo "$CURRENT_FRONTEND_CHECKSUM" > "$FRONTEND_CHECKSUM_FILE"
+        chown abhinav:abhinav "$FRONTEND_CHECKSUM_FILE"
+    fi
+    if [ -n "$CURRENT_FRONTEND_ENV_SIG" ]; then
+        echo "$CURRENT_FRONTEND_ENV_SIG" > "$FRONTEND_ENV_SIG_FILE"
+        chown abhinav:abhinav "$FRONTEND_ENV_SIG_FILE"
+    fi
 else
-    echo -e "\n${BLUE}✅ Frontend is already built${NC}"
+    echo -e "\n${BLUE}✅ Frontend build up-to-date (no rebuild needed)${NC}"
 fi
 
 # =============================================================================

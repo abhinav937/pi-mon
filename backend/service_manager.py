@@ -9,6 +9,8 @@ import subprocess
 import time
 import logging
 import platform
+import shutil
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -16,38 +18,156 @@ class ServiceManager:
     """Manages system services"""
     
     def __init__(self):
+        # Kept for fallback when full enumeration is unavailable
         self.candidate_services = ['ssh', 'nginx', 'docker', 'pi-monitor']
     
     def get_services_list(self):
-        """List services with status for ServiceManagement UI"""
+        """List services with status for ServiceManagement UI.
+
+        On Linux, attempts to enumerate ALL services via systemd. On Windows, uses 'sc query'.
+        Falls back to a small whitelist if enumeration is not available.
+        """
+        try:
+            if platform.system() == 'Linux' and shutil.which('systemctl'):
+                return self._list_systemd_services()
+            if platform.system() == 'Windows' and shutil.which('sc'):
+                return self._list_windows_services()
+        except Exception as e:
+            logger.warning(f"Service enumeration failed, falling back to candidates: {e}")
+
+        # Fallback to the predefined small set
         services = []
-        
         for svc in self.candidate_services:
-            status = 'unknown'
-            active = False
-            enabled = False
-            
-            try:
-                result = subprocess.run(['systemctl', 'is-active', svc], 
-                                      capture_output=True, text=True, timeout=5)
-                status = result.stdout.strip() if result.returncode == 0 else 'stopped'
-                active = (status == 'active' or status == 'running')
-                
-                result2 = subprocess.run(['systemctl', 'is-enabled', svc], 
-                                       capture_output=True, text=True, timeout=5)
-                enabled = (result2.returncode == 0 and 'enabled' in result2.stdout)
-            except Exception:
-                pass
-            
+            services.append(self._get_single_service_status(svc))
+        return services
+
+    def _list_systemd_services(self):
+        """Enumerate services using systemctl list-units and list-unit-files."""
+        services = []
+        # Get active/runtime status and description
+        result = subprocess.run(
+            ['systemctl', 'list-units', '--type=service', '--all', '--no-legend', '--no-pager', '--plain'],
+            capture_output=True, text=True, timeout=15
+        )
+        lines = result.stdout.splitlines() if result.returncode == 0 else []
+
+        # Also gather enabled/disabled from unit-files
+        enabled_map = {}
+        try:
+            files_out = subprocess.run(
+                ['systemctl', 'list-unit-files', '--type=service', '--no-legend', '--no-pager'],
+                capture_output=True, text=True, timeout=15
+            )
+            if files_out.returncode == 0:
+                for line in files_out.stdout.splitlines():
+                    # Format: UNITFILE <whitespace> STATE [PRESET]
+                    parts = re.split(r"\s+", line.strip())
+                    if len(parts) >= 2 and parts[0].endswith('.service'):
+                        enabled_map[parts[0]] = (parts[1] == 'enabled')
+        except Exception:
+            pass
+
+        def normalize_status(active_col: str) -> str:
+            if active_col in ('active', 'running'):
+                return 'running'
+            if active_col in ('inactive', 'dead', 'failed'):
+                return 'stopped' if active_col != 'failed' else 'failed'
+            return active_col or 'unknown'
+
+        for line in lines:
+            # Columns: UNIT LOAD ACTIVE SUB DESCRIPTION
+            parts = re.split(r"\s+", line.strip(), maxsplit=4)
+            if len(parts) < 5:
+                continue
+            unit, load, active_col, sub, description = parts
+
+            # Skip templated/systemd-internal/user sessions to reduce noise
+            if any([
+                '@' in unit,
+                unit.startswith('user@'),
+                unit.startswith('sysinit-'),
+                unit.startswith('systemd-'),
+                unit.startswith('dbus-'),
+            ]):
+                continue
+
+            name = unit.replace('.service', '')
+            status = normalize_status(active_col)
+            active = (status == 'running')
+            enabled = enabled_map.get(unit, False)
             services.append({
-                'name': svc,
-                'status': 'running' if active else ('stopped' if status == 'stopped' else status or 'unknown'),
+                'name': name,
+                'status': status,
                 'active': active,
                 'enabled': enabled,
-                'description': f'{svc} service'
+                'description': description or f'{name} service'
             })
-        
+
+        # Reasonable cap to avoid rendering thousands; sort by active first then name
+        services.sort(key=lambda s: (not s['active'], s['name']))
+        return services[:500]
+
+    def _list_windows_services(self):
+        """Enumerate services on Windows using 'sc query' output."""
+        services = []
+        # 'sc query type= service state= all'
+        result = subprocess.run(
+            ['sc', 'query', 'type=', 'service', 'state=', 'all'],
+            capture_output=True, text=True, timeout=20, shell=True
+        )
+        cur_name = None
+        cur_state = None
+        for line in result.stdout.splitlines():
+            line = line.strip()
+            if line.startswith('SERVICE_NAME:'):
+                if cur_name is not None:
+                    services.append({
+                        'name': cur_name,
+                        'status': 'running' if cur_state == 'RUNNING' else 'stopped',
+                        'active': cur_state == 'RUNNING',
+                        'enabled': True,  # Windows enable state not trivial here
+                        'description': f'{cur_name} service'
+                    })
+                cur_name = line.split(':', 1)[1].strip()
+                cur_state = None
+            elif line.startswith('STATE'):
+                # e.g., STATE              : 4  RUNNING
+                if 'RUNNING' in line:
+                    cur_state = 'RUNNING'
+                elif 'STOPPED' in line:
+                    cur_state = 'STOPPED'
+        if cur_name is not None:
+            services.append({
+                'name': cur_name,
+                'status': 'running' if cur_state == 'RUNNING' else 'stopped',
+                'active': cur_state == 'RUNNING',
+                'enabled': True,
+                'description': f'{cur_name} service'
+            })
         return services
+
+    def _get_single_service_status(self, svc_name: str):
+        """Return a uniform service dict for a single named service using best-effort checks."""
+        status = 'unknown'
+        active = False
+        enabled = False
+        try:
+            if shutil.which('systemctl'):
+                result = subprocess.run(['systemctl', 'is-active', svc_name], capture_output=True, text=True, timeout=5)
+                raw = result.stdout.strip()
+                status = raw if result.returncode == 0 else 'stopped'
+                active = (raw in ('active', 'running'))
+                result2 = subprocess.run(['systemctl', 'is-enabled', svc_name], capture_output=True, text=True, timeout=5)
+                enabled = (result2.returncode == 0 and 'enabled' in result2.stdout)
+        except Exception:
+            pass
+        return {
+            'name': svc_name,
+            'status': 'running' if active else ('stopped' if status == 'stopped' else status or 'unknown'),
+            'active': active,
+            'enabled': enabled,
+            'description': f'{svc_name} service'
+        }
     
     def handle_service_action(self, request_handler):
         """Handle service control actions"""
@@ -64,12 +184,22 @@ class ServiceManager:
                     return {"success": True, "message": f"Service {service_name} status checked"}
                 elif action in ['start', 'stop', 'restart']:
                     try:
-                        result = subprocess.run(['systemctl', action, service_name], 
-                                              capture_output=True, text=True)
+                        # Try plain systemctl first
+                        result = subprocess.run(['systemctl', action, service_name], capture_output=True, text=True)
                         if result.returncode == 0:
                             return {"success": True, "message": f"Service {service_name} {action} successful"}
-                        else:
-                            return self._handle_service_action_alternative(service_name, action)
+
+                        # If we hit an auth error, try sudo non-interactively (requires sudoers NOPASSWD)
+                        stderr = (result.stderr or '').lower()
+                        if any(word in stderr for word in ['access denied', 'permission', 'authentication is required', 'not authorized']):
+                            sudo_path = shutil.which('sudo')
+                            if sudo_path:
+                                sudo_result = subprocess.run([sudo_path, '-n', 'systemctl', action, service_name], capture_output=True, text=True)
+                                if sudo_result.returncode == 0:
+                                    return {"success": True, "message": f"Service {service_name} {action} successful (sudo)"}
+
+                        # Fallback to alternatives
+                        return self._handle_service_action_alternative(service_name, action)
                     except FileNotFoundError:
                         return self._handle_service_action_alternative(service_name, action)
                     except Exception as e:

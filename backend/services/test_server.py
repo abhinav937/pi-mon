@@ -7,8 +7,8 @@ Simple script to test if the server can start and run
 import sys
 import os
 
-# Add the backend directory to the path
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+# Add the backend directory to the path (parent of services/)
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 def test_imports():
     """Test if all required modules can be imported"""

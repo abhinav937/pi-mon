@@ -7,8 +7,8 @@ Main file that imports and runs the Pi Monitor server
 import sys
 import os
 
-# Add the backend directory to the path
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+# Add the backend directory to the path (parent of core/)
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from services.server import PiMonitorServer
 from config.config import config

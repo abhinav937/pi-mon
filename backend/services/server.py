@@ -107,13 +107,13 @@ class PiMonitorHandler(BaseHTTPRequestHandler):
         super().__init__(*args, **kwargs)
         self.request_start_time = time.time()
     
-    def log_message(self, format, *args):
+    def log_message(self, format_str, *args):
         """Custom logging with performance metrics"""
         try:
             execution_time = time.time() - getattr(self, 'request_start_time', time.time())
-            print(f"{self.client_address[0]} - {format % args} - {execution_time:.3f}s")
+            print(f"{self.client_address[0]} - {format_str % args} - {execution_time:.3f}s")
         except Exception:
-            print(f"{self.client_address[0]} - {format % args}")
+            print(f"{self.client_address[0]} - {format_str % args}")
     
     def setup(self):
         """Setup method called before handling each request"""

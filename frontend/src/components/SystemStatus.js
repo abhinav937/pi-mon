@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useQuery } from 'react-query';
 import { Refresh as RefreshCw, Dns as Server, Storage as HardDrive, Memory as Cpu, Monitor, Wifi } from '@mui/icons-material';
 import toast from 'react-hot-toast';
+import { formatBytes } from '../utils/format';
 
 const SystemStatus = ({ unifiedClient }) => {
   const [realTimeData, setRealTimeData] = useState(null);

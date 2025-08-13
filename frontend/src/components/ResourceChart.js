@@ -34,7 +34,6 @@ const ResourceChart = ({ unifiedClient }) => {
     memory: { labels: [], data: [] },
     temperature: { labels: [], data: [] },
     disk: { labels: [], data: [] },
-    network: { labels: [], data: [] },
   });
   const [isLoadingHistorical, setIsLoadingHistorical] = useState(true);
   
@@ -144,61 +143,48 @@ const ResourceChart = ({ unifiedClient }) => {
     });
   }, [unifiedClient, timeRange, maxDataPoints]);
 
+  const fetchHistoricalData = React.useCallback(async () => {
+    if (!unifiedClient) return;
+    setIsLoadingHistorical(true);
+    try {
+      const response = await unifiedClient.getMetricsHistory(timeRange);
+      if (response && response.metrics) {
+        const metrics = response.metrics;
+        const labels = metrics.map(m => {
+          const date = new Date(m.timestamp * 1000);
+          return timeRange > 60 ? date.toLocaleString() : date.toLocaleTimeString();
+        });
+        const cpuData = metrics.map(m => m.cpu_percent || 0);
+        const memoryData = metrics.map(m => m.memory_percent || 0);
+        const temperatureData = metrics.map(m => m.temperature || 0);
+        const diskData = metrics.map(m => m.disk_percent || 0);
+
+        setChartData({
+          cpu: { labels, data: cpuData },
+          memory: { labels, data: memoryData },
+          temperature: { labels, data: temperatureData },
+          disk: { labels, data: diskData }
+        });
+
+        if (chartRef.current) {
+          chartRef.current.update();
+        }
+      }
+    } catch (error) {
+      /* noop */
+    } finally {
+      setIsLoadingHistorical(false);
+    }
+  }, [unifiedClient, timeRange]);
+
   // Fetch historical metrics data - only when timeRange changes or component mounts
   useEffect(() => {
     if (!unifiedClient) return;
-
-    const fetchHistoricalData = async () => {
-      setIsLoadingHistorical(true);
-      try {
-        // debug: fetching historical data
-        const response = await unifiedClient.getMetricsHistory(timeRange);
-        if (response && response.metrics) {
-          const metrics = response.metrics;
-          /* noop */
-          
-          // Process historical data with better timestamp handling
-          const labels = metrics.map(m => {
-            const date = new Date(m.timestamp * 1000);
-            return timeRange > 60 ? date.toLocaleString() : date.toLocaleTimeString();  // Full date-time for longer ranges
-          });
-          const cpuData = metrics.map(m => m.cpu_percent || 0);
-          const memoryData = metrics.map(m => m.memory_percent || 0);
-          const temperatureData = metrics.map(m => m.temperature || 0);
-          const diskData = metrics.map(m => m.disk_percent || 0);
-          
-          // Set the chart data with all available historical data
-          setChartData({ 
-            cpu: { labels, data: cpuData },
-            memory: { labels, data: memoryData },
-            temperature: { labels, data: temperatureData },
-            disk: { labels, data: diskData }
-          });
-          
-          
-          // Smooth update if chart exists
-          if (chartRef.current) {
-            chartRef.current.update();
-          }
-        } else {
-          // no metrics received
-        }
-      } catch (error) {
-        /* noop */
-      } finally {
-        setIsLoadingHistorical(false);
-      }
-    };
-
-    // Immediately fetch historical data when component mounts or timeRange changes
     fetchHistoricalData();
-    
-    // Set up periodic refresh for historical data (less frequent than real-time updates)
     const refreshInterval = Math.max(30000, timeRange * 1000 / 10);
     const interval = setInterval(fetchHistoricalData, refreshInterval);
-    
     return () => clearInterval(interval);
-  }, [unifiedClient, timeRange]);
+  }, [unifiedClient, timeRange, fetchHistoricalData]);
 
   const getChartConfig = (metric) => {
     const isDarkMode = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
@@ -420,37 +406,7 @@ const ResourceChart = ({ unifiedClient }) => {
           <button
             onClick={() => {
               setIsLoadingHistorical(true);
-              // Trigger a fresh fetch of historical data
-              setTimeout(() => {
-                const fetchHistoricalData = async () => {
-                  try {
-                    const response = await unifiedClient.getMetricsHistory(timeRange);
-                    if (response && response.metrics) {
-                      const metrics = response.metrics;
-                      const labels = metrics.map(m => {
-                        const date = new Date(m.timestamp * 1000);
-                        return timeRange > 60 ? date.toLocaleString() : date.toLocaleTimeString();
-                      });
-                      const cpuData = metrics.map(m => m.cpu_percent || 0);
-                      const memoryData = metrics.map(m => m.memory_percent || 0);
-                      const temperatureData = metrics.map(m => m.temperature || 0);
-                      const diskData = metrics.map(m => m.disk_percent || 0);
-                      
-                      setChartData({ 
-                        cpu: { labels, data: cpuData },
-                        memory: { labels, data: memoryData },
-                        temperature: { labels, data: temperatureData },
-                        disk: { labels, data: diskData }
-                      });
-                    }
-                  } catch (error) {
-                    /* noop */
-                  } finally {
-                    setIsLoadingHistorical(false);
-                  }
-                };
-                fetchHistoricalData();
-              }, 100);
+              setTimeout(() => { fetchHistoricalData(); }, 100);
             }}
             className="px-3 py-1 text-sm bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors duration-200 flex items-center space-x-1"
             title="Refresh historical data"

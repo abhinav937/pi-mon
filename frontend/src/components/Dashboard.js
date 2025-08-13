@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useQuery } from 'react-query';
 import { Memory as Cpu, Storage as HardDrive, Thermostat as Thermometer, Timeline as Activity, AccessTime as Clock, Wifi, TrendingUp, DataObject as Database, Bolt as Zap } from '@mui/icons-material';
 import toast from 'react-hot-toast';
+import { formatBytes } from '../utils/format';
+import { getStatusColor, getProgressBarColor } from '../utils/status';
 
 const Dashboard = ({ unifiedClient }) => {
   const [realTimeData, setRealTimeData] = useState(null);
@@ -59,28 +61,6 @@ const Dashboard = ({ unifiedClient }) => {
 
   // Use real-time data if available, otherwise fall back to query data
   const currentData = realTimeData || systemStats;
-
-  const getStatusColor = (percentage) => {
-    if (percentage === null || percentage === undefined || isNaN(percentage)) return 'text-gray-500';
-    if (percentage >= 90) return 'text-red-600';
-    if (percentage >= 70) return 'text-yellow-600';
-    return 'text-green-600';
-  };
-
-  const getProgressBarColor = (percentage) => {
-    if (percentage === null || percentage === undefined || isNaN(percentage)) return 'bg-gray-400';
-    if (percentage >= 90) return 'bg-red-500';
-    if (percentage >= 70) return 'bg-yellow-500';
-    return 'bg-green-500';
-  };
-
-  const formatBytes = (bytes) => {
-    if (bytes === 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-  };
 
   const formatNetworkRate = (bytesPerSecond) => {
     return formatBytes(bytesPerSecond) + '/s';

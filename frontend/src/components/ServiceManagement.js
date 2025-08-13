@@ -2,6 +2,7 @@ import React from 'react';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
 import { PlayArrow as Play, Stop as Square, RestartAlt as RotateCcw, Refresh as RefreshCw, Settings, CheckCircle, ErrorOutline as AlertCircle, Cancel as XCircle } from '@mui/icons-material';
 import toast from 'react-hot-toast';
+import { getStatusBadgeClass } from '../utils/status';
 
 function ServiceManagement({ unifiedClient }) {
   const queryClient = useQueryClient();
@@ -58,18 +59,7 @@ function ServiceManagement({ unifiedClient }) {
     }
   };
 
-  const getStatusBadgeClass = (status) => {
-    switch (status) {
-      case 'running':
-        return 'status-badge-success';
-      case 'stopped':
-        return 'status-badge-info';
-      case 'failed':
-        return 'status-badge-error';
-      default:
-        return 'status-badge-warning';
-    }
-  };
+  
 
   const ServiceCard = ({ service }) => (
     <div className="metric-card transition-all duration-200 hover:shadow-md">

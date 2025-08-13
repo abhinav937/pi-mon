@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useQuery } from 'react-query';
-import { Wifi, WifiOff, Public as Globe, Timeline as Activity, Download, Upload, SignalCellularAlt as Signal, Refresh as RefreshCw } from '@mui/icons-material';
+import { Wifi, WifiOff, Public as Globe, Timeline as Activity, Download, Upload, Refresh as RefreshCw } from '@mui/icons-material';
 import toast from 'react-hot-toast';
+import { formatSpeed } from '../utils/format';
 
 const NetworkMonitor = ({ unifiedClient }) => {
   const [selectedInterface, setSelectedInterface] = useState('all');
@@ -16,9 +17,8 @@ const NetworkMonitor = ({ unifiedClient }) => {
     {
       enabled: !!unifiedClient,
       refetchInterval: 10000, // Refetch every 10 seconds
-      onError: (err) => {
+      onError: () => {
         toast.error('Failed to fetch network information');
-        console.error('Network info error:', err);
       },
     }
   );
@@ -49,30 +49,9 @@ const NetworkMonitor = ({ unifiedClient }) => {
     }
   };
 
-  const getStatusColor = (status) => {
-    switch (status?.toLowerCase()) {
-      case 'up':
-      case 'active':
-        return 'text-green-600';
-      case 'down':
-      case 'inactive':
-        return 'text-red-600';
-      default:
-        return 'text-yellow-600';
-    }
-  };
+  
 
-  const formatBytes = (bytes) => {
-    if (bytes === 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-  };
-
-  const formatSpeed = (bytesPerSecond) => {
-    return formatBytes(bytesPerSecond) + '/s';
-  };
+  
 
   if (isLoading) {
     return (

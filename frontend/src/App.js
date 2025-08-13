@@ -69,7 +69,6 @@ function App() {
     const saved = localStorage.getItem('darkMode');
     return saved ? JSON.parse(saved) : window.matchMedia('(prefers-color-scheme: dark)').matches;
   });
-  const [showSettings, setShowSettings] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [frontendVersion, setFrontendVersion] = useState(process.env.REACT_APP_VERSION || '2.0.0');
@@ -286,14 +285,7 @@ function App() {
                   {isDarkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
                 </button>
 
-                {/* Settings Button */}
-                <button
-                  onClick={() => setShowSettings(!showSettings)}
-                  className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-200"
-                  title="Settings"
-                >
-                  <Settings className="h-4 w-4" />
-                </button>
+                
               </div>
 
               {/* Mobile Menu Button */}
@@ -388,17 +380,7 @@ function App() {
                   <span>Switch to {isDarkMode ? 'Light' : 'Dark'} Mode</span>
                 </button>
 
-                {/* Settings Button */}
-                <button
-                  onClick={() => {
-                    setShowSettings(!showSettings);
-                    setIsMobileMenuOpen(false);
-                  }}
-                  className="w-full flex items-center justify-center space-x-2 p-3 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 rounded-lg transition-colors duration-200"
-                >
-                  <Settings className="h-4 w-4" />
-                  <span>Settings</span>
-                </button>
+                
               </div>
             </div>
           </div>
@@ -438,21 +420,7 @@ function App() {
           </div>
         </main>
 
-        {/* Settings Panel */}
-        {showSettings && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-            <div className="max-w-4xl w-full max-h-[90vh] overflow-y-auto">
-              <Suspense fallback={<LoadingSpinner />}>
-                <SettingsPanel 
-                  isDarkMode={isDarkMode}
-                  setIsDarkMode={setIsDarkMode}
-                  unifiedClient={unifiedClient}
-                  onClose={() => setShowSettings(false)}
-                />
-              </Suspense>
-            </div>
-          </div>
-        )}
+        
 
         {/* Footer */}
         <footer className="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 mt-auto">

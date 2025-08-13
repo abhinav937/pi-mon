@@ -16,16 +16,22 @@ STATIC_IP="65.36.123.68"
 WEB_ROOT="/var/www/pi-monitor"
 NGINX_SITES_AVAILABLE="/etc/nginx/sites-available"
 NGINX_SITES_ENABLED="/etc/nginx/sites-enabled"
-PRODUCTION_URL="http://65.36.123.68"
+PRODUCTION_URL="https://65.36.123.68"  # Changed to HTTPS
 PI_MON_DIR="/home/abhinav/pi-mon"
 VENV_DIR="$PI_MON_DIR/.venv"
 SERVICE_FILE="/etc/systemd/system/pi-monitor-backend.service"
 STATE_DIR="$PI_MON_DIR/.deploy_state"
 
 # Port configuration
-PUBLIC_PORT="80"
-NGINX_PORT="80"
+PUBLIC_PORT="443"  # Changed to HTTPS port
+NGINX_PORT="443"   # Changed to HTTPS port
 BACKEND_PORT="5001"
+
+# Security configuration
+SSL_ENABLED=true
+SSL_CERT_DIR="$PI_MON_DIR/backend/certs"
+SSL_CERT_FILE="$SSL_CERT_DIR/server.crt"
+SSL_KEY_FILE="$SSL_CERT_DIR/server.key"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -235,6 +241,15 @@ if curl -fsS http://127.0.0.1:5001/health &>/dev/null; then
     BACKEND_ACCESSIBLE=true
 fi
 
+# Check SSL certificate status
+SSL_CERT_EXISTS=false
+if [ -f "$SSL_CERT_FILE" ] && [ -f "$SSL_KEY_FILE" ]; then
+    SSL_CERT_EXISTS=true
+    echo -e "${GREEN}✅ SSL certificates found${NC}"
+else
+    echo -e "${YELLOW}⚠️  SSL certificates not found${NC}"
+fi
+
 # =============================================================================
 # 2. CREATE USER AND DIRECTORY (if needed)
 # =============================================================================
@@ -262,6 +277,51 @@ if [ "$PI_MON_EXISTS" = false ]; then
     mkdir -p "$PI_MON_DIR"
     chown abhinav:abhinav "$PI_MON_DIR"
     echo -e "${GREEN}✅ Pi-mon directory created${NC}"
+fi
+
+# =============================================================================
+# 2.1 SETUP SSL CERTIFICATES (if needed)
+# =============================================================================
+if [ "$SSL_CERT_EXISTS" = false ] && [ "$SSL_ENABLED" = true ]; then
+    echo -e "\n${BLUE}🔒 Setting up SSL certificates...${NC}"
+    
+    # Install OpenSSL if not available
+    if ! command -v openssl &>/dev/null; then
+        echo "Installing OpenSSL..."
+        apt-get update -y
+        apt-get install -y openssl
+    fi
+    
+    # Create certs directory
+    mkdir -p "$SSL_CERT_DIR"
+    chown abhinav:abhinav "$SSL_CERT_DIR"
+    
+    # Generate self-signed certificate
+    echo "Generating self-signed SSL certificate..."
+    cd "$SSL_CERT_DIR"
+    
+    # Generate private key
+    openssl genrsa -out server.key 4096
+    
+    # Generate certificate signing request
+    openssl req -new -key server.key -out server.csr -subj "/C=US/ST=State/L=City/O=PiMonitor/CN=$DOMAIN"
+    
+    # Generate self-signed certificate
+    openssl x509 -req -in server.csr -signkey server.key -out server.crt -days 365
+    
+    # Set proper permissions
+    chmod 600 server.key
+    chmod 644 server.crt
+    
+    # Clean up CSR file
+    rm server.csr
+    
+    # Set ownership
+    chown abhinav:abhinav server.key server.crt
+    
+    echo -e "${GREEN}✅ SSL certificates generated successfully${NC}"
+    
+    cd "$SCRIPT_DIR"
 fi
 
 # =============================================================================
@@ -307,7 +367,7 @@ if [ "$SERVICE_EXISTS" = false ] || [ "$SERVICE_RUNNING" = false ]; then
     # Create proper service file
     cat > "$SERVICE_FILE" <<EOF
 [Unit]
-Description=Pi Monitor Backend Service
+Description=Pi Monitor Secure Backend Service
 After=network.target
 Wants=network.target
 
@@ -319,13 +379,16 @@ WorkingDirectory=$PI_MON_DIR/backend
 Environment=PYTHONUNBUFFERED=1
 Environment=PI_MONITOR_ENV=production
 Environment=PI_MONITOR_PRODUCTION_URL=$PRODUCTION_URL
+Environment=PI_MONITOR_SSL_ENABLED=$SSL_ENABLED
+Environment=PI_MONITOR_SSL_CERT_FILE=$SSL_CERT_FILE
+Environment=PI_MONITOR_SSL_KEY_FILE=$SSL_KEY_FILE
 EnvironmentFile=$PI_MON_DIR/backend/.env
-ExecStart=$VENV_DIR/bin/python $PI_MON_DIR/backend/start_service.py
+ExecStart=$VENV_DIR/bin/python $PI_MON_DIR/backend/secure_server.py
 Restart=always
 RestartSec=10
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=pi-monitor
+SyslogIdentifier=pi-monitor-secure
 
 # Resource limits
 LimitNOFILE=65536
@@ -336,7 +399,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=$PI_MON_DIR/backend $PI_MON_DIR
+ReadWritePaths=$PI_MON_DIR/backend $PI_MON_DIR $SSL_CERT_DIR
 
 # Auto-restart on failure
 StartLimitInterval=60
@@ -349,12 +412,53 @@ EOF
     # Create .env file if it doesn't exist
     if [ ! -f "$PI_MON_DIR/backend/.env" ]; then
         cat > "$PI_MON_DIR/backend/.env" <<EOF
-# Environment for Pi Monitor backend
+# Environment for Pi Monitor secure backend
 PI_MONITOR_API_KEY=pi-monitor-api-key-2024
 PI_MONITOR_ENV=production
 PI_MONITOR_PRODUCTION_URL=$PRODUCTION_URL
+PI_MONITOR_SSL_ENABLED=$SSL_ENABLED
+PI_MONITOR_SSL_CERT_FILE=$SSL_CERT_FILE
+PI_MONITOR_SSL_KEY_FILE=$SSL_KEY_FILE
 EOF
         chown abhinav:abhinav "$PI_MON_DIR/backend/.env"
+    fi
+
+    # Create security configuration if it doesn't exist
+    if [ ! -f "$PI_MON_DIR/backend/security_config.json" ]; then
+        cat > "$PI_MON_DIR/backend/security_config.json" <<EOF
+{
+  "ssl": {
+    "enabled": $SSL_ENABLED,
+    "cert_file": "$SSL_CERT_FILE",
+    "key_file": "$SSL_KEY_FILE",
+    "verify_mode": "none",
+    "check_hostname": false
+  },
+  "security_headers": {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "X-XSS-Protection": "1; mode=block",
+    "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+    "Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Permissions-Policy": "geolocation=(), microphone=(), camera=()"
+  },
+  "rate_limiting": {
+    "enabled": true,
+    "max_requests": 100,
+    "window_seconds": 60,
+    "burst_limit": 20
+  },
+  "authentication": {
+    "enabled": true,
+    "session_timeout": 3600,
+    "max_login_attempts": 5,
+    "lockout_duration": 900,
+    "require_https": true
+  }
+}
+EOF
+        chown abhinav:abhinav "$PI_MON_DIR/backend/security_config.json"
     fi
 
     # Reload systemd and start service
@@ -434,6 +538,7 @@ REACT_APP_API_BASE_URL=$PRODUCTION_URL
 REACT_APP_ENVIRONMENT=production
 REACT_APP_BACKEND_PORT=$BACKEND_PORT
 REACT_APP_FRONTEND_PORT=$NGINX_PORT
+REACT_APP_HTTPS_ENABLED=$SSL_ENABLED
 EOF
     
     # Build frontend
@@ -484,14 +589,36 @@ if [ "$NGINX_CONFIGURED" = false ]; then
     if [ -f "$PI_MON_DIR/nginx/pi-subdomain.conf" ]; then
         cp "$PI_MON_DIR/nginx/pi-subdomain.conf" "$NGINX_SITES_AVAILABLE/$DOMAIN"
     else
-        # Fallback configuration
+        # Fallback configuration with HTTPS support
         cat > "$NGINX_SITES_AVAILABLE/$DOMAIN" <<EOF
 server {
   listen 80;
   server_name $DOMAIN;
+  return 301 https://\$server_name\$request_uri;
+}
+
+server {
+  listen 443 ssl http2;
+  server_name $DOMAIN;
+
+  ssl_certificate $SSL_CERT_FILE;
+  ssl_certificate_key $SSL_KEY_FILE;
+  
+  # SSL configuration
+  ssl_protocols TLSv1.2 TLSv1.3;
+  ssl_ciphers ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-AES128-SHA256:ECDHE-RSA-AES256-SHA384;
+  ssl_prefer_server_ciphers off;
+  ssl_session_cache shared:SSL:10m;
+  ssl_session_timeout 10m;
 
   root $WEB_ROOT;
   index index.html;
+
+  # Security headers
+  add_header X-Content-Type-Options nosniff;
+  add_header X-Frame-Options DENY;
+  add_header X-XSS-Protection "1; mode=block";
+  add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
 
   location / {
     try_files \$uri /index.html;
@@ -582,7 +709,7 @@ fi
 
 # Check frontend
 echo "Testing frontend..." >&3
-if curl -fsS http://localhost/ &>/dev/null; then
+if curl -fsS -k https://localhost/ &>/dev/null; then
     :
 else
     echo "WARN: Frontend test failed (may be starting)" >&2
@@ -649,7 +776,7 @@ done
 
 # Test Nginx proxy to health
 echo "Checking Nginx proxy..." >&3
-if curl -fsS "http://localhost/health" &>/dev/null; then :; else echo "ERROR: Nginx proxy to /health failed" >&2; fi
+if curl -fsS -k "https://localhost/health" &>/dev/null; then :; else echo "ERROR: Nginx proxy to /health failed" >&2; fi
 
 # Check system resources
 :

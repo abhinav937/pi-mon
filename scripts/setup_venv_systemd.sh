@@ -128,7 +128,7 @@ User=$APP_USER
 WorkingDirectory=$BACKEND_DIR
 Environment=PYTHONUNBUFFERED=1
 EnvironmentFile=$ENV_FILE
-ExecStart=$VENV_DIR/bin/python main.py
+ExecStart=$VENV_DIR/bin/python services/start_service.py
 Restart=always
 RestartSec=5
 

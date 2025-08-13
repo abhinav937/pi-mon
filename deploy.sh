@@ -96,17 +96,22 @@ fi
 
 # Ensure backend service is configured for production
 echo -e "${YELLOW}🔧 Configuring backend service for production...${NC}"
-if [ -f "pi-monitor.service" ]; then
+SERVICE_FILE="/etc/systemd/system/pi-monitor-backend.service"
+if [ -f "$SERVICE_FILE" ]; then
     # Update service file to use production environment
-    sed -i "s|WorkingDirectory=.*|WorkingDirectory=$PI_MON_DIR|g" pi-monitor.service
-    sed -i "s|User=.*|User=abhinav|g" pi-monitor.service
-    sed -i "s|Group=.*|Group=abhinav|g" pi-monitor.service
+    sed -i "s|WorkingDirectory=.*|WorkingDirectory=$PI_MON_DIR|g" $SERVICE_FILE
+    sed -i "s|User=.*|User=abhinav|g" $SERVICE_FILE
+    sed -i "s|Group=.*|Group=abhinav|g" $SERVICE_FILE
+    # Add production environment if not present
+    if ! grep -q "Environment=PI_MONITOR_ENV=production" $SERVICE_FILE; then
+        sed -i '/ExecStart=/i Environment=PI_MONITOR_ENV=production\nEnvironment=PI_MONITOR_PRODUCTION_URL=http://65.36.123.68' $SERVICE_FILE
+    fi
     
-    # Copy service file to systemd
-    cp pi-monitor.service /etc/systemd/system/
     systemctl daemon-reload
     
     echo -e "${GREEN}✅ Backend service configured for production${NC}"
+else
+    echo -e "${RED}❌ Backend service file not found: $SERVICE_FILE${NC}"
 fi
 
 echo -e "${BLUE}🌐 Setting up subdomain configuration...${NC}"

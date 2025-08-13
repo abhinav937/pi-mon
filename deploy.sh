@@ -35,15 +35,85 @@ SSL_KEY_FILE="$SSL_CERT_DIR/server.key"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# -----------------------------------------------------------------------------
+# CLI flags
+# -----------------------------------------------------------------------------
+# Operations (can be combined). If none provided, run full install/update + verify
+DO_NGINX=false
+DO_FRONTEND=false
+DO_BACKEND=false
+DO_VERIFY=true
+FORCE_FRONTEND=false
+FORCE_BACKEND=false
+FORCE_NGINX=false
+RESET_STATE=false
+QUIET=true
+VERBOSE=false
+
+show_usage() {
+  cat >&2 <<EOF
+Usage: sudo ./deploy.sh [options]
+
+Operations (can be combined):
+  -n, --nginx            Update and reload Nginx using repo config
+  -f, --frontend         Rebuild and redeploy frontend (force)
+  -b, --backend          Update deps if needed and restart backend
+  -V, --verify           Run verification checks only (default: on)
+      --no-verify        Skip verification checks
+      --reset-state      Clear cached deploy state (~/.deploy_state)
+
+Output:
+  -q, --quiet            Concise output (default)
+  -x, --verbose          Verbose output (no suppression)
+  -h, --help             Show this help
+
+Examples:
+  sudo ./deploy.sh                    # full run (backend+frontend+nginx+verify)
+  sudo ./deploy.sh -n                 # only update/reload nginx
+  sudo ./deploy.sh -f -b              # rebuild frontend and restart backend
+  sudo ./deploy.sh -V                 # verification only
+EOF
+}
+
+ANY_SELECTED=false
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -n|--nginx)      DO_NGINX=true; FORCE_NGINX=true; ANY_SELECTED=true ;;
+    -f|--frontend)   DO_FRONTEND=true; FORCE_FRONTEND=true; ANY_SELECTED=true ;;
+    -b|--backend)    DO_BACKEND=true; FORCE_BACKEND=true; ANY_SELECTED=true ;;
+    -V|--verify)     DO_VERIFY=true; ANY_SELECTED=true ;;
+        --no-verify) DO_VERIFY=false ;;
+        --reset-state) RESET_STATE=true ;;
+    -q|--quiet)      QUIET=true ;;
+    -x|--verbose)    VERBOSE=true; QUIET=false ;;
+    -h|--help)       show_usage; exit 0 ;;
+    *) echo "Unknown option: $1" >&2; show_usage; exit 1 ;;
+  esac
+  shift
+done
+
+# If no specific ops selected, run full set
+if [ "$ANY_SELECTED" = false ]; then
+  DO_NGINX=true
+  DO_FRONTEND=true
+  DO_BACKEND=true
+  DO_VERIFY=true
+fi
+
 # Check if running as root or with sudo
 if [[ "$EUID" -ne 0 ]]; then
   echo "ERROR: This script must be run with sudo"
   exit 1
 fi
 
-# Quiet mode: suppress stdout. Use FD 3 for minimal notices (version updates), stderr for errors.
-exec 3>&1
-exec 1>/dev/null
+# Output mode: default concise, optional verbose
+if [ "$VERBOSE" = true ]; then
+  exec 3>&1
+else
+  # Concise: suppress stdout, keep minimal notices on FD 3
+  exec 3>&1
+  exec 1>/dev/null
+fi
 
 # =============================================================================
 # 1. CHECK CURRENT STATE
@@ -61,6 +131,12 @@ fi
 # Ensure deploy state directory exists
 mkdir -p "$STATE_DIR"
 chown abhinav:abhinav "$STATE_DIR"
+
+# Optional: reset cached deploy state
+if [ "$RESET_STATE" = true ]; then
+  echo "Resetting cached deploy state" >&3
+  rm -f "$STATE_DIR"/frontend_checksum "$STATE_DIR"/frontend_env_sig "$STATE_DIR"/backend_checksum "$STATE_DIR"/backend_version" 2>/dev/null || true
+fi
 
 # Determine if frontend needs rebuild based on version bump
 NEED_FRONTEND_BUILD=false
@@ -253,7 +329,12 @@ fi
 # =============================================================================
 # 2. CREATE USER AND DIRECTORY (if needed)
 # =============================================================================
-if [ "$USER_EXISTS" = false ]; then
+DO_SETUP_PREREQS=false
+if [ "$DO_NGINX" = true ] || [ "$DO_FRONTEND" = true ] || [ "$DO_BACKEND" = true ]; then
+  DO_SETUP_PREREQS=true
+fi
+
+if [ "$DO_SETUP_PREREQS" = true ] && [ "$USER_EXISTS" = false ]; then
     echo -e "\n${BLUE}👤 Creating user 'abhinav'...${NC}"
     
     # Create group 'abhinav' if it doesn't exist
@@ -272,7 +353,7 @@ if [ "$USER_EXISTS" = false ]; then
     echo -e "${GREEN}✅ User 'abhinav' created successfully${NC}"
 fi
 
-if [ "$PI_MON_EXISTS" = false ]; then
+if [ "$DO_SETUP_PREREQS" = true ] && [ "$PI_MON_EXISTS" = false ]; then
     echo -e "\n${BLUE}📁 Creating pi-mon directory...${NC}"
     mkdir -p "$PI_MON_DIR"
     chown abhinav:abhinav "$PI_MON_DIR"
@@ -282,7 +363,7 @@ fi
 # =============================================================================
 # 2.1 SETUP SSL CERTIFICATES (if needed)
 # =============================================================================
-if [ "$SSL_CERT_EXISTS" = false ] && [ "$SSL_ENABLED" = true ]; then
+if [ "$DO_NGINX" = true ] && [ "$SSL_CERT_EXISTS" = false ] && [ "$SSL_ENABLED" = true ]; then
     echo -e "\n${BLUE}🔒 Setting up SSL certificates...${NC}"
     
     # Install OpenSSL if not available
@@ -327,7 +408,7 @@ fi
 # =============================================================================
 # 3. SETUP VIRTUAL ENVIRONMENT (if needed)
 # =============================================================================
-if [ "$VENV_EXISTS" = false ]; then
+if [ "$DO_BACKEND" = true ] && [ "$VENV_EXISTS" = false ]; then
     echo -e "\n${BLUE}🐍 Setting up Python virtual environment...${NC}"
     
     # Install Python venv if not available
@@ -350,7 +431,7 @@ if [ "$VENV_EXISTS" = false ]; then
         echo -e "${RED}❌ requirements.txt not found${NC}"
         exit 1
     fi
-else
+elif [ "$DO_BACKEND" = true ]; then
     echo -e "\n${BLUE}🔄 Updating virtual environment dependencies...${NC}"
     if [ -f "$PI_MON_DIR/backend/requirements.txt" ]; then
         "$VENV_DIR/bin/pip" install -r "$PI_MON_DIR/backend/requirements.txt" --upgrade
@@ -361,7 +442,7 @@ fi
 # =============================================================================
 # 4. SETUP BACKEND SERVICE (if needed or broken)
 # =============================================================================
-if [ "$SERVICE_EXISTS" = false ] || [ "$SERVICE_RUNNING" = false ]; then
+if [ "$DO_BACKEND" = true ] && { [ "$SERVICE_EXISTS" = false ] || [ "$SERVICE_RUNNING" = false ]; }; then
     echo -e "\n${BLUE}🔧 Setting up backend service...${NC}"
     
     # Create proper service file
@@ -486,7 +567,10 @@ fi
 # =============================================================================
 # 4.1 APPLY BACKEND UPDATES IF CHANGED
 # =============================================================================
-if [ "$NEED_BACKEND_RESTART" = true ]; then
+# Respect CLI force
+if [ "$FORCE_BACKEND" = true ]; then NEED_BACKEND_RESTART=true; fi
+
+if [ "$DO_BACKEND" = true ] && [ "$NEED_BACKEND_RESTART" = true ]; then
     echo "UPDATE: Restarting backend (changes detected)" >&3
     if [ -f "$PI_MON_DIR/backend/requirements.txt" ]; then
         echo "Updating Python dependencies (if needed)..."
@@ -509,7 +593,7 @@ if [ "$NEED_BACKEND_RESTART" = true ]; then
         journalctl -u pi-monitor-backend.service --no-pager -n 20 || true
         exit 1
     fi
-else
+elif [ "$DO_BACKEND" = true ]; then
     if [ -n "$SOURCE_BACKEND_VERSION" ]; then
         echo "OK: Backend up-to-date (version $SOURCE_BACKEND_VERSION)" >&3
     else
@@ -520,7 +604,10 @@ fi
 # =============================================================================
 # 5. BUILD FRONTEND (if needed)
 # =============================================================================
-if [ "$NEED_FRONTEND_BUILD" = true ]; then
+# Respect CLI force
+if [ "$FORCE_FRONTEND" = true ]; then NEED_FRONTEND_BUILD=true; fi
+
+if [ "$DO_FRONTEND" = true ] && [ "$NEED_FRONTEND_BUILD" = true ]; then
     echo "UPDATE: Building frontend" >&3
     
     # Install Node.js if not available
@@ -563,7 +650,7 @@ EOF
         echo "$CURRENT_FRONTEND_ENV_SIG" > "$FRONTEND_ENV_SIG_FILE"
         chown abhinav:abhinav "$FRONTEND_ENV_SIG_FILE"
     fi
-else
+elif [ "$DO_FRONTEND" = true ]; then
     DISPLAY_FRONTEND_VERSION="$DEPLOYED_FRONTEND_VERSION"
     if [ -z "$DISPLAY_FRONTEND_VERSION" ]; then DISPLAY_FRONTEND_VERSION="$SOURCE_FRONTEND_VERSION"; fi
     if [ -n "$DISPLAY_FRONTEND_VERSION" ]; then
@@ -574,9 +661,9 @@ else
 fi
 
 # =============================================================================
-# 6. SETUP NGINX (if needed)
+# 6. UPDATE/SETUP NGINX (on demand)
 # =============================================================================
-if [ "$NGINX_CONFIGURED" = false ]; then
+if [ "$DO_NGINX" = true ]; then
     echo "Setting up Nginx..." >&3
     
     # Install Nginx if not available
@@ -586,7 +673,7 @@ if [ "$NGINX_CONFIGURED" = false ]; then
         apt-get install -y nginx
     fi
     
-    # Copy Nginx configuration
+    # Copy Nginx configuration (repo version preferred)
     if [ -f "$PI_MON_DIR/nginx/pi-subdomain.conf" ]; then
         cp "$PI_MON_DIR/nginx/pi-subdomain.conf" "$NGINX_SITES_AVAILABLE/$DOMAIN"
     else
@@ -660,15 +747,14 @@ EOF
     nginx -t
     systemctl restart nginx
     echo "Nginx configured and started" >&3
-else
-    :
 fi
 
 # =============================================================================
 # 7. FINAL VERIFICATION
 # =============================================================================
+if [ "$DO_VERIFY" = true ]; then
 echo "Verifying..." >&3
-sleep 5
+sleep 2
 
 # Check backend service
 if systemctl is-active --quiet pi-monitor-backend.service; then
@@ -740,6 +826,7 @@ else
 fi
 
 # Final comprehensive test
+if [ "$DO_VERIFY" = true ]; then
 echo "Running API checks..." >&3
 
 # Prepare auth header from .env if available
@@ -778,9 +865,19 @@ done
 # Test Nginx proxy to health
 echo "Checking Nginx proxy..." >&3
 if curl -fsS -k "https://localhost/health" &>/dev/null; then :; else echo "ERROR: Nginx proxy to /health failed" >&2; fi
+fi
 
 # Check system resources
 :
 
-# Success summary
+# Success summary (concise)
 echo "Done." >&3
+echo "Summary:" >&3
+if [ "$DO_BACKEND" = true ]; then
+  if [ "$NEED_BACKEND_RESTART" = true ]; then echo " - Backend: restarted" >&3; else echo " - Backend: unchanged" >&3; fi
+fi
+if [ "$DO_FRONTEND" = true ]; then
+  if [ "$NEED_FRONTEND_BUILD" = true ]; then echo " - Frontend: rebuilt" >&3; else echo " - Frontend: unchanged" >&3; fi
+fi
+if [ "$DO_NGINX" = true ]; then echo " - Nginx: updated and reloaded" >&3; fi
+if [ "$DO_VERIFY" = true ]; then echo " - Verify: completed" >&3; fi

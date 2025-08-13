@@ -8,6 +8,7 @@ import json
 import time
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
+import os
 from urllib.parse import urlparse, parse_qs
 
 from config import config
@@ -25,6 +26,7 @@ class PiMonitorServer:
     
     def __init__(self, port=None):
         self.port = port or config.get_port('backend')
+        self.start_time = time.time()
         self.metrics_collector = MetricsCollector()
         self.database = MetricsDatabase()
         self.system_monitor = SystemMonitor()
@@ -132,6 +134,8 @@ class PiMonitorHandler(BaseHTTPRequestHandler):
             self._handle_root_endpoint()
         elif path == '/health':
             self._handle_health_check()
+        elif path == '/api/version':
+            self._handle_version()
         elif path == '/api/system':
             self._handle_system_stats(query_params)
         elif path == '/api/system/enhanced':
@@ -222,7 +226,27 @@ class PiMonitorHandler(BaseHTTPRequestHandler):
             "timestamp": time.strftime('%Y-%m-%d %H:%M:%S'),
             "version": config.get('project.version', '1.0.0'),
             "uptime": self.server_instance.system_monitor.get_uptime(),
-            "enhanced_monitoring": True
+            "enhanced_monitoring": True,
+            "service": "backend",
+            "name": config.get('project.name', 'Pi Monitor')
+        }
+        self.wfile.write(json.dumps(response).encode())
+
+    def _handle_version(self):
+        """Return backend version and build information"""
+        self.send_response(200)
+        self._set_common_headers()
+        version = config.get('project.version', '1.0.0')
+        name = config.get('project.name', 'Pi Monitor')
+        commit = config.get('project.commit', None) or os.environ.get('PI_MONITOR_COMMIT')
+        started_at = self.server_instance.start_time
+        response = {
+            "service": "backend",
+            "name": name,
+            "version": version,
+            "commit": commit,
+            "started_at": time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(started_at)),
+            "uptime_seconds": int(time.time() - started_at)
         }
         self.wfile.write(json.dumps(response).encode())
     
@@ -528,6 +552,13 @@ class PiMonitorHandler(BaseHTTPRequestHandler):
         """Set common response headers"""
         self.send_header('Content-type', 'application/json')
         self._set_cors_headers()
+        # Versioning headers for easier diagnostics
+        try:
+            self.send_header('X-PiMonitor-Name', config.get('project.name', 'Pi Monitor'))
+            self.send_header('X-PiMonitor-Version', config.get('project.version', '1.0.0'))
+            self.send_header('X-PiMonitor-Service', 'backend')
+        except Exception:
+            pass
         self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
         self.send_header('Pragma', 'no-cache')
         self.send_header('Expires', '0')
@@ -538,6 +569,8 @@ class PiMonitorHandler(BaseHTTPRequestHandler):
         self.send_header('Access-Control-Allow-Origin', '*')
         self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+        # Expose custom headers so frontend can read versioning
+        self.send_header('Access-Control-Expose-Headers', 'X-PiMonitor-Name, X-PiMonitor-Version, X-PiMonitor-Service')
     
     def _send_unauthorized(self):
         """Send unauthorized response"""

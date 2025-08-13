@@ -1,7 +1,7 @@
 import React from 'react';
 import { Wifi, WifiOff, AccessTime as Clock } from '@mui/icons-material';
 
-const ConnectionStatus = ({ status, isOnline, lastUpdate, isMobile = false }) => {
+const ConnectionStatus = ({ status, isOnline, lastUpdate, isMobile = false, backendVersion }) => {
   const getStatusColor = () => {
     switch (status) {
       case 'connected':
@@ -51,6 +51,13 @@ const ConnectionStatus = ({ status, isOnline, lastUpdate, isMobile = false }) =>
           {getStatusText()}
         </span>
       </div>
+
+      {/* Backend Version */}
+      {backendVersion && status === 'connected' && (
+        <div className="text-xs text-gray-500 dark:text-gray-400">
+          Backend v{backendVersion}
+        </div>
+      )}
 
       {/* Last Update */}
       {lastUpdate && status === 'connected' && (

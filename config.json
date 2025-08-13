@@ -52,6 +52,7 @@
     "endpoints": {
       "root": "/",
       "health": "/health",
+      "version": "/api/version",
       "auth": "/api/auth/token",
       "system": "/api/system",
       "metrics": "/api/metrics",

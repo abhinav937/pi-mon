@@ -151,6 +151,8 @@ class UnifiedClient {
       }
     );
     
+    this.backendInfo = null;
+    this.backendHeaders = {};
     this.initializeConnection();
   }
 
@@ -159,7 +161,19 @@ class UnifiedClient {
       if (!this.apiKey) {
         await this.authenticate();
       }
-      await this.checkHealth();
+      const health = await this.checkHealth();
+      // Read version headers if available
+      try {
+        if (health && health.__headers) {
+          this.backendHeaders = health.__headers;
+        }
+      } catch (_) {}
+      // Fetch detailed version info (non-fatal)
+      try {
+        this.backendInfo = await this.getVersion();
+      } catch (e) {
+        logDebug('Version endpoint not available, will rely on headers', {}, 'error');
+      }
       this.setConnectionState(CONNECTION_STATES.CONNECTED);
       this.startPolling();
     } catch (error) {
@@ -239,10 +253,31 @@ class UnifiedClient {
   async checkHealth() {
     try {
       const response = await this.httpClient.get('/health');
+      // Attach headers for version visibility to the return object
+      const data = response.data || {};
+      data.__headers = response.headers || {};
+      return data;
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  async getVersion() {
+    try {
+      const response = await this.httpClient.get('/api/version');
+      // Save headers as well for convenience
+      this.backendHeaders = response.headers || {};
       return response.data;
     } catch (error) {
       throw error;
     }
+  }
+
+  getBackendInfo() {
+    return {
+      info: this.backendInfo,
+      headers: this.backendHeaders
+    };
   }
 
   async getServices() {

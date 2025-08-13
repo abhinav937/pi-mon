@@ -66,6 +66,7 @@ function App() {
   const [connectionStatus, setConnectionStatus] = useState('connecting');
   const [unifiedClient, setUnifiedClient] = useState(null);
   const [lastUpdate, setLastUpdate] = useState(null);
+  const [backendInfo, setBackendInfo] = useState(null);
   const [isDarkMode, setIsDarkMode] = useState(() => {
     const saved = localStorage.getItem('darkMode');
     return saved ? JSON.parse(saved) : window.matchMedia('(prefers-color-scheme: dark)').matches;
@@ -73,6 +74,7 @@ function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [frontendVersion, setFrontendVersion] = useState(process.env.REACT_APP_VERSION || '2.0.0');
 
   // Initialize unified client with better error handling
   useEffect(() => {
@@ -102,6 +104,42 @@ function App() {
       client.disconnect();
     };
   }, []);
+
+  // Load frontend version from public/version.json if available
+  useEffect(() => {
+    const loadFrontendVersion = async () => {
+      try {
+        const res = await fetch('/version.json', { cache: 'no-store' });
+        if (res.ok) {
+          const v = await res.json();
+          if (v?.version) {
+            setFrontendVersion(v.version);
+          }
+        }
+      } catch (_) {}
+    };
+    loadFrontendVersion();
+  }, []);
+
+  // When connected, fetch backend version info
+  useEffect(() => {
+    const fetchBackendInfo = async () => {
+      if (!unifiedClient || connectionStatus !== 'connected') return;
+      try {
+        const info = await unifiedClient.getVersion();
+        setBackendInfo(info);
+      } catch (e) {
+        // Fallback: try to use headers from last health check if available
+        const meta = unifiedClient.getBackendInfo();
+        if (meta && meta.headers) {
+          setBackendInfo({
+            version: meta.headers['x-pimonitor-version'] || meta.headers['X-PiMonitor-Version']
+          });
+        }
+      }
+    };
+    fetchBackendInfo();
+  }, [unifiedClient, connectionStatus]);
 
   // Handle online/offline status
   useEffect(() => {
@@ -230,6 +268,7 @@ function App() {
                   status={connectionStatus}
                   isOnline={isOnline}
                   lastUpdate={lastUpdate}
+                  backendVersion={backendInfo?.version}
                 />
 
                 {/* Refresh Button */}
@@ -426,7 +465,10 @@ function App() {
                 © 2024 Pi Monitor - Raspberry Pi Monitoring Dashboard
               </div>
               <div className="flex items-center space-x-4">
-                <span>Version 2.0.0</span>
+                <span>Frontend v{frontendVersion}</span>
+                {backendInfo?.version && (
+                  <span>Backend v{backendInfo.version}</span>
+                )}
                 {process.env.NODE_ENV === 'development' && (
                   <span className="px-2 py-1 bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200 rounded text-xs">
                     DEV

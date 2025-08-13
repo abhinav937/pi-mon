@@ -10,15 +10,15 @@ import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
-from config import config
-from auth import AuthManager
-from metrics import MetricsCollector
-from database import MetricsDatabase
-from system_monitor import SystemMonitor
-from service_manager import ServiceManager
-from power_manager import PowerManager
-from log_manager import LogManager
-from utils import rate_limit, monitor_performance
+from config.config import config
+from config.auth import AuthManager
+from services.metrics import MetricsCollector
+from core.database import MetricsDatabase
+from services.system_monitor import SystemMonitor
+from services.service_manager import ServiceManager
+from services.power_manager import PowerManager
+from utils.log_manager import LogManager
+from utils.utils import rate_limit, monitor_performance
 
 class PiMonitorServer:
     """Main Pi Monitor HTTP server"""

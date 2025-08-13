@@ -15,31 +15,31 @@ def test_imports():
     try:
         print("🧪 Testing imports...")
         
-        from config import config
+        from config.config import config
         print("✅ Config imported successfully")
         
-        from server import PiMonitorServer
+        from services.server import PiMonitorServer
         print("✅ Server imported successfully")
         
-        from auth import AuthManager
+        from config.auth import AuthManager
         print("✅ Auth imported successfully")
         
-        from metrics import MetricsCollector
+        from services.metrics import MetricsCollector
         print("✅ Metrics imported successfully")
         
-        from database import MetricsDatabase
+        from core.database import MetricsDatabase
         print("✅ Database imported successfully")
         
-        from system_monitor import SystemMonitor
+        from services.system_monitor import SystemMonitor
         print("✅ SystemMonitor imported successfully")
         
-        from service_manager import ServiceManager
+        from services.service_manager import ServiceManager
         print("✅ ServiceManager imported successfully")
         
-        from power_manager import PowerManager
+        from services.power_manager import PowerManager
         print("✅ PowerManager imported successfully")
         
-        from log_manager import LogManager
+        from utils.log_manager import LogManager
         print("✅ LogManager imported successfully")
         
         print("✅ All imports successful!")
@@ -54,7 +54,7 @@ def test_config():
     try:
         print("\n🧪 Testing configuration...")
         
-        from config import config
+        from config.config import config
         
         print(f"✅ Config file: {config.config_file}")
         print(f"✅ Backend port: {config.get_port('backend')}")
@@ -71,7 +71,7 @@ def test_server_creation():
     try:
         print("\n🧪 Testing server creation...")
         
-        from server import PiMonitorServer
+        from services.server import PiMonitorServer
         
         server = PiMonitorServer(port=5001)
         print("✅ Server created successfully")

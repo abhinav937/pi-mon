@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Close as X, Save, Refresh as RefreshCw, Monitor, Notifications as Bell, Shield, Palette, DataObject as Database } from '@mui/icons-material';
 import toast from 'react-hot-toast';
 
-const SettingsPanel = ({ isDarkMode, setIsDarkMode, onClose }) => {
+const SettingsPanel = ({ isDarkMode, setIsDarkMode, onClose, unifiedClient }) => {
   const [settings, setSettings] = useState({
     refreshInterval: 5000,
     notifications: true,
@@ -18,6 +18,17 @@ const SettingsPanel = ({ isDarkMode, setIsDarkMode, onClose }) => {
 
   const [activeTab, setActiveTab] = useState('general');
 
+  // Load saved settings on mount
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('pi-monitor-settings');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        setSettings(prev => ({ ...prev, ...parsed }));
+      }
+    } catch (_) {}
+  }, []);
+
   const handleSettingChange = (key, value) => {
     setSettings(prev => ({
       ...prev,
@@ -31,7 +42,9 @@ const SettingsPanel = ({ isDarkMode, setIsDarkMode, onClose }) => {
     
     // Apply theme change
     if (settings.theme !== (isDarkMode ? 'dark' : 'light')) {
-      setIsDarkMode(settings.theme === 'dark');
+      if (setIsDarkMode) {
+        setIsDarkMode(settings.theme === 'dark');
+      }
     }
     
     toast.success('Settings saved successfully');
@@ -290,7 +303,27 @@ const SettingsPanel = ({ isDarkMode, setIsDarkMode, onClose }) => {
             Download all collected data as JSON
           </p>
         </div>
-        <button className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-md transition-colors duration-200">
+        <button
+          onClick={async () => {
+            try {
+              if (!unifiedClient) throw new Error('Client not ready');
+              const data = await unifiedClient.exportMetrics();
+              const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = `pi-monitor-metrics-${new Date().toISOString().replace(/[:.]/g,'-')}.json`;
+              document.body.appendChild(a);
+              a.click();
+              document.body.removeChild(a);
+              URL.revokeObjectURL(url);
+              toast.success('Data exported');
+            } catch (e) {
+              toast.error('Export failed');
+            }
+          }}
+          className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-md transition-colors duration-200"
+        >
           Export
         </button>
       </div>
@@ -304,7 +337,19 @@ const SettingsPanel = ({ isDarkMode, setIsDarkMode, onClose }) => {
             Remove all stored data (irreversible)
           </p>
         </div>
-        <button className="px-3 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-md transition-colors duration-200">
+        <button
+          onClick={async () => {
+            try {
+              if (!window.confirm('This will permanently delete all stored metrics. Continue?')) return;
+              if (!unifiedClient) throw new Error('Client not ready');
+              await unifiedClient.clearMetrics();
+              toast.success('All data cleared');
+            } catch (e) {
+              toast.error('Failed to clear data');
+            }
+          }}
+          className="px-3 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-md transition-colors duration-200"
+        >
           Clear
         </button>
       </div>
@@ -384,32 +429,34 @@ const SettingsPanel = ({ isDarkMode, setIsDarkMode, onClose }) => {
   };
 
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-4xl w-full mx-4">
+    <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-4xl w-full mx-2 sm:mx-4">
       {/* Header */}
       <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
         <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
           Settings
         </h2>
-        <button
-          onClick={onClose}
-          className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-200"
-        >
-          <X className="h-5 w-5" />
-        </button>
+        {onClose && (
+          <button
+            onClick={onClose}
+            className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-200"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        )}
       </div>
 
       {/* Content */}
-      <div className="flex">
+      <div className="flex flex-col md:flex-row">
         {/* Sidebar */}
-        <div className="w-64 border-r border-gray-200 dark:border-gray-700">
-          <nav className="p-4">
+        <div className="w-full md:w-64 md:border-r border-gray-200 dark:border-gray-700">
+          <nav className="p-2 md:p-4 flex md:block overflow-x-auto space-x-2 md:space-x-0">
             {tabs.map((tab) => {
               const Icon = tab.icon;
               return (
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
-                  className={`w-full flex items-center space-x-3 px-3 py-2 text-sm font-medium rounded-md transition-colors duration-200 ${
+                  className={`flex-shrink-0 w-auto md:w-full flex items-center space-x-3 px-3 py-2 text-sm font-medium rounded-md transition-colors duration-200 ${
                     activeTab === tab.id
                       ? 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300'
                       : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100 dark:text-gray-400 dark:hover:text-gray-300 dark:hover:bg-gray-700'
@@ -424,7 +471,7 @@ const SettingsPanel = ({ isDarkMode, setIsDarkMode, onClose }) => {
         </div>
 
         {/* Main Content */}
-        <div className="flex-1 p-6">
+        <div className="flex-1 p-4 md:p-6">
           {renderTabContent()}
         </div>
       </div>
@@ -440,12 +487,14 @@ const SettingsPanel = ({ isDarkMode, setIsDarkMode, onClose }) => {
         </button>
 
         <div className="flex space-x-3">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-md transition-colors duration-200"
-          >
-            Cancel
-          </button>
+          {onClose && (
+            <button
+              onClick={onClose}
+              className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-md transition-colors duration-200"
+            >
+              Cancel
+            </button>
+          )}
           <button
             onClick={handleSave}
             className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors duration-200 flex items-center space-x-2"

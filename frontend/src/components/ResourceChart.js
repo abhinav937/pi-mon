@@ -151,11 +151,11 @@ const ResourceChart = ({ unifiedClient }) => {
     const fetchHistoricalData = async () => {
       setIsLoadingHistorical(true);
       try {
-        console.log(`Fetching historical data for last ${timeRange} minutes...`);
+        // debug: fetching historical data
         const response = await unifiedClient.getMetricsHistory(timeRange);
         if (response && response.metrics) {
           const metrics = response.metrics;
-          console.log(`Received ${metrics.length} historical data points`);
+          /* noop */
           
           // Process historical data with better timestamp handling
           const labels = metrics.map(m => {
@@ -175,17 +175,16 @@ const ResourceChart = ({ unifiedClient }) => {
             disk: { labels, data: diskData }
           });
           
-          console.log(`Historical data loaded: CPU=${cpuData.length} points, Memory=${memoryData.length} points, Temp=${temperatureData.length} points, Disk=${diskData.length} points`);
           
           // Smooth update if chart exists
           if (chartRef.current) {
             chartRef.current.update();
           }
         } else {
-          console.warn('No metrics data received from backend');
+          // no metrics received
         }
       } catch (error) {
-        console.error('Failed to fetch historical metrics:', error);
+        /* noop */
       } finally {
         setIsLoadingHistorical(false);
       }
@@ -363,7 +362,7 @@ const ResourceChart = ({ unifiedClient }) => {
 
   // Safety check to ensure chartData is properly initialized
   if (!chartData[selectedMetric] || !Array.isArray(chartData[selectedMetric].data)) {
-    console.warn(`Chart data for ${selectedMetric} is not properly initialized`);
+    /* noop */
   }
 
   return (
@@ -379,14 +378,14 @@ const ResourceChart = ({ unifiedClient }) => {
       </div>
 
       {/* Metric Selection */}
-      <div className="flex space-x-4 border-b border-gray-200 dark:border-gray-700">
+      <div className="flex flex-wrap gap-2 sm:space-x-4 border-b border-gray-200 dark:border-gray-700">
         {metrics.map((metric) => {
           const Icon = metric.icon;
           return (
             <button
               key={metric.id}
               onClick={() => setSelectedMetric(metric.id)}
-              className={`flex items-center space-x-2 px-4 py-2 border-b-2 transition-colors duration-200 ${
+              className={`flex items-center space-x-2 px-3 sm:px-4 py-2 border-b-2 transition-colors duration-200 ${
                 selectedMetric === metric.id
                   ? 'border-blue-500 text-blue-600 dark:text-blue-400'
                   : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
@@ -400,10 +399,10 @@ const ResourceChart = ({ unifiedClient }) => {
       </div>
 
       {/* Time Range Selector */}
-      <div className="flex items-center justify-between bg-gray-50 dark:bg-gray-800 p-4 rounded-lg">
-        <div className="flex items-center space-x-4">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-gray-50 dark:bg-gray-800 p-3 sm:p-4 rounded-lg">
+        <div className="flex items-center space-x-2 sm:space-x-4">
           <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Time Range:</span>
-          <div className="flex space-x-2">
+          <div className="flex flex-wrap gap-2">
             {[15, 30, 60, 120].map((minutes) => (
               <button
                 key={minutes}
@@ -445,7 +444,7 @@ const ResourceChart = ({ unifiedClient }) => {
                       });
                     }
                   } catch (error) {
-                    console.error('Failed to refresh historical data:', error);
+                    /* noop */
                   } finally {
                     setIsLoadingHistorical(false);
                   }
@@ -497,7 +496,7 @@ const ResourceChart = ({ unifiedClient }) => {
                 };
                 return <Line ref={chartRef} {...validatedData} />;
               } catch (error) {
-                console.error('Chart rendering error:', error);
+                /* noop */
                 return (
                   <div className="h-full flex items-center justify-center text-red-500">
                     Chart failed to load: {error.message}. Please refresh.

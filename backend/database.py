@@ -205,6 +205,22 @@ class MetricsDatabase:
         except Exception as e:
             logger.error(f"Failed to get database stats: {e}")
             return {}
+
+    def clear_all_metrics(self):
+        """Delete all records from metrics table and return count"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute('SELECT COUNT(*) FROM metrics')
+                total_before = cursor.fetchone()[0]
+                cursor.execute('DELETE FROM metrics')
+                deleted_count = cursor.rowcount if cursor.rowcount is not None else total_before
+                conn.commit()
+                logger.info(f"Cleared {deleted_count} metrics records")
+                return deleted_count
+        except Exception as e:
+            logger.error(f"Failed to clear metrics: {e}")
+            return 0
     
     def store_system_info(self, key, value):
         """Store system information in database"""

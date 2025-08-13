@@ -327,6 +327,24 @@ class UnifiedClient {
     }
   }
 
+  async exportMetrics() {
+    try {
+      const response = await this.httpClient.get('/api/metrics/export');
+      return response.data;
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  async clearMetrics() {
+    try {
+      const response = await this.httpClient.post('/api/metrics/clear');
+      return response.data;
+    } catch (error) {
+      throw error;
+    }
+  }
+
   // Network monitoring methods
   async getNetworkInfo() {
     try {

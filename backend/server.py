@@ -160,6 +160,8 @@ class PiMonitorHandler(BaseHTTPRequestHandler):
             self._handle_metrics_history(query_params)
         elif path == '/api/metrics/database':
             self._handle_database_stats()
+        elif path == '/api/metrics/export':
+            self._handle_metrics_export()
         elif path == '/api/refresh':
             self._handle_refresh()
         elif path == '/api/power':
@@ -187,6 +189,8 @@ class PiMonitorHandler(BaseHTTPRequestHandler):
             self._handle_power_restart()
         elif path == '/api/power/sleep':
             self._handle_power_sleep()
+        elif path == '/api/metrics/clear':
+            self._handle_metrics_clear()
         elif path.startswith('/api/service/'):
             self._handle_service_post_endpoints(path)
         else:
@@ -404,6 +408,41 @@ class PiMonitorHandler(BaseHTTPRequestHandler):
         
         response = self.server_instance.database.get_database_stats()
         self.wfile.write(json.dumps(response).encode())
+
+    def _handle_metrics_export(self):
+        """Export metrics as JSON"""
+        if not self._check_auth():
+            self._send_unauthorized()
+            return
+        try:
+            # Large range to include most historical data
+            metrics = self.server_instance.database.get_metrics_history(minutes=525600, limit=1000000)
+            self.send_response(200)
+            # Override headers for download-friendly response
+            self.send_header('Content-type', 'application/json')
+            self._set_cors_headers()
+            self.end_headers()
+            response = {
+                "exported_at": time.strftime('%Y-%m-%d %H:%M:%S'),
+                "count": len(metrics),
+                "metrics": metrics
+            }
+            self.wfile.write(json.dumps(response).encode())
+        except Exception as e:
+            self._send_internal_error(f"Failed to export metrics: {str(e)}")
+
+    def _handle_metrics_clear(self):
+        """Clear all metrics from the database"""
+        if not self._check_auth():
+            self._send_unauthorized()
+            return
+        try:
+            deleted = self.server_instance.database.clear_all_metrics()
+            self.send_response(200)
+            self._set_common_headers()
+            self.wfile.write(json.dumps({"success": True, "deleted": deleted}).encode())
+        except Exception as e:
+            self._send_internal_error(f"Failed to clear metrics: {str(e)}")
     
     def _handle_refresh(self):
         """Handle refresh"""

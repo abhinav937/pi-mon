@@ -189,7 +189,7 @@ function App() {
   };
 
   const renderActiveComponent = () => {
-    const props = { unifiedClient, isDarkMode };
+    const props = { unifiedClient, isDarkMode, setIsDarkMode };
     
     switch (activeTab) {
       case 'dashboard':
@@ -445,11 +445,12 @@ function App() {
         {/* Settings Panel */}
         {showSettings && (
           <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-            <div className="bg-white dark:bg-gray-800 rounded-lg p-4 sm:p-6 max-w-md w-full max-h-[90vh] overflow-y-auto">
+            <div className="max-w-4xl w-full max-h-[90vh] overflow-y-auto">
               <Suspense fallback={<LoadingSpinner />}>
                 <SettingsPanel 
                   isDarkMode={isDarkMode}
                   setIsDarkMode={setIsDarkMode}
+                  unifiedClient={unifiedClient}
                   onClose={() => setShowSettings(false)}
                 />
               </Suspense>

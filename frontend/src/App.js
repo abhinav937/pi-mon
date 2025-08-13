@@ -1,7 +1,7 @@
 import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { QueryClient, QueryClientProvider } from 'react-query';
 import { Toaster } from 'react-hot-toast';
-import { ErrorOutline as AlertCircle, Wifi, WifiOff, LightMode as Sun, DarkMode as Moon, Settings, Refresh as RefreshCw, Menu, Close as X, Dashboard as LayoutDashboard, Monitor, BarChart, Bolt as Zap, Build as Wrench, Public as Globe, Article as FileText } from '@mui/icons-material';
+import { ErrorOutline as AlertCircle, Wifi, WifiOff, LightMode as Sun, DarkMode as Moon, Settings, Refresh as RefreshCw, Menu, Close as X, Dashboard as LayoutDashboard, BarChart, Bolt as Zap, Build as Wrench, Public as Globe, Article as FileText } from '@mui/icons-material';
 
 import { UnifiedClient } from './services/unifiedClient';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -13,7 +13,6 @@ import './index.css';
 
 // Lazy load components for better performance
 const Dashboard = lazy(() => import('./components/Dashboard'));
-const SystemStatus = lazy(() => import('./components/SystemStatus'));
 const ResourceChart = lazy(() => import('./components/ResourceChart'));
 const PowerManagement = lazy(() => import('./components/PowerManagement'));
 const ServiceManagement = lazy(() => import('./components/ServiceManagement'));
@@ -51,7 +50,6 @@ const queryClient = new QueryClient({
 // Enhanced navigation tabs with more features
 const TABS = [
   { id: 'dashboard', name: 'Dashboard', icon: LayoutDashboard, description: 'System overview and key metrics' },
-  { id: 'system', name: 'System Status', icon: Monitor, description: 'Detailed system information' },
   { id: 'charts', name: 'Charts', icon: BarChart, description: 'Performance graphs and trends' },
   { id: 'power', name: 'Power', icon: Zap, description: 'Power management and monitoring' },
   { id: 'services', name: 'Services', icon: Wrench, description: 'System service management' },
@@ -194,8 +192,6 @@ function App() {
     switch (activeTab) {
       case 'dashboard':
         return <Dashboard {...props} />;
-      case 'system':
-        return <SystemStatus {...props} />;
       case 'charts':
         return <ResourceChart {...props} />;
       case 'power':

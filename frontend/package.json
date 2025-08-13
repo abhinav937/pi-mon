@@ -3,6 +3,7 @@
   "version": "2.0.0",
   "description": "Pi Monitor - React Frontend Dashboard",
   "private": true,
+  "homepage": ".",
   "dependencies": {
     "@testing-library/jest-dom": "^5.17.0",
     "@testing-library/react": "^13.4.0",
@@ -33,7 +34,8 @@
     "autoprefixer": "^10.4.16",
     "postcss": "^8.4.32",
     "web-vitals": "^3.5.0",
-    "eslint": "^8.57.1"
+    "eslint": "^8.57.1",
+    "gh-pages": "^6.0.0"
   },
   "scripts": {
     "start": "react-scripts start",
@@ -43,7 +45,9 @@
     "build:docker": "npm run build && docker build -t pi-monitor-frontend .",
     "dev": "npm start",
     "lint": "eslint src --ext .js,.jsx",
-    "lint:fix": "eslint src --ext .js,.jsx --fix"
+    "lint:fix": "eslint src --ext .js,.jsx --fix",
+    "predeploy": "npm run build && cp build/index.html build/404.html",
+    "deploy": "gh-pages -d build"
   },
   "eslintConfig": {
     "extends": [

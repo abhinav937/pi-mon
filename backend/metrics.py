@@ -152,7 +152,7 @@ class MetricsCollector:
             
             return {
                 "timestamp": time.time(),
-                "cpu_percent": round(cpu_percent, 1),
+                "cpu_percent": float(cpu_percent),
                 "memory_percent": round(memory.percent, 1),
                 "disk_percent": round(disk.percent, 1),
                 "temperature": temperature,

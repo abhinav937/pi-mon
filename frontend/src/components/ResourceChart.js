@@ -487,7 +487,10 @@ const ResourceChart = ({ unifiedClient }) => {
                chartData[selectedMetric].data[chartData[selectedMetric].data.length - 1] !== null &&
                chartData[selectedMetric].data[chartData[selectedMetric].data.length - 1] !== undefined &&
                !isNaN(chartData[selectedMetric].data[chartData[selectedMetric].data.length - 1])
-                ? `${chartData[selectedMetric].data[chartData[selectedMetric].data.length - 1].toFixed(1)}${selectedMetric === 'temperature' ? '°C' : '%'}`
+               ? `${selectedMetric === 'cpu' 
+                    ? chartData[selectedMetric].data[chartData[selectedMetric].data.length - 1]
+                    : chartData[selectedMetric].data[chartData[selectedMetric].data.length - 1].toFixed(1)
+                  }${selectedMetric === 'temperature' ? '°C' : '%'}`
                 : 'N/A'
               }
             </div>
@@ -505,7 +508,7 @@ const ResourceChart = ({ unifiedClient }) => {
                     );
                     if (validData.length === 0) return 'N/A';
                     const average = validData.reduce((a, b) => a + b, 0) / validData.length;
-                    return `${average.toFixed(1)}${selectedMetric === 'temperature' ? '°C' : '%'}`;
+                    return `${selectedMetric === 'cpu' ? average : average.toFixed(1)}${selectedMetric === 'temperature' ? '°C' : '%'}`;
                   })()
                 : 'N/A'
               }
@@ -524,7 +527,7 @@ const ResourceChart = ({ unifiedClient }) => {
                     );
                     if (validData.length === 0) return 'N/A';
                     const maxValue = Math.max(...validData);
-                    return `${maxValue.toFixed(1)}${selectedMetric === 'temperature' ? '°C' : '%'}`;
+                    return `${selectedMetric === 'cpu' ? maxValue : maxValue.toFixed(1)}${selectedMetric === 'temperature' ? '°C' : '%'}`;
                   })()
                 : 'N/A'
               }

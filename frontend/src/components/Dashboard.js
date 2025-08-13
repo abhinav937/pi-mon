@@ -157,7 +157,7 @@ const Dashboard = ({ unifiedClient }) => {
                 <p className="metric-label text-xs sm:text-sm">CPU Usage</p>
                 <p className={`metric-value text-xl sm:text-3xl ${getStatusColor(currentData.cpu_percent)}`}>
                   {currentData.cpu_percent !== null && currentData.cpu_percent !== undefined && !isNaN(currentData.cpu_percent)
-                    ? `${currentData.cpu_percent.toFixed(1)}%`
+                    ? `${currentData.cpu_percent}%`
                     : 'N/A'
                   }
                 </p>
@@ -374,7 +374,7 @@ const Dashboard = ({ unifiedClient }) => {
                   <div className="font-medium text-gray-900 dark:text-white">
                     {(() => {
                       const value = metricsHistory.metrics[metricsHistory.metrics.length - 1]?.cpu_percent;
-                      return value !== null && value !== undefined && !isNaN(value) ? `${value.toFixed(1)}%` : 'N/A';
+                      return value !== null && value !== undefined && !isNaN(value) ? `${value}%` : 'N/A';
                     })()}
                   </div>
                   <div className="text-gray-500 dark:text-gray-400">Current CPU</div>

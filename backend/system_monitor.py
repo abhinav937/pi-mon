@@ -141,7 +141,7 @@ class SystemMonitor:
             return {
                 "timestamp": time.time(),
                 "uptime": uptime,
-                "cpu_percent": round(float(cpu_percent) if cpu_percent is not None else 0.0, 1),
+                "cpu_percent": float(cpu_percent) if cpu_percent is not None else 0.0,
                 "memory_percent": round(float(memory.percent) if memory.percent is not None else 0.0, 1),
                 "disk_percent": round(float(disk.percent) if disk.percent is not None else 0.0, 1),
                 "temperature": float(temperature) if temperature is not None else 0.0,
@@ -174,7 +174,7 @@ class SystemMonitor:
             # Aggregate metrics for the last N minutes
             aggregated_metrics = {
                 "timestamp": time.time(),
-                "cpu_percent": round(sum(float(m['cpu_percent']) if m['cpu_percent'] is not None else 0.0 for m in recent_metrics) / len(recent_metrics), 1),
+                "cpu_percent": sum(float(m['cpu_percent']) if m['cpu_percent'] is not None else 0.0 for m in recent_metrics) / len(recent_metrics),
                 "memory_percent": round(sum(float(m['memory_percent']) if m['memory_percent'] is not None else 0.0 for m in recent_metrics) / len(recent_metrics), 1),
                 "disk_percent": round(sum(float(m['disk_percent']) if m['disk_percent'] is not None else 0.0 for m in recent_metrics) / len(recent_metrics), 1),
                 "temperature": round(sum(float(m['temperature']) if m['temperature'] is not None else 0.0 for m in recent_metrics) / len(recent_metrics), 1),

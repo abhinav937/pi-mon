@@ -199,7 +199,7 @@ const SystemStatus = ({ unifiedClient }) => {
                 (currentData?.cpu_percent || 0) > 60 ? 'text-yellow-600' : 'text-green-600'
               }`}>
                 {currentData?.cpu_percent !== null && currentData?.cpu_percent !== undefined && !isNaN(currentData?.cpu_percent)
-                  ? `${currentData.cpu_percent.toFixed(1)}%`
+                  ? `${currentData.cpu_percent}%`
                   : 'N/A'
                 }
               </span>

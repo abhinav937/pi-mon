@@ -43,7 +43,6 @@ exec 1>/dev/null
 # 1. CHECK CURRENT STATE
 # =============================================================================
 echo "Checking state..." >&3
-
 # Check if user exists
 USER_EXISTS=false
 if id "abhinav" &>/dev/null; then
@@ -66,10 +65,17 @@ FRONTEND_CHECKSUM_FILE="$STATE_DIR/frontend_checksum"
 CURRENT_FRONTEND_CHECKSUM=""
 FRONTEND_ENV_SIG_FILE="$STATE_DIR/frontend_env_sig"
 CURRENT_FRONTEND_ENV_SIG=""
+BACKEND_VERSION_FILE="$STATE_DIR/backend_version"
+SOURCE_BACKEND_VERSION=""
 
 if [ -f "$PI_MON_DIR/frontend/public/version.json" ]; then
     # Parse version without jq
     SOURCE_FRONTEND_VERSION=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"\n]*\)".*/\1/p' "$PI_MON_DIR/frontend/public/version.json" | head -n1)
+fi
+
+# Backend version from config.json (if present)
+if [ -f "$PI_MON_DIR/config.json" ]; then
+    SOURCE_BACKEND_VERSION=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"\n]*\)".*/\1/p' "$PI_MON_DIR/config.json" | head -n1)
 fi
 
 # Fallback to package.json if public version.json not present
@@ -150,6 +156,20 @@ if [ -d "$PI_MON_DIR/backend" ]; then
             # First-time record
             NEED_BACKEND_RESTART=true
         fi
+    fi
+fi
+
+# If backend version changed (from config.json), note and force restart
+if [ -n "$SOURCE_BACKEND_VERSION" ]; then
+    if [ -f "$BACKEND_VERSION_FILE" ]; then
+        PREV_BACKEND_VERSION=$(cat "$BACKEND_VERSION_FILE" 2>/dev/null || true)
+        if [ "$SOURCE_BACKEND_VERSION" != "$PREV_BACKEND_VERSION" ]; then
+            echo "UPDATE: Backend version $PREV_BACKEND_VERSION -> $SOURCE_BACKEND_VERSION" >&3
+            NEED_BACKEND_RESTART=true
+        fi
+    else
+        # First-time: write later after restart
+        :
     fi
 fi
 
@@ -375,6 +395,10 @@ if [ "$NEED_BACKEND_RESTART" = true ]; then
         echo "Backend service restarted" >&3
         echo "$CURRENT_BACKEND_CHECKSUM" > "$BACKEND_CHECKSUM_FILE"
         chown abhinav:abhinav "$BACKEND_CHECKSUM_FILE"
+        if [ -n "$SOURCE_BACKEND_VERSION" ]; then
+            echo "$SOURCE_BACKEND_VERSION" > "$BACKEND_VERSION_FILE"
+            chown abhinav:abhinav "$BACKEND_VERSION_FILE"
+        fi
     else
         echo "ERROR: Backend service failed to restart" >&2
         systemctl status pi-monitor-backend.service --no-pager -l || true
@@ -382,7 +406,11 @@ if [ "$NEED_BACKEND_RESTART" = true ]; then
         exit 1
     fi
 else
-    :
+    if [ -n "$SOURCE_BACKEND_VERSION" ]; then
+        echo "OK: Backend up-to-date (version $SOURCE_BACKEND_VERSION)" >&3
+    else
+        echo "OK: Backend up-to-date" >&3
+    fi
 fi
 
 # =============================================================================
@@ -430,7 +458,13 @@ EOF
         chown abhinav:abhinav "$FRONTEND_ENV_SIG_FILE"
     fi
 else
-    :
+    DISPLAY_FRONTEND_VERSION="$DEPLOYED_FRONTEND_VERSION"
+    if [ -z "$DISPLAY_FRONTEND_VERSION" ]; then DISPLAY_FRONTEND_VERSION="$SOURCE_FRONTEND_VERSION"; fi
+    if [ -n "$DISPLAY_FRONTEND_VERSION" ]; then
+        echo "OK: Frontend up-to-date (version $DISPLAY_FRONTEND_VERSION)" >&3
+    else
+        echo "OK: Frontend up-to-date" >&3
+    fi
 fi
 
 # =============================================================================

@@ -64,8 +64,10 @@ fi
 echo "==> Backend environment ready ($ENV_FILE)"
 
 echo "==> Building frontend"
+# Ensure correct ownership before installing dependencies
+chown -R "$APP_USER":"$APP_GROUP" "$FRONTEND_DIR"
 pushd "$FRONTEND_DIR" >/dev/null
-sudo -u "$APP_USER" npm install --no-audit --no-fund
+sudo -u "$APP_USER" npm install --no-audit --no-fund --no-optional
 sudo -u "$APP_USER" npm run build
 popd >/dev/null
 
@@ -138,7 +140,7 @@ User=$APP_USER
 WorkingDirectory=$BACKEND_DIR
 Environment=PYTHONUNBUFFERED=1
 EnvironmentFile=$ENV_FILE
-ExecStart=$VENV_DIR/bin/python services/start_service.py
+ExecStart=$VENV_DIR/bin/python start_service.py
 Restart=always
 RestartSec=5
 

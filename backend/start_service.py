@@ -9,8 +9,8 @@ import os
 import signal
 import time
 
-# Add the backend directory to the path (parent of services/)
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Add the backend directory to the path
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 def signal_handler(sig, frame):
     """Handle shutdown signals"""

@@ -23,9 +23,9 @@ SERVICE_FILE="/etc/systemd/system/pi-monitor-backend.service"
 STATE_DIR="$PI_MON_DIR/.deploy_state"
 
 # Port configuration
-PUBLIC_PORT="443"  # Changed to HTTPS port
-NGINX_PORT="443"   # Changed to HTTPS port
-BACKEND_PORT="5001"
+PUBLIC_PORT="443"  # HTTPS port for external access
+NGINX_PORT="443"   # HTTPS port for Nginx
+BACKEND_PORT="5001" # HTTP port for backend (internal)
 
 # Security configuration
 SSL_ENABLED=true
@@ -539,6 +539,7 @@ REACT_APP_ENVIRONMENT=production
 REACT_APP_BACKEND_PORT=$BACKEND_PORT
 REACT_APP_FRONTEND_PORT=$NGINX_PORT
 REACT_APP_HTTPS_ENABLED=$SSL_ENABLED
+REACT_APP_INTERNAL_BACKEND_URL=http://127.0.0.1:$BACKEND_PORT
 EOF
     
     # Build frontend

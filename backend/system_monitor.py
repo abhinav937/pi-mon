@@ -133,6 +133,7 @@ class SystemMonitor:
             memory = psutil.virtual_memory()
             disk = psutil.disk_usage('/')
             temperature = self._get_temperature()
+            voltage = self._get_voltage()
             network = psutil.net_io_counters()
             disk_io = psutil.disk_io_counters()
             uptime = self.get_uptime()
@@ -145,6 +146,7 @@ class SystemMonitor:
                 "memory_percent": round(float(memory.percent) if memory.percent is not None else 0.0, 1),
                 "disk_percent": round(float(disk.percent) if disk.percent is not None else 0.0, 1),
                 "temperature": float(temperature) if temperature is not None else 0.0,
+                "voltage": float(voltage) if voltage is not None else 0.0,
                 "network": {
                     "bytes_sent": network.bytes_sent if network else 0,
                     "bytes_recv": network.bytes_recv if network else 0,
@@ -178,6 +180,7 @@ class SystemMonitor:
                 "memory_percent": round(sum(float(m['memory_percent']) if m['memory_percent'] is not None else 0.0 for m in recent_metrics) / len(recent_metrics), 1),
                 "disk_percent": round(sum(float(m['disk_percent']) if m['disk_percent'] is not None else 0.0 for m in recent_metrics) / len(recent_metrics), 1),
                 "temperature": round(sum(float(m['temperature']) if m['temperature'] is not None else 0.0 for m in recent_metrics) / len(recent_metrics), 1),
+                "voltage": round(sum(float(m['voltage']) if m['voltage'] is not None else 0.0 for m in recent_metrics) / len(recent_metrics), 3),
                 "network": {
                     "bytes_sent": sum(m['network']['bytes_sent'] if m['network'] and m['network']['bytes_sent'] is not None else 0 for m in recent_metrics),
                     "bytes_recv": sum(m['network']['bytes_recv'] if m['network'] and m['network']['bytes_recv'] is not None else 0 for m in recent_metrics),
@@ -240,6 +243,11 @@ class SystemMonitor:
                     "celsius": basic_stats["temperature"],
                     "fahrenheit": round((basic_stats["temperature"] * 9/5) + 32, 1),
                     "status": self._get_temperature_status(basic_stats["temperature"])
+                },
+                "voltage": {
+                    "volts": basic_stats["voltage"],
+                    "millivolts": round(basic_stats["voltage"] * 1000, 0),
+                    "status": self._get_voltage_status(basic_stats["voltage"])
                 },
                 "network": {
                     "bytes_sent": basic_stats["network"]["bytes_sent"],
@@ -455,6 +463,56 @@ class SystemMonitor:
         # Return a safe default value if all methods fail
         return 25.0  # Room temperature as safe default
     
+    def _get_voltage(self):
+        """Get core voltage using multiple methods"""
+        try:
+            import os
+            # Try Raspberry Pi specific path for voltage
+            if os.path.exists('/sys/devices/platform/soc/soc:firmware/kobs-ng/voltage'):
+                with open('/sys/devices/platform/soc/soc:firmware/kobs-ng/voltage', 'r') as f:
+                    voltage_raw = f.read().strip()
+                    voltage_value = float(voltage_raw) / 1000.0  # Convert mV to V
+                    if voltage_value > 0 and voltage_value < 10:  # Sanity check
+                        return round(voltage_value, 3)
+            
+            # Try vcgencmd for Raspberry Pi core voltage
+            try:
+                import subprocess
+                result = subprocess.run(['vcgencmd', 'measure_volts', 'core'], capture_output=True, text=True, timeout=5)
+                if result.returncode == 0:
+                    import re
+                    voltage_match = re.search(r'volt=(\d+\.?\d*)', result.stdout)
+                    if voltage_match:
+                        voltage_value = float(voltage_match.group(1))
+                        if voltage_value > 0 and voltage_value < 10:  # Sanity check
+                            return round(voltage_value, 3)
+            except:
+                pass
+                
+            # Try alternative vcgencmd command
+            try:
+                import subprocess
+                result = subprocess.run(['vcgencmd', 'get_config', 'int'], capture_output=True, text=True, timeout=5)
+                if result.returncode == 0:
+                    import re
+                    # Look for voltage-related config values
+                    voltage_match = re.search(r'over_voltage=(\d+)', result.stdout)
+                    if voltage_match:
+                        # This is overvoltage setting, not actual voltage, but can be used as fallback
+                        overvoltage = int(voltage_match.group(1))
+                        # Base voltage is typically 1.2V, overvoltage adds 0.025V per step
+                        base_voltage = 1.2
+                        voltage_value = base_voltage + (overvoltage * 0.025)
+                        return round(voltage_value, 3)
+            except:
+                pass
+                
+        except Exception as e:
+            logger.error(f"Failed to get voltage: {e}")
+        
+        # Return a safe default value if all methods fail
+        return 1.2  # Default core voltage as safe default
+    
     def _get_cpu_status(self, cpu_percent):
         """Get CPU status indicator based on usage percentage"""
         if cpu_percent >= 90:
@@ -496,5 +554,18 @@ class SystemMonitor:
             return {"level": "high", "color": "orange", "message": "Hot"}
         elif temperature >= 60:
             return {"level": "moderate", "color": "yellow", "message": "Warm"}
+        else:
+            return {"level": "normal", "color": "green", "message": "Normal"}
+    
+    def _get_voltage_status(self, voltage):
+        """Get voltage status indicator based on voltage value"""
+        if voltage >= 1.4:
+            return {"level": "critical", "color": "red", "message": "Overvoltage"}
+        elif voltage >= 1.35:
+            return {"level": "high", "color": "orange", "message": "High"}
+        elif voltage <= 1.0:
+            return {"level": "critical", "color": "red", "message": "Undervoltage"}
+        elif voltage <= 1.1:
+            return {"level": "high", "color": "orange", "message": "Low"}
         else:
             return {"level": "normal", "color": "green", "message": "Normal"}

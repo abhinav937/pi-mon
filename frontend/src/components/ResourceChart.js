@@ -12,7 +12,7 @@ import {
   Filler,
   TimeScale
 } from 'chart.js';
-import { TrendingUp, BarChart as BarChart3, Timeline, Storage as HardDrive, DataObject as Database } from '@mui/icons-material';
+import { TrendingUp, BarChart as BarChart3, Timeline, Bolt } from '@mui/icons-material';
 import { formatTimestamp, getTickIntervals, formatRelativeTime } from '../utils/format';
 
 // Register Chart.js components
@@ -34,7 +34,7 @@ const ResourceChart = ({ unifiedClient }) => {
     cpu: { labels: [], data: [], timestamps: [] },
     memory: { labels: [], data: [], timestamps: [] },
     temperature: { labels: [], data: [], timestamps: [] },
-    disk: { labels: [], data: [], timestamps: [] },
+    voltage: { labels: [], data: [], timestamps: [] },
   });
   const [isLoadingHistorical, setIsLoadingHistorical] = useState(true);
   const [lastUpdateTime, setLastUpdateTime] = useState(null);
@@ -213,12 +213,12 @@ const ResourceChart = ({ unifiedClient }) => {
                   }
                 }
                 
-                // Update Disk data
-                if (systemData.disk_percent !== undefined && systemData.disk_percent !== null && !isNaN(systemData.disk_percent)) {
-                  if (!newData.disk.timestamps.includes(timestamp)) {
-                    newData.disk.timestamps = [...newData.disk.timestamps, timestamp].slice(-maxDataPoints);
-                    newData.disk.labels = [...newData.disk.labels, formattedTimestamp].slice(-maxDataPoints);
-                    newData.disk.data = [...newData.disk.data, parseFloat(systemData.disk_percent)].slice(-maxDataPoints);
+                // Update Voltage data
+                if (systemData.voltage !== undefined && systemData.voltage !== null && !isNaN(systemData.voltage)) {
+                  if (!newData.voltage.timestamps.includes(timestamp)) {
+                    newData.voltage.timestamps = [...newData.voltage.timestamps, timestamp].slice(-maxDataPoints);
+                    newData.voltage.labels = [...newData.voltage.labels, formattedTimestamp].slice(-maxDataPoints);
+                    newData.voltage.data = [...newData.voltage.data, parseFloat(systemData.voltage)].slice(-maxDataPoints);
                   }
                 }
               });
@@ -269,10 +269,11 @@ const ResourceChart = ({ unifiedClient }) => {
         newData.temperature.labels = [...prevData.temperature.labels, formattedTimestamp].slice(-maxDataPoints);
         newData.temperature.data = [...prevData.temperature.data, parseFloat(latest.temperature)].slice(-maxDataPoints);
       }
-      if (latest.disk_percent != null && !isNaN(latest.disk_percent) && !prevData.disk.timestamps.includes(timestamp)) {
-        newData.disk.timestamps = [...prevData.disk.timestamps, timestamp].slice(-maxDataPoints);
-        newData.disk.labels = [...prevData.disk.labels, formattedTimestamp].slice(-maxDataPoints);
-        newData.disk.data = [...prevData.disk.data, parseFloat(latest.disk_percent)].slice(-maxDataPoints);
+      
+      if (latest.voltage != null && !isNaN(latest.voltage) && !prevData.voltage.timestamps.includes(timestamp)) {
+        newData.voltage.timestamps = [...prevData.voltage.timestamps, timestamp].slice(-maxDataPoints);
+        newData.voltage.labels = [...prevData.voltage.labels, formattedTimestamp].slice(-maxDataPoints);
+        newData.voltage.data = [...prevData.voltage.data, parseFloat(latest.voltage)].slice(-maxDataPoints);
       }
       
       return newData;
@@ -292,13 +293,13 @@ const ResourceChart = ({ unifiedClient }) => {
         const cpuData = metrics.map(m => m.cpu_percent || 0);
         const memoryData = metrics.map(m => m.memory_percent || 0);
         const temperatureData = metrics.map(m => m.temperature || 0);
-        const diskData = metrics.map(m => m.disk_percent || 0);
+        const voltageData = metrics.map(m => m.voltage || 0);
 
         setChartData({
           cpu: { labels, data: cpuData, timestamps },
           memory: { labels, data: memoryData, timestamps },
           temperature: { labels, data: temperatureData, timestamps },
-          disk: { labels, data: diskData, timestamps }
+          voltage: { labels, data: voltageData, timestamps },
         });
 
         if (chartRef.current) {
@@ -345,7 +346,7 @@ const ResourceChart = ({ unifiedClient }) => {
         point: 'rgb(239, 68, 68)',
         hover: 'rgba(239, 68, 68, 0.2)',
       },
-      disk: {
+      voltage: {
         background: 'rgba(34, 197, 94, 0.08)',
         border: 'rgb(34, 197, 94)',
         point: 'rgb(34, 197, 94)',
@@ -361,7 +362,7 @@ const ResourceChart = ({ unifiedClient }) => {
             label: metric === 'cpu' ? 'CPU Usage (%)' : 
                    metric === 'memory' ? 'Memory Usage (%)' : 
                    metric === 'temperature' ? 'Temperature (°C)' :
-                   'Disk Usage (%)',
+                   'Core Voltage (V)',
             data: chartData[metric].data,
             borderColor: colors[metric].border,
             backgroundColor: colors[metric].background,
@@ -423,10 +424,13 @@ const ResourceChart = ({ unifiedClient }) => {
               },
               label: function(context) {
                 const value = context.parsed && context.parsed.y != null ? context.parsed.y : null;
-                const unit = metric === 'temperature' ? '°C' : '%';
+                let unit = '%';
+                if (metric === 'temperature') unit = '°C';
+                else if (metric === 'voltage') unit = 'V';
                 const datasetLabel = context.dataset && context.dataset.label ? context.dataset.label : '';
                 if (value == null || isNaN(value)) return datasetLabel;
-                return `${datasetLabel}: ${Number(value).toFixed(1)}${unit}`;
+                const precision = metric === 'voltage' ? 3 : 1;
+                return `${datasetLabel}: ${Number(value).toFixed(precision)}${unit}`;
               }
             }
           },
@@ -478,17 +482,19 @@ const ResourceChart = ({ unifiedClient }) => {
           y: {
             display: true,
             min: 0,
-            max: metric === 'temperature' ? 100 : 100,
+            max: metric === 'temperature' ? 100 : metric === 'voltage' ? 2.0 : 100,
             ticks: {
               color: isDarkMode ? '#9ca3af' : '#6b7280',
               font: {
                 size: 11,
                 weight: '500',
               },
-              stepSize: metric === 'temperature' ? 20 : 25,
+              stepSize: metric === 'temperature' ? 20 : metric === 'voltage' ? 0.2 : 25,
               padding: 8,
               callback: function(value) {
-                return `${value}${metric === 'temperature' ? '°C' : '%'}`;
+                if (metric === 'temperature') return `${value}°C`;
+                else if (metric === 'voltage') return `${value}V`;
+                else return `${value}%`;
               }
             },
             grid: {
@@ -539,7 +545,7 @@ const ResourceChart = ({ unifiedClient }) => {
     { id: 'cpu', name: 'CPU Usage', icon: Timeline, color: 'text-blue-600' },
     { id: 'memory', name: 'Memory Usage', icon: BarChart3, color: 'text-purple-600' },
     { id: 'temperature', name: 'Temperature', icon: TrendingUp, color: 'text-red-600' },
-    { id: 'disk', name: 'Disk Usage', icon: HardDrive, color: 'text-green-600' },
+    { id: 'voltage', name: 'Core Voltage', icon: Bolt, color: 'text-green-600' },
   ];
 
   // Tesla Powerwall-style time range options

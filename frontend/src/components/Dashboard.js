@@ -1,7 +1,7 @@
 /* eslint-disable no-console */
 import React, { useState, useEffect } from 'react';
 import { useQuery } from 'react-query';
-import { Memory as Cpu, Storage as HardDrive, Thermostat as Thermometer, Timeline as Activity, AccessTime as Clock, Wifi, TrendingUp, DataObject as Database, Bolt as Zap } from '@mui/icons-material';
+import { Memory as Cpu, Thermostat as Thermometer, Timeline as Activity, AccessTime as Clock, Wifi, TrendingUp, DataObject as Database, Bolt as Zap, Bolt } from '@mui/icons-material';
 import toast from 'react-hot-toast';
 import { formatBytes } from '../utils/format';
 import { getStatusColor, getProgressBarColor } from '../utils/status';
@@ -180,32 +180,6 @@ const Dashboard = ({ unifiedClient }) => {
           </div>
         </div>
 
-        {/* Disk Usage */}
-        <div className="metric-card p-4 sm:p-6">
-          <div className="flex items-center justify-between mb-3 sm:mb-4">
-            <div className="flex items-center space-x-2 sm:space-x-3">
-              <div className="p-1.5 sm:p-2 bg-green-100 dark:bg-green-900 rounded-lg">
-                <HardDrive className="h-4 w-4 sm:h-6 sm:w-6 text-green-600 dark:text-green-400" />
-              </div>
-              <div>
-                <p className="metric-label text-xs sm:text-sm">Disk Space</p>
-                <p className={`metric-value text-xl sm:text-3xl ${getStatusColor(currentData.disk_percent)}`}>
-                  {currentData.disk_percent !== null && currentData.disk_percent !== undefined && !isNaN(currentData.disk_percent) 
-                    ? `${currentData.disk_percent.toFixed(1)}%` 
-                    : 'N/A'
-                  }
-                </p>
-              </div>
-            </div>
-          </div>
-          <div className="progress-bar">
-            <div
-              className={`progress-bar-fill ${getProgressBarColor(currentData.disk_percent)}`}
-              style={{ width: `${Math.min(currentData.disk_percent || 0, 100)}%` }}
-            />
-          </div>
-        </div>
-
         {/* Temperature */}
         <div className="metric-card p-4 sm:p-6">
           <div className="flex items-center justify-between mb-3 sm:mb-4">
@@ -232,6 +206,34 @@ const Dashboard = ({ unifiedClient }) => {
               <span className="status-badge-warning">Warm</span>
             )}
             {currentData.temperature !== null && currentData.temperature !== undefined && !isNaN(currentData.temperature) && currentData.temperature <= 70 && (
+              <span className="status-badge-success">Normal</span>
+            )}
+          </div>
+        </div>
+
+        {/* Core Voltage */}
+        <div className="metric-card p-4 sm:p-6">
+          <div className="flex items-center justify-between mb-3 sm:mb-4">
+            <div className="flex items-center space-x-2 sm:space-x-3">
+              <div className="p-1.5 sm:p-2 bg-green-100 dark:bg-green-900 rounded-lg">
+                <Bolt className="h-4 w-4 sm:h-6 sm:w-6 text-green-600 dark:text-green-400" />
+              </div>
+              <div>
+                <p className="metric-label text-xs sm:text-sm">Core Voltage</p>
+                <p className={`metric-value text-xl sm:text-3xl ${(currentData.voltage || 0) > 1.35 ? 'text-red-600' : (currentData.voltage || 0) < 1.1 ? 'text-red-600' : (currentData.voltage || 0) > 1.3 ? 'text-yellow-600' : 'text-green-600'}`}>
+                  {currentData.voltage !== null && currentData.voltage !== undefined && !isNaN(currentData.voltage)
+                    ? `${currentData.voltage.toFixed(3)}V`
+                    : 'N/A'
+                  }
+                </p>
+              </div>
+            </div>
+          </div>
+          <div className="text-sm text-gray-500 dark:text-gray-400">
+            {currentData.voltage !== null && currentData.voltage !== undefined && !isNaN(currentData.voltage) && (currentData.voltage > 1.35 || currentData.voltage < 1.1) && (
+              <span className="status-badge-error">Voltage Alert</span>
+            )}
+            {currentData.voltage !== null && currentData.voltage !== undefined && !isNaN(currentData.voltage) && currentData.voltage <= 1.35 && currentData.voltage >= 1.1 && (
               <span className="status-badge-success">Normal</span>
             )}
           </div>
@@ -382,11 +384,11 @@ const Dashboard = ({ unifiedClient }) => {
                 <div className="text-center">
                   <div className="font-medium text-gray-900 dark:text-white">
                     {(() => {
-                      const value = metricsHistory.metrics[metricsHistory.metrics.length - 1]?.disk_percent;
-                      return value !== null && value !== undefined && !isNaN(value) ? `${value.toFixed(1)}%` : 'N/A';
+                      const value = metricsHistory.metrics[metricsHistory.metrics.length - 1]?.voltage;
+                      return value !== null && value !== undefined && !isNaN(value) ? `${value.toFixed(3)}V` : 'N/A';
                     })()}
                   </div>
-                  <div className="text-gray-500 dark:text-gray-400">Current Disk</div>
+                  <div className="text-gray-500 dark:text-gray-400">Current Voltage</div>
                 </div>
               </div>
             </div>

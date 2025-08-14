@@ -173,6 +173,8 @@ class PiMonitorHandler(BaseHTTPRequestHandler):
             self._handle_log_clear()
         elif path.startswith('/api/metrics/history'):
             self._handle_metrics_history(query_params)
+        elif path.startswith('/api/metrics/range'):
+            self._handle_metrics_range(query_params)
         elif path == '/api/metrics/database':
             self._handle_database_stats()
         elif path == '/api/metrics/export':
@@ -415,6 +417,39 @@ class PiMonitorHandler(BaseHTTPRequestHandler):
         
         response = self.server_instance.metrics_collector.get_metrics_history_formatted(minutes, include_date)
         self.wfile.write(json.dumps(response).encode())
+
+    def _handle_metrics_range(self, query_params):
+        """Return metrics for a specific time range with optional pagination.
+
+        Query params:
+          start: epoch seconds (float)
+          end: epoch seconds (float)
+          limit: optional int
+          offset: optional int
+        """
+        if not self._check_auth():
+            self._send_unauthorized()
+            return
+        try:
+            start_ts = float(query_params.get('start', [str(time.time() - 3600)])[0])
+            end_ts = float(query_params.get('end', [str(time.time())])[0])
+            limit = query_params.get('limit', [None])[0]
+            offset = query_params.get('offset', [None])[0]
+            limit_val = int(limit) if limit is not None else None
+            offset_val = int(offset) if offset is not None else None
+
+            metrics = self.server_instance.database.get_metrics_range(start_ts, end_ts, limit_val, offset_val)
+            response = {
+                "count": len(metrics),
+                "start": start_ts,
+                "end": end_ts,
+                "metrics": metrics
+            }
+            self.send_response(200)
+            self._set_common_headers()
+            self.wfile.write(json.dumps(response).encode())
+        except Exception as e:
+            self._send_internal_error(f"Failed to get metrics range: {str(e)}")
     
     def _handle_database_stats(self):
         """Handle database stats"""

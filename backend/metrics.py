@@ -88,6 +88,21 @@ class MetricsCollector:
         self.recent_cache = deque(maxlen=self.max_history)
         # Maintain compatibility with any code referencing metrics_history
         self.metrics_history = self.recent_cache
+        # Try loading persisted interval from database
+        try:
+            from database import MetricsDatabase
+            db = MetricsDatabase()
+            saved = db.get_system_info('collection_interval_seconds')
+            if saved is not None:
+                try:
+                    saved_interval = float(saved)
+                    if 1.0 <= saved_interval <= 300.0:
+                        self.collection_interval = saved_interval
+                        logger.info(f"Loaded persisted collection interval: {saved_interval}s")
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.warning(f"Could not load persisted collection interval: {e}")
     
     def set_collection_interval(self, interval_seconds):
         """Update the collection interval (in seconds)"""
@@ -101,6 +116,13 @@ class MetricsCollector:
             with self.collection_lock:
                 self.collection_interval = new_interval
                 logger.info(f"Metrics collection interval updated to {new_interval} seconds")
+            # Persist to database
+            try:
+                from database import MetricsDatabase
+                db = MetricsDatabase()
+                db.store_system_info('collection_interval_seconds', str(new_interval))
+            except Exception as e:
+                logger.warning(f"Failed to persist collection interval: {e}")
             return True
         except (ValueError, TypeError) as e:
             logger.error(f"Invalid interval value: {e}")

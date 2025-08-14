@@ -326,6 +326,22 @@ class UnifiedClient {
     }
   }
 
+  async getMetricsRange({ start, end, limit, offset } = {}) {
+    try {
+      const params = new URLSearchParams();
+      if (start != null) params.set('start', String(start));
+      if (end != null) params.set('end', String(end));
+      if (limit != null) params.set('limit', String(limit));
+      if (offset != null) params.set('offset', String(offset));
+      const qs = params.toString();
+      const url = `/api/metrics/range${qs ? `?${qs}` : ''}`;
+      const response = await this.httpClient.get(url);
+      return response.data;
+    } catch (error) {
+      throw error;
+    }
+  }
+
   async getDatabaseStats() {
     try {
       const response = await this.httpClient.get('/api/metrics/database');

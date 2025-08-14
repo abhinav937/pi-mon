@@ -24,10 +24,25 @@ class MetricsDatabase:
             self.db_path = db_path
         self.init_database()
     
+    def _connect(self):
+        """Create a SQLite connection with performance PRAGMAs enabled."""
+        conn = sqlite3.connect(self.db_path, timeout=5.0)
+        try:
+            conn.execute('PRAGMA journal_mode=WAL;')
+            conn.execute('PRAGMA synchronous=NORMAL;')
+            conn.execute('PRAGMA busy_timeout=5000;')
+            conn.execute('PRAGMA temp_store=MEMORY;')
+            conn.execute('PRAGMA cache_size=-20000;')  # ~20MB
+            conn.execute('PRAGMA mmap_size=268435456;')  # 256MB
+            conn.execute('PRAGMA foreign_keys=ON;')
+        except Exception:
+            pass
+        return conn
+    
     def init_database(self):
         """Initialize the database with required tables"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._connect() as conn:
                 cursor = conn.cursor()
                 
                 # Create metrics table
@@ -76,7 +91,7 @@ class MetricsDatabase:
     def insert_metrics(self, metrics_data):
         """Insert metrics data into database"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._connect() as conn:
                 cursor = conn.cursor()
                 
                 cursor.execute('''
@@ -125,7 +140,7 @@ class MetricsDatabase:
             else:
                 effective_limit = limit
             
-            with sqlite3.connect(self.db_path) as conn:
+            with self._connect() as conn:
                 cursor = conn.cursor()
                 
                 cursor.execute('''
@@ -173,12 +188,105 @@ class MetricsDatabase:
             logger.error(f"Failed to get metrics history: {e}")
             return []
     
+    def get_metrics_range(self, start_ts, end_ts, limit=None, offset=None):
+        """Get metrics between start_ts and end_ts (inclusive start, exclusive end)."""
+        try:
+            params = [float(start_ts), float(end_ts)]
+            limit_clause = ''
+            if limit is not None:
+                limit_clause = ' LIMIT ?'
+                params.append(int(limit))
+                if offset is not None:
+                    limit_clause += ' OFFSET ?'
+                    params.append(int(offset))
+            with self._connect() as conn:
+                cursor = conn.cursor()
+                query = f'''
+                    SELECT timestamp, cpu_percent, memory_percent, disk_percent, temperature, voltage, core_current,
+                           network_bytes_sent, network_bytes_recv, network_packets_sent, network_packets_recv,
+                           disk_read_bytes, disk_write_bytes, disk_read_count, disk_write_count
+                    FROM metrics
+                    WHERE timestamp >= ? AND timestamp < ?
+                    ORDER BY timestamp ASC{limit_clause}
+                '''
+                cursor.execute(query, tuple(params))
+                rows = cursor.fetchall()
+                metrics = []
+                for row in rows:
+                    metrics.append({
+                        'timestamp': row[0],
+                        'cpu_percent': row[1],
+                        'memory_percent': row[2],
+                        'disk_percent': row[3],
+                        'temperature': row[4],
+                        'voltage': row[5],
+                        'core_current': row[6],
+                        'network': {
+                            'bytes_sent': row[7],
+                            'bytes_recv': row[8],
+                            'packets_sent': row[9],
+                            'packets_recv': row[10]
+                        },
+                        'disk_io': {
+                            'read_bytes': row[11],
+                            'write_bytes': row[12],
+                            'read_count': row[13],
+                            'write_count': row[14]
+                        }
+                    })
+                return metrics
+        except Exception as e:
+            logger.error(f"Failed to get metrics range: {e}")
+            return []
+    
+    def get_latest(self, limit=1):
+        """Return the most recent N metrics rows in ascending timestamp order."""
+        try:
+            with self._connect() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT timestamp, cpu_percent, memory_percent, disk_percent, temperature, voltage, core_current,
+                           network_bytes_sent, network_bytes_recv, network_packets_sent, network_packets_recv,
+                           disk_read_bytes, disk_write_bytes, disk_read_count, disk_write_count
+                    FROM metrics
+                    ORDER BY timestamp DESC
+                    LIMIT ?
+                ''', (int(limit),))
+                rows = cursor.fetchall()
+                metrics = []
+                for row in rows:
+                    metrics.append({
+                        'timestamp': row[0],
+                        'cpu_percent': row[1],
+                        'memory_percent': row[2],
+                        'disk_percent': row[3],
+                        'temperature': row[4],
+                        'voltage': row[5],
+                        'core_current': row[6],
+                        'network': {
+                            'bytes_sent': row[7],
+                            'bytes_recv': row[8],
+                            'packets_sent': row[9],
+                            'packets_recv': row[10]
+                        },
+                        'disk_io': {
+                            'read_bytes': row[11],
+                            'write_bytes': row[12],
+                            'read_count': row[13],
+                            'write_count': row[14]
+                        }
+                    })
+                return list(reversed(metrics))
+        except Exception as e:
+            logger.error(f"Failed to get latest metrics: {e}")
+            return []
+    
     def cleanup_old_data(self, days_to_keep=7):
         """Clean up old metrics data to prevent database bloat"""
         try:
             cutoff_time = time.time() - (days_to_keep * 24 * 60 * 60)
             
-            with sqlite3.connect(self.db_path) as conn:
+            with self._connect() as conn:
                 cursor = conn.cursor()
                 
                 cursor.execute('DELETE FROM metrics WHERE timestamp < ?', (cutoff_time,))
@@ -195,7 +303,7 @@ class MetricsDatabase:
     def get_database_stats(self):
         """Get database statistics"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._connect() as conn:
                 cursor = conn.cursor()
                 
                 # Get total records
@@ -229,7 +337,7 @@ class MetricsDatabase:
     def clear_all_metrics(self):
         """Delete all records from metrics table and return count"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._connect() as conn:
                 cursor = conn.cursor()
                 cursor.execute('SELECT COUNT(*) FROM metrics')
                 total_before = cursor.fetchone()[0]
@@ -245,7 +353,7 @@ class MetricsDatabase:
     def store_system_info(self, key, value):
         """Store system information in database"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._connect() as conn:
                 cursor = conn.cursor()
                 
                 cursor.execute('''
@@ -263,7 +371,7 @@ class MetricsDatabase:
     def get_system_info(self, key):
         """Get system information from database"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self._connect() as conn:
                 cursor = conn.cursor()
                 
                 cursor.execute('SELECT value FROM system_info WHERE key = ?', (key,))

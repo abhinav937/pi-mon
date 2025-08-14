@@ -6,20 +6,20 @@ set -euo pipefail
 # ============================================================================
 
 # Defaults (overridable via flags)
-DOMAIN="pi.cabhinav.com"
-STATIC_IP="65.36.123.68"
+DOMAIN="_"
+STATIC_IP=""
 WEB_ROOT="/var/www/pi-monitor"
 NGINX_SITES_AVAILABLE="/etc/nginx/sites-available"
 NGINX_SITES_ENABLED="/etc/nginx/sites-enabled"
-PRODUCTION_URL="http://65.36.123.68"
-PI_MON_DIR="/home/abhinav/pi-mon"
+PRODUCTION_URL="http://localhost"
+PI_MON_DIR=""
 VENV_DIR=""
 SERVICE_FILE="/etc/systemd/system/pi-monitor-backend.service"
 STATE_DIR=""
 PUBLIC_PORT="80"
 NGINX_PORT="80"
 BACKEND_PORT="5001"
-SYSTEM_USER="abhinav"
+SYSTEM_USER=""
 
 # Behavior flags
 LOG_LEVEL="info"   # debug|info|warn|error
@@ -34,6 +34,11 @@ FORCE_BACKEND=false
 USE_SETUP_SCRIPT=false
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Derive sane defaults based on runtime
+[ -n "$PI_MON_DIR" ] || PI_MON_DIR="$SCRIPT_DIR"
+[ -n "$SYSTEM_USER" ] || SYSTEM_USER="${SUDO_USER:-$(id -un)}"
+[ -n "$PRODUCTION_URL" ] || PRODUCTION_URL="http://localhost"
 
 # ----------------------------------------------------------------------------
 # Color and logging
@@ -159,6 +164,14 @@ parse_args "$@"
 [ -n "$VENV_DIR" ] || VENV_DIR="$PI_MON_DIR/.venv"
 [ -n "$STATE_DIR" ] || STATE_DIR="$PI_MON_DIR/.deploy_state"
 
+# If STATIC_IP not provided, attempt to detect a primary IPv4 (best-effort)
+if [ -z "$STATIC_IP" ]; then
+    STATIC_IP=$(hostname -I 2>/dev/null | awk '{print $1}') || true
+fi
+if [ -z "$STATIC_IP" ]; then
+    STATIC_IP="127.0.0.1"
+fi
+
 if [[ "$EUID" -ne 0 ]]; then
     log error "This script must be run with sudo"
     exit 1
@@ -173,7 +186,7 @@ mkdir -p "$STATE_DIR"
 run_cmd chown "$SYSTEM_USER":"$SYSTEM_USER" "$STATE_DIR"
 
 USER_EXISTS=false
-if id "$SYSTEM_USER" &>/dev/null; then USER_EXISTS=true; else log warn "User '$SYSTEM_USER' does not exist"; fi
+if id "$SYSTEM_USER" &>/dev/null; then USER_EXISTS=true; else log error "User '$SYSTEM_USER' does not exist"; fi
 
 PI_MON_EXISTS=false
 [ -d "$PI_MON_DIR" ] && PI_MON_EXISTS=true
@@ -276,11 +289,8 @@ log info "User exists: $USER_EXISTS | Project: $PI_MON_EXISTS | Venv: $VENV_EXIS
 # ----------------------------------------------------------------------------
 ensure_user() {
     if [ "$USER_EXISTS" = false ]; then
-        log info "Creating user '$SYSTEM_USER'"
-        run_cmd groupadd -f "$SYSTEM_USER"
-        if ! id "$SYSTEM_USER" &>/dev/null; then
-            run_cmd useradd -m -g "$SYSTEM_USER" -s /bin/bash "$SYSTEM_USER"
-        fi
+        log error "Target user '$SYSTEM_USER' not found. Re-run with sudo as the desired user or pass --user <name>."
+        exit 1
     fi
     if [ "$PI_MON_EXISTS" = false ]; then
         log info "Creating project directory at $PI_MON_DIR"
@@ -432,8 +442,8 @@ build_frontend() {
         run_cmd apt-get install -y nodejs
     fi
     cat > "$PI_MON_DIR/frontend/.env.production" <<EOF
-REACT_APP_SERVER_URL=${PRODUCTION_URL}
-REACT_APP_API_BASE_URL=${PRODUCTION_URL}
+REACT_APP_SERVER_URL=dynamic
+REACT_APP_API_BASE_URL=dynamic
 REACT_APP_ENVIRONMENT=production
 REACT_APP_BACKEND_PORT=${BACKEND_PORT}
 REACT_APP_FRONTEND_PORT=${NGINX_PORT}
@@ -459,14 +469,15 @@ configure_nginx() {
         run_cmd apt-get install -y nginx
     fi
 
-    local site_conf_src="$PI_MON_DIR/nginx/pi-subdomain.conf"
-    local site_conf_dst="$NGINX_SITES_AVAILABLE/$DOMAIN"
+    local site_conf_src="$PI_MON_DIR/nginx/pi-monitor.conf"
+    local site_name="pi-monitor"
+    local site_conf_dst="$NGINX_SITES_AVAILABLE/$site_name"
     local tmp_conf
     tmp_conf="$(mktemp)"
 
     if [ -f "$site_conf_src" ]; then
         cp "$site_conf_src" "$tmp_conf"
-        sed -i -E "s/server_name[[:space:]].*;/server_name ${DOMAIN};/" "$tmp_conf"
+        sed -i -E "s/server_name[[:space:]].*;/server_name ${DOMAIN};/" "$tmp_conf" || true
         sed -i -E "s@root[[:space:]].*;@root ${WEB_ROOT};@" "$tmp_conf"
         sed -i -E "s/(listen[[:space:]]+)[0-9]+;/\1${NGINX_PORT};/" "$tmp_conf" || true
         sed -i -E "s@proxy_pass[[:space:]]+http://127.0.0.1:[0-9]+/api/@proxy_pass http://127.0.0.1:${BACKEND_PORT}/api/@g" "$tmp_conf" || true
@@ -528,7 +539,7 @@ EOF
     if [ "$need_update" = true ]; then
         log info "Updating Nginx config (changes detected)"
         run_cmd cp "$tmp_conf" "$site_conf_dst"
-        run_cmd ln -sf "$site_conf_dst" "$NGINX_SITES_ENABLED/$DOMAIN"
+        run_cmd ln -sf "$site_conf_dst" "$NGINX_SITES_ENABLED/$site_name"
         if [ -L "$NGINX_SITES_ENABLED/default" ]; then run_cmd rm "$NGINX_SITES_ENABLED/default"; fi
         run_cmd nginx -t
         run_cmd systemctl restart nginx
@@ -536,7 +547,7 @@ EOF
         run_cmd chown "$SYSTEM_USER":"$SYSTEM_USER" "$NGINX_CHECKSUM_FILE" || true
     else
         log info "Nginx config up-to-date"
-        run_cmd ln -sf "$site_conf_dst" "$NGINX_SITES_ENABLED/$DOMAIN"
+        run_cmd ln -sf "$site_conf_dst" "$NGINX_SITES_ENABLED/$site_name"
     fi
 
     rm -f "$tmp_conf" || true

@@ -14,7 +14,17 @@ class AuthManager:
     """Manages API key authentication"""
     
     def __init__(self):
-        self.api_key = os.environ.get('PI_MONITOR_API_KEY', 'pi-monitor-api-key-2024')
+        self.api_key = os.environ.get('PI_MONITOR_API_KEY') or os.environ.get('PI_MONITOR_API_KEY_FILE')
+        if self.api_key and os.path.isfile(self.api_key):
+            try:
+                with open(self.api_key, 'r') as f:
+                    self.api_key = f.read().strip()
+            except Exception:
+                self.api_key = None
+        if not self.api_key:
+            # Fallback for dev; print a warning in production
+            self.api_key = 'pi-monitor-api-key-2024'
+            logger.warning('Using default API key; set PI_MONITOR_API_KEY for production')
     
     def check_auth(self, request_handler):
         """Check if request is authenticated"""

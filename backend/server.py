@@ -8,6 +8,7 @@ import json
 import time
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from socketserver import ThreadingMixIn
 import os
 from urllib.parse import urlparse, parse_qs
 
@@ -20,6 +21,10 @@ from service_manager import ServiceManager
 from power_manager import PowerManager
 from log_manager import LogManager
 from utils import rate_limit, monitor_performance
+
+class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
+    daemon_threads = True
+
 
 class PiMonitorServer:
     """Main Pi Monitor HTTP server"""
@@ -59,7 +64,7 @@ class PiMonitorServer:
     def run(self):
         """Run the HTTP server"""
         server_address = ('0.0.0.0', self.port)
-        httpd = HTTPServer(server_address, PiMonitorHandler)
+        httpd = ThreadingHTTPServer(server_address, PiMonitorHandler)
         
         # Set server instance in handler for access to services
         PiMonitorHandler.server_instance = self
@@ -116,6 +121,16 @@ class PiMonitorHandler(BaseHTTPRequestHandler):
             print(f"{self.client_address[0]} - {format_str % args} - {execution_time:.3f}s")
         except Exception:
             print(f"{self.client_address[0]} - {format_str % args}")
+
+    def version_string(self):
+        """Reduce server signature exposure"""
+        try:
+            from config import config as _config
+            name = _config.get('project.name', 'Pi Monitor')
+            version = _config.get('project.version', '1.0.0')
+            return f"{name}/{version}"
+        except Exception:
+            return "PiMonitor"
     
     def setup(self):
         """Setup method called before handling each request"""

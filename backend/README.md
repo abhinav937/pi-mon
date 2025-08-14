@@ -101,6 +101,16 @@ The server uses the existing `config.py` file for configuration. All modules imp
 - **subprocess** - System command execution (built-in)
 - **threading** - Background operations (built-in)
 
+### Environment
+
+Copy `env.example` to `.env` and customize for production:
+
+```
+cp env.example .env
+```
+
+Set `PI_MONITOR_API_KEY` to a secure random value and keep `.env` out of version control.
+
 ## Migration Notes
 
 - The original `simple_server.py` functionality is preserved

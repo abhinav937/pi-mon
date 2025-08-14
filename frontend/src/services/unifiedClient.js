@@ -8,8 +8,12 @@ const CONNECTION_STATES = {
   ERROR: 'error'
 };
 
+// Toggle debug logs: enabled in development, or when localStorage flag is set
+const DEBUG_ENABLED = process.env.NODE_ENV !== 'production' || (typeof window !== 'undefined' && localStorage.getItem('pi-monitor-debug') === '1');
+
 // Debug logging function
 const logDebug = (message, data = null, type = 'info') => {
+  if (!DEBUG_ENABLED && type !== 'error') return;
   const timestamp = new Date().toISOString();
   const logEntry = {
     timestamp,
@@ -18,10 +22,14 @@ const logDebug = (message, data = null, type = 'info') => {
     data
   };
   
-  console.log(`[UnifiedClient Debug] ${message}`, logEntry);
+  if (DEBUG_ENABLED || type === 'error') {
+    // eslint-disable-next-line no-console
+    console.log(`[UnifiedClient Debug] ${message}`, logEntry);
+  }
   
   // Also log to localStorage for persistence across page reloads
   try {
+    if (!DEBUG_ENABLED && type !== 'error') return;
     const existingLogs = JSON.parse(localStorage.getItem('pi-monitor-debug-logs') || '[]');
     existingLogs.push(logEntry);
     // Keep only last 100 logs

@@ -6,6 +6,7 @@ Common utility functions and decorators
 
 import time
 import logging
+import json
 from collections import defaultdict
 from functools import wraps
 
@@ -33,7 +34,7 @@ def rate_limit(max_requests=100, window=60):
                     self.send_header('Retry-After', str(window))
                     self.end_headers()
                     response = {"error": "Rate limit exceeded", "retry_after": window}
-                    self.wfile.write(response.encode())
+                    self.wfile.write(json.dumps(response).encode())
                     return
                 
                 # Add current request

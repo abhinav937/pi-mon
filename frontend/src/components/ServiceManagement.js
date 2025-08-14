@@ -1,3 +1,4 @@
+/* eslint-disable no-console */
 import React from 'react';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
 import { PlayArrow as Play, Stop as Square, RestartAlt as RotateCcw, Refresh as RefreshCw, Settings, CheckCircle, ErrorOutline as AlertCircle, Cancel as XCircle } from '@mui/icons-material';

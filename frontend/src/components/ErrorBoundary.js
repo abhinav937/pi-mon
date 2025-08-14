@@ -1,3 +1,4 @@
+/* eslint-disable no-console */
 import React from 'react';
 import { Warning as AlertTriangle, Refresh as RefreshCw, Home } from '@mui/icons-material';
 

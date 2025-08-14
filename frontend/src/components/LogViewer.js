@@ -1,3 +1,4 @@
+/* eslint-disable no-console */
 import React, { useState, useEffect } from 'react';
 import { useQuery } from 'react-query';
 import { Article as FileText, Search, FilterAlt as Filter, Download, Refresh as RefreshCw, Warning as AlertTriangle, Info, Cancel as XCircle } from '@mui/icons-material';

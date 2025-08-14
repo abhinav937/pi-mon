@@ -1,3 +1,4 @@
+/* eslint-disable no-console */
 import React, { useState, useEffect } from 'react';
 import { useQuery } from 'react-query';
 import { Memory as Cpu, Storage as HardDrive, Thermostat as Thermometer, Timeline as Activity, AccessTime as Clock, Wifi, TrendingUp, DataObject as Database, Bolt as Zap } from '@mui/icons-material';

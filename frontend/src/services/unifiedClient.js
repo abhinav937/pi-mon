@@ -1,5 +1,5 @@
+/* eslint-disable no-console */
 import axios from 'axios';
-import PRODUCTION_CONFIG from '../config/production.js';
 
 const CONNECTION_STATES = {
   DISCONNECTED: 'disconnected',

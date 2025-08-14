@@ -6,6 +6,7 @@ import toast from 'react-hot-toast';
 const PowerManagement = ({ unifiedClient }) => {
   const [selectedAction, setSelectedAction] = useState('shutdown');
   const [delay, setDelay] = useState(0);
+  const [delayInput, setDelayInput] = useState('0');
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [timerActive, setTimerActive] = useState(false);
   const [timeRemaining, setTimeRemaining] = useState(0);
@@ -52,6 +53,11 @@ const PowerManagement = ({ unifiedClient }) => {
     };
   }, [timerActive, timeRemaining, timerPaused]);
 
+  // Update delayInput when delay changes (e.g., after successful action)
+  useEffect(() => {
+    setDelayInput(delay.toString());
+  }, [delay]);
+
   const powerMutation = useMutation(
     async ({ action, delay }) => {
       if (!unifiedClient) {
@@ -70,6 +76,7 @@ const PowerManagement = ({ unifiedClient }) => {
         toast.success(data.message || `${selectedAction} initiated successfully`);
         setShowConfirmation(false);
         setDelay(0);
+        setDelayInput('0');
         setTimerActive(false);
         setTimeRemaining(0);
       },
@@ -112,7 +119,24 @@ const PowerManagement = ({ unifiedClient }) => {
     setTimerActive(false);
     setTimeRemaining(0);
     setTimerPaused(false);
+    setDelay(0);
+    setDelayInput('0');
     toast.success('Timer cancelled');
+  };
+
+  const handleDelayInputChange = (e) => {
+    const value = e.target.value;
+    setDelayInput(value);
+    
+    // Convert to number for validation and state
+    const numValue = parseInt(value) || 0;
+    const clampedValue = Math.max(0, Math.min(3600, numValue));
+    setDelay(clampedValue);
+  };
+
+  const handleDelayInputBlur = () => {
+    // Ensure the input shows the actual numeric value on blur
+    setDelayInput(delay.toString());
   };
 
   const formatDelay = (seconds) => {
@@ -361,8 +385,9 @@ const PowerManagement = ({ unifiedClient }) => {
               min="0"
               max="3600"
               step="1"
-              value={delay}
-              onChange={(e) => setDelay(Math.max(0, Math.min(3600, parseInt(e.target.value) || 0)))}
+              value={delayInput}
+              onChange={handleDelayInputChange}
+              onBlur={handleDelayInputBlur}
               className="input-field"
               placeholder="Enter delay in seconds"
               disabled={timerActive}

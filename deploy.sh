@@ -49,9 +49,10 @@ if [ -t 1 ] && [ "${NO_COLOR}" = false ]; then
     GREEN='\033[0;32m'
     YELLOW='\033[0;33m'
     BLUE='\033[0;34m'
+    WHITE='\033[1;37m'
     NC='\033[0m'
 else
-    RED=''; GREEN=''; YELLOW=''; BLUE=''; NC=''
+    RED=''; GREEN=''; YELLOW=''; BLUE=''; WHITE=''; NC=''
 fi
 
 _level_value() {
@@ -72,7 +73,7 @@ log() {
     [ "$level_num" -lt "$LOG_LEVEL_NUM" ] && return 0
     local ts
     ts="$(date '+%Y-%m-%d %H:%M:%S')"
-    local tag=""; local color=""; local reset="$NC"
+    local tag=""; local color=""; local text="$WHITE"; local reset="$NC"
     case "$level" in
         debug) tag="DEBUG"; color="$BLUE" ;;
         info)  tag="INFO";  color="$GREEN" ;;
@@ -80,9 +81,9 @@ log() {
         error) tag="ERROR"; color="$RED" ;;
         *)     tag="INFO";  color="" ;;
     esac
-    if [ "$NO_COLOR" = true ]; then color=""; reset=""; fi
-    # Concise colored header line
-    printf "%b[%s] %-5s%b %s\n" "$color" "$ts" "$tag" "$reset" "$*"
+    if [ "$NO_COLOR" = true ]; then color=""; text=""; reset=""; fi
+    # Concise colored header; message in white for contrast
+    printf "%b[%s] %-5s%b %b%s%b\n" "$color" "$ts" "$tag" "$reset" "$text" "$*" "$reset"
     # Also append full message to log file
     echo "[$ts] $tag $*" >> "$LOG_FILE" 2>/dev/null || true
 }
@@ -181,9 +182,10 @@ announce() {
     local msg="$1"
     local ts
     ts="$(date '+%Y-%m-%d %H:%M:%S')"
-    local color="$BLUE"; local reset="$NC"
-    if [ "$NO_COLOR" = true ]; then color=""; reset=""; fi
-    printf "%b[%s] %s%b\n" "$color" "$ts" "$msg" "$reset"
+    local hcolor="$BLUE"; local mcolor="$WHITE"; local reset="$NC"
+    if [ "$NO_COLOR" = true ]; then hcolor=""; mcolor=""; reset=""; fi
+    # Header (timestamp) in blue, message in white
+    printf "%b[%s]%b %b%s%b\n" "$hcolor" "$ts" "$reset" "$mcolor" "$msg" "$reset"
 }
 
 # If STATIC_IP not provided, attempt to detect a primary IPv4 (best-effort)

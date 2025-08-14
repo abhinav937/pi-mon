@@ -3,6 +3,7 @@
   "version": "2.0.0",
   "description": "Pi Monitor - React Frontend Dashboard",
   "private": true,
+  "homepage": "https://abhinav937.github.io/pi-mon",
   "dependencies": {
     "@testing-library/jest-dom": "^5.17.0",
     "@testing-library/react": "^13.4.0",
@@ -43,7 +44,8 @@
     "build:docker": "npm run build && docker build -t pi-monitor-frontend .",
     "dev": "npm start",
     "lint": "eslint src --ext .js,.jsx",
-    "lint:fix": "eslint src --ext .js,.jsx --fix"
+    "lint:fix": "eslint src --ext .js,.jsx --fix",
+    "build:pages": "react-scripts build && node scripts/copyBuildToDocs.js"
   },
   "eslintConfig": {
     "extends": [

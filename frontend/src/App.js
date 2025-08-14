@@ -107,7 +107,8 @@ function App() {
   useEffect(() => {
     const loadFrontendVersion = async () => {
       try {
-        const res = await fetch('/version.json', { cache: 'no-store' });
+        const url = `${process.env.PUBLIC_URL || ''}/version.json`;
+        const res = await fetch(url, { cache: 'no-store' });
         if (res.ok) {
           const v = await res.json();
           if (v?.version) {

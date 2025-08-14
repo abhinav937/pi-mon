@@ -208,6 +208,8 @@ class PiMonitorHandler(BaseHTTPRequestHandler):
             self._handle_power_sleep()
         elif path == '/api/metrics/clear':
             self._handle_metrics_clear()
+        elif path == '/api/metrics/interval':
+            self._handle_metrics_interval(parse_qs(urlparse(self.path).query))
         elif path.startswith('/api/service/'):
             self._handle_service_post_endpoints(path)
         else:
@@ -463,26 +465,43 @@ class PiMonitorHandler(BaseHTTPRequestHandler):
                     "message": f"Current metrics collection interval: {current_interval} seconds"
                 }
             elif self.command == 'POST':
-                # Update interval
-                interval_str = query_params.get('interval', ['5'])[0]
-                try:
-                    interval_seconds = float(interval_str)
-                    success = self.server_instance.metrics_collector.set_collection_interval(interval_seconds)
-                    if success:
-                        response = {
-                            "success": True,
-                            "message": f"Metrics collection interval updated to {interval_seconds} seconds",
-                            "new_interval": interval_seconds
-                        }
-                    else:
+                # Update interval from POST body
+                content_length = int(self.headers.get('Content-Length', 0))
+                if content_length > 0:
+                    post_data = self.rfile.read(content_length)
+                    try:
+                        data = json.loads(post_data.decode('utf-8'))
+                        interval_str = data.get('interval', '5')
+                        interval_seconds = float(interval_str)
+                        
+                        # Validate interval range
+                        if interval_seconds < 1 or interval_seconds > 300:
+                            response = {
+                                "success": False,
+                                "message": "Interval must be between 1 and 300 seconds"
+                            }
+                        else:
+                            success = self.server_instance.metrics_collector.set_collection_interval(interval_seconds)
+                            if success:
+                                response = {
+                                    "success": True,
+                                    "message": f"Metrics collection interval updated to {interval_seconds} seconds",
+                                    "new_interval": interval_seconds
+                                }
+                            else:
+                                response = {
+                                    "success": False,
+                                    "message": "Failed to update collection interval"
+                                }
+                    except (ValueError, json.JSONDecodeError):
                         response = {
                             "success": False,
-                            "message": "Failed to update collection interval"
+                            "message": "Invalid interval value. Must be a valid number."
                         }
-                except ValueError:
+                else:
                     response = {
                         "success": False,
-                        "message": "Invalid interval value. Must be a number."
+                        "message": "No data provided in POST request"
                     }
             else:
                 response = {

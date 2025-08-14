@@ -72,15 +72,19 @@ log() {
     [ "$level_num" -lt "$LOG_LEVEL_NUM" ] && return 0
     local ts
     ts="$(date '+%Y-%m-%d %H:%M:%S')"
-    local color=""; local tag=""
+    local tag=""; local color=""; local reset="$NC"
     case "$level" in
-        debug) color="$BLUE"; tag="DEBUG" ;;
-        info)  color="$GREEN"; tag="INFO" ;;
-        warn)  color="$YELLOW"; tag="WARN" ;;
-        error) color="$RED"; tag="ERROR" ;;
-        *)     color=""; tag="INFO" ;;
+        debug) tag="DEBUG"; color="$BLUE" ;;
+        info)  tag="INFO";  color="$GREEN" ;;
+        warn)  tag="WARN";  color="$YELLOW" ;;
+        error) tag="ERROR"; color="$RED" ;;
+        *)     tag="INFO";  color="" ;;
     esac
-    printf "%b[%s] %-5s%b %s\n" "$color" "$ts" "$tag" "$NC" "$*"
+    if [ "$NO_COLOR" = true ]; then color=""; reset=""; fi
+    # Concise colored header line
+    printf "%b[%s] %-5s%b %s\n" "$color" "$ts" "$tag" "$reset" "$*"
+    # Also append full message to log file
+    echo "[$ts] $tag $*" >> "$LOG_FILE" 2>/dev/null || true
 }
 
 run_cmd() {
@@ -172,6 +176,16 @@ parse_args "$@"
 LOG_FILE="$STATE_DIR/deploy.log"
 touch "$LOG_FILE" 2>/dev/null || true
 
+# Minimal announcer (always prints)
+announce() {
+    local msg="$1"
+    local ts
+    ts="$(date '+%Y-%m-%d %H:%M:%S')"
+    local color="$BLUE"; local reset="$NC"
+    if [ "$NO_COLOR" = true ]; then color=""; reset=""; fi
+    printf "%b[%s] %s%b\n" "$color" "$ts" "$msg" "$reset"
+}
+
 # If STATIC_IP not provided, attempt to detect a primary IPv4 (best-effort)
 if [ -z "$STATIC_IP" ]; then
     STATIC_IP=$(hostname -I 2>/dev/null | awk '{print $1}') || true
@@ -189,6 +203,7 @@ fi
 # Discovery and state
 # ----------------------------------------------------------------------------
 log info "Checking current state"
+announce "pi-mon deploy starting"
 
 mkdir -p "$STATE_DIR"
 run_cmd chown "$SYSTEM_USER":"$SYSTEM_USER" "$STATE_DIR"
@@ -291,6 +306,7 @@ if [ "$SKIP_BACKEND" = false ]; then
 fi
 
 log info "User exists: $USER_EXISTS | Project: $PI_MON_EXISTS | Venv: $VENV_EXISTS | Service: $SERVICE_RUNNING | Nginx: $NGINX_CONFIGURED | Frontend: $FRONTEND_BUILT"
+announce "paths: PI_MON_DIR=$PI_MON_DIR WEB_ROOT=$WEB_ROOT VENV_DIR=$VENV_DIR"
 
 # ----------------------------------------------------------------------------
 # Ensure user and directories
@@ -332,6 +348,7 @@ bootstrap_with_setup_script() {
         return 0
     fi
     log info "Bootstrapping via scripts/setup_venv_systemd.sh"
+    announce "bootstrap: scripts/setup_venv_systemd.sh"
     # Ensure prerequisites the bootstrap script expects
     if ! command -v python3 >/dev/null 2>&1; then
         if [ "$SILENT_OUTPUT" = true ]; then
@@ -672,4 +689,4 @@ configure_nginx
 configure_firewall
 verify_stack
 
-log info "Done"
+announce "deploy complete"

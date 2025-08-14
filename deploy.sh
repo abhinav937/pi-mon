@@ -871,7 +871,10 @@ fi
 
 # Bootstrap during full update (no --only) or when explicitly requested
 if { [ "$SKIP_BACKEND" = false ] && [ -z "${ONLY_TARGET}" ]; } || [ "$USE_SETUP_SCRIPT" = true ]; then
-    bootstrap_with_setup_script
+    # Only bootstrap if prerequisites are missing
+    if [ "$USE_SETUP_SCRIPT" = true ] || [ "$VENV_EXISTS" = false ] || [ "$SERVICE_EXISTS" = false ]; then
+        bootstrap_with_setup_script
+    fi
 fi
 ensure_venv
 setup_backend_service

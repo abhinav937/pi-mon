@@ -12,7 +12,7 @@ import {
   Filler,
   TimeScale
 } from 'chart.js';
-import { TrendingUp, BarChart as BarChart3, Timeline, Bolt } from '@mui/icons-material';
+import { TrendingUp, BarChart as BarChart3, Timeline, Bolt, DataObject as Database } from '@mui/icons-material';
 import { formatTimestamp, getTickIntervals, formatRelativeTime } from '../utils/format';
 
 // Register Chart.js components
@@ -664,6 +664,8 @@ const ResourceChart = ({ unifiedClient }) => {
                           return Math.max(-20, Math.min(120, numVal)); // -20°C to 120°C
                         } else if (dataset.label.includes('Usage')) {
                           return Math.max(0, Math.min(100, numVal)); // 0% to 100%
+                        } else if (dataset.label.includes('Voltage')) {
+                          return Math.max(0, Math.min(2.0, numVal)); // 0V to 2.0V
                         }
                         return numVal;
                       })
@@ -716,7 +718,12 @@ const ResourceChart = ({ unifiedClient }) => {
                chartData[selectedMetric].data[chartData[selectedMetric].data.length - 1] !== null &&
                chartData[selectedMetric].data[chartData[selectedMetric].data.length - 1] !== undefined &&
                !isNaN(chartData[selectedMetric].data[chartData[selectedMetric].data.length - 1])
-               ? `${Number(chartData[selectedMetric].data[chartData[selectedMetric].data.length - 1]).toFixed(1)}${selectedMetric === 'temperature' ? '°C' : '%'}`
+               ? (() => {
+                   const value = Number(chartData[selectedMetric].data[chartData[selectedMetric].data.length - 1]);
+                   if (selectedMetric === 'temperature') return `${value.toFixed(1)}°C`;
+                   else if (selectedMetric === 'voltage') return `${value.toFixed(3)}V`;
+                   else return `${value.toFixed(1)}%`;
+                 })()
                 : 'N/A'
               }
             </div>
@@ -734,7 +741,9 @@ const ResourceChart = ({ unifiedClient }) => {
                     );
                     if (validData.length === 0) return 'N/A';
                     const average = validData.reduce((a, b) => a + b, 0) / validData.length;
-                    return `${Number(average).toFixed(1)}${selectedMetric === 'temperature' ? '°C' : '%'}`;
+                    if (selectedMetric === 'temperature') return `${Number(average).toFixed(1)}°C`;
+                    else if (selectedMetric === 'voltage') return `${Number(average).toFixed(3)}V`;
+                    else return `${Number(average).toFixed(1)}%`;
                   })()
                 : 'N/A'
               }
@@ -753,7 +762,9 @@ const ResourceChart = ({ unifiedClient }) => {
                     );
                     if (validData.length === 0) return 'N/A';
                     const maxValue = Math.max(...validData);
-                    return `${Number(maxValue).toFixed(1)}${selectedMetric === 'temperature' ? '°C' : '%'}`;
+                    if (selectedMetric === 'temperature') return `${Number(maxValue).toFixed(1)}°C`;
+                    else if (selectedMetric === 'voltage') return `${Number(maxValue).toFixed(3)}V`;
+                    else return `${Number(maxValue).toFixed(1)}%`;
                   })()
                 : 'N/A'
               }

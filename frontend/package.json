@@ -3,7 +3,7 @@
   "version": "2.0.0",
   "description": "Pi Monitor - React Frontend Dashboard",
   "private": true,
-  "homepage": "https://abhinav937.github.io/pi-mon",
+  "homepage": ".",
   "dependencies": {
     "@testing-library/jest-dom": "^5.17.0",
     "@testing-library/react": "^13.4.0",

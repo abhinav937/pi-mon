@@ -369,7 +369,8 @@ bootstrap_with_setup_script() {
             run_cmd apt-get install -y nodejs
         fi
     fi
-    run_cmd bash "$setup_script" "$PI_MON_DIR"
+    # Run bootstrap quietly so it prints minimal output (PMON_QUIET=1)
+    run_cmd PMON_QUIET=1 bash "$setup_script" "$PI_MON_DIR"
     refresh_backend_state
 }
 

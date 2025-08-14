@@ -10,7 +10,7 @@ import {
   Tooltip,
   Legend,
   Filler,
-  TimeScale  // Add this
+  TimeScale
 } from 'chart.js';
 import { TrendingUp, BarChart as BarChart3, Timeline as Activity, Storage as HardDrive, DataObject as Database } from '@mui/icons-material';
 
@@ -24,7 +24,7 @@ ChartJS.register(
   Tooltip,
   Legend,
   Filler,
-  TimeScale  // Register time scale
+  TimeScale
 );
 
 const ResourceChart = ({ unifiedClient }) => {
@@ -37,10 +37,10 @@ const ResourceChart = ({ unifiedClient }) => {
   });
   const [isLoadingHistorical, setIsLoadingHistorical] = useState(true);
   
-  // Load time range from localStorage or default to 2 hours
+  // Updated time range options: 1hr, 6hr, 12hr, 24hr
   const [timeRange, setTimeRange] = useState(() => {
     const saved = localStorage.getItem('pi-monitor-time-range');
-    return saved ? parseInt(saved) : 120; // Default to last 2 hours
+    return saved ? parseInt(saved) : 60; // Default to last 1 hour
   });
   
   const SAMPLE_INTERVAL_SECONDS = 5; // Expected real-time sample interval
@@ -49,7 +49,7 @@ const ResourceChart = ({ unifiedClient }) => {
     return Math.max(100, estimated);
   });
   
-  const chartRef = useRef(null);  // Ref to chart instance
+  const chartRef = useRef(null);
 
   // Save time range to localStorage whenever it changes and recompute max points
   useEffect(() => {
@@ -58,6 +58,37 @@ const ResourceChart = ({ unifiedClient }) => {
     setMaxDataPoints(Math.max(100, estimated));
   }, [timeRange]);
 
+  // Helper function to format timestamps properly
+  const formatTimestamp = (timestamp, range) => {
+    if (typeof timestamp === 'string') {
+      // If it's already a formatted string, return as is
+      return timestamp;
+    }
+    
+    const date = new Date(timestamp * 1000);
+    
+    if (range >= 1440) { // 24 hours or more
+      return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    } else if (range >= 720) { // 12 hours or more
+      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    } else {
+      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    }
+  };
+
+  // Helper function to get x-axis tick interval based on time range
+  const getTickInterval = (range) => {
+    if (range >= 1440) { // 24 hours
+      return 6; // Show every 6 hours
+    } else if (range >= 720) { // 12 hours
+      return 3; // Show every 3 hours
+    } else if (range >= 120) { // 2 hours or more
+      return 1; // Show every hour
+    } else {
+      return 0.5; // Show every 30 minutes
+    }
+  };
+
   // Listen for real-time updates
   useEffect(() => {
     if (!unifiedClient) return;
@@ -65,7 +96,7 @@ const ResourceChart = ({ unifiedClient }) => {
     const handleUpdate = (data) => {
       if (data.type === 'initial_stats' || data.type === 'periodic_update' || data.type === 'mqtt_update') {
         const now = new Date();
-        const timestamp = timeRange > 60 ? now.toLocaleString() : now.toLocaleTimeString();
+        const timestamp = formatTimestamp(now.getTime() / 1000, timeRange);
         const systemData = data.data || data;
 
         setChartData(prevData => {
@@ -120,7 +151,7 @@ const ResourceChart = ({ unifiedClient }) => {
     const latest = unifiedClient.getLatestStats && unifiedClient.getLatestStats();
     if (!latest) return;
     const now = new Date();
-    const timestamp = timeRange > 60 ? now.toLocaleString() : now.toLocaleTimeString();
+    const timestamp = formatTimestamp(now.getTime() / 1000, timeRange);
     setChartData(prevData => {
       const newData = { ...prevData };
       if (latest.cpu_percent != null && !isNaN(latest.cpu_percent) && !prevData.cpu.labels.includes(timestamp)) {
@@ -150,10 +181,7 @@ const ResourceChart = ({ unifiedClient }) => {
       const response = await unifiedClient.getMetricsHistory(timeRange);
       if (response && response.metrics) {
         const metrics = response.metrics;
-        const labels = metrics.map(m => {
-          const date = new Date(m.timestamp * 1000);
-          return timeRange > 60 ? date.toLocaleString() : date.toLocaleTimeString();
-        });
+        const labels = metrics.map(m => formatTimestamp(m.timestamp, timeRange));
         const cpuData = metrics.map(m => m.cpu_percent || 0);
         const memoryData = metrics.map(m => m.memory_percent || 0);
         const temperatureData = metrics.map(m => m.temperature || 0);
@@ -171,7 +199,7 @@ const ResourceChart = ({ unifiedClient }) => {
         }
       }
     } catch (error) {
-      /* noop */
+      console.error('Failed to fetch historical data:', error);
     } finally {
       setIsLoadingHistorical(false);
     }
@@ -281,16 +309,29 @@ const ResourceChart = ({ unifiedClient }) => {
         },
         scales: {
           x: {
-            type: 'category',  // Back to category (no adapter needed)
+            type: 'category',
             ticks: {
-              maxTicksLimit: 10,
+              maxTicksLimit: getTickInterval(timeRange) * 2, // Adjust based on time range
               autoSkip: true,
               maxRotation: 45,
               minRotation: 0,
               callback: function(value, index, ticks) {
-                // Custom label formatting
+                // Custom label formatting to avoid "AM AM AM" issue
                 const label = this.getLabelForValue(value);
-                return timeRange > 60 ? label : label.split(' ')[1];  // Show full or time-only
+                if (!label) return '';
+                
+                // For 24-hour view, show date and time
+                if (timeRange >= 1440) {
+                  return label;
+                }
+                // For 12-hour view, show time only
+                else if (timeRange >= 720) {
+                  return label.split(' ').pop(); // Get time part only
+                }
+                // For shorter views, show time with seconds
+                else {
+                  return label;
+                }
               }
             },
             title: {
@@ -339,6 +380,14 @@ const ResourceChart = ({ unifiedClient }) => {
     { id: 'disk', name: 'Disk Usage', icon: HardDrive, color: 'text-green-600' },
   ];
 
+  // Updated time range options with better labels
+  const timeRangeOptions = [
+    { value: 60, label: '1 Hour', description: 'Last hour with 30-min intervals' },
+    { value: 360, label: '6 Hours', description: 'Last 6 hours with 3-hour intervals' },
+    { value: 720, label: '12 Hours', description: 'Last 12 hours with 3-hour intervals' },
+    { value: 1440, label: '24 Hours', description: 'Last 24 hours with 6-hour intervals' }
+  ];
+
   const chartConfig = getChartConfig(selectedMetric);
   const hasData = chartData[selectedMetric] && 
                   chartData[selectedMetric].data && 
@@ -359,7 +408,7 @@ const ResourceChart = ({ unifiedClient }) => {
           Resource Charts
         </h2>
         <div className="text-sm text-gray-500 dark:text-gray-400">
-          Real-time monitoring
+          Real-time monitoring with 24-hour historical data
         </div>
       </div>
 
@@ -384,22 +433,23 @@ const ResourceChart = ({ unifiedClient }) => {
         })}
       </div>
 
-      {/* Time Range Selector */}
+      {/* Enhanced Time Range Selector */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-gray-50 dark:bg-gray-800 p-3 sm:p-4 rounded-lg">
-        <div className="flex items-center space-x-2 sm:space-x-4">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3">
           <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Time Range:</span>
           <div className="flex flex-wrap gap-2">
-            {[15, 30, 60, 120].map((minutes) => (
+            {timeRangeOptions.map((option) => (
               <button
-                key={minutes}
-                onClick={() => setTimeRange(minutes)}
+                key={option.value}
+                onClick={() => setTimeRange(option.value)}
                 className={`px-3 py-1 text-sm rounded-md transition-colors duration-200 ${
-                  timeRange === minutes
+                  timeRange === option.value
                     ? 'bg-blue-500 text-white'
                     : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600'
                 }`}
+                title={option.description}
               >
-                {minutes}m
+                {option.label}
               </button>
             ))}
           </div>
@@ -419,7 +469,7 @@ const ResourceChart = ({ unifiedClient }) => {
         </div>
         <div className="text-sm text-gray-500 dark:text-gray-400">
           <Database className="inline h-4 w-4 mr-1" />
-          Historical data from backend
+          Historical data from backend (up to 24 hours)
         </div>
       </div>
 
@@ -452,7 +502,7 @@ const ResourceChart = ({ unifiedClient }) => {
                 };
                 return <Line ref={chartRef} {...validatedData} />;
               } catch (error) {
-                /* noop */
+                console.error('Chart error:', error);
                 return (
                   <div className="h-full flex items-center justify-center text-red-500">
                     Chart failed to load: {error.message}. Please refresh.
@@ -530,7 +580,7 @@ const ResourceChart = ({ unifiedClient }) => {
         </div>
       )}
 
-      {/* Chart Info */}
+      {/* Enhanced Chart Info */}
       <div className="text-sm text-gray-500 dark:text-gray-400">
         <p>
           Charts display both historical data from the backend database and real-time updates. 
@@ -548,6 +598,12 @@ const ResourceChart = ({ unifiedClient }) => {
           <Activity className="inline h-4 w-4 mr-1 text-blue-600" />
           <span className="text-blue-700 dark:text-blue-300">
             Real-time updates: Active - New data points are added every 5 seconds and displayed immediately.
+          </span>
+        </div>
+        <div className="mt-2 p-2 bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded">
+          <Timeline className="inline h-4 w-4 mr-1 text-purple-600" />
+          <span className="text-purple-700 dark:text-purple-300">
+            Time ranges: 1hr (30-min intervals), 6hr (3-hr intervals), 12hr (3-hr intervals), 24hr (6-hr intervals).
           </span>
         </div>
       </div>

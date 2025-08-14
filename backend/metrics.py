@@ -80,7 +80,9 @@ class MetricsCollector:
         self.collection_count = 0
         self.error_count = 0
         self.last_error = None
-        self.max_history = 5000  # Keep last 5000 data points in memory
+        # Increased max_history to support 24-hour data logging
+        # 24 hours * 60 minutes * 60 seconds / 5 second interval = 17,280 data points
+        self.max_history = 20000  # Keep last 20,000 data points in memory for 24+ hours
         
         # In-memory cache for recent data
         self.recent_cache = deque(maxlen=self.max_history)

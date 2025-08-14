@@ -107,6 +107,14 @@ class MetricsDatabase:
             
             logger.info(f"Database query: minutes={minutes}, cutoff_time={cutoff_time}, limit={limit}")
             
+            # Increase limit for longer time ranges to get more data points
+            if minutes >= 1440:  # 24 hours or more
+                effective_limit = min(limit * 4, 50000)  # Allow up to 50k records for 24hr+ views
+            elif minutes >= 720:  # 12 hours or more
+                effective_limit = min(limit * 2, 25000)  # Allow up to 25k records for 12hr+ views
+            else:
+                effective_limit = limit
+            
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 
@@ -118,10 +126,10 @@ class MetricsDatabase:
                     WHERE timestamp > ? 
                     ORDER BY timestamp ASC 
                     LIMIT ?
-                ''', (cutoff_time, limit))
+                ''', (cutoff_time, effective_limit))
                 
                 rows = cursor.fetchall()
-                logger.info(f"Database returned {len(rows)} rows")
+                logger.info(f"Database returned {len(rows)} rows (requested: {effective_limit})")
                 
                 # Convert to the format expected by frontend
                 metrics = []
@@ -153,7 +161,7 @@ class MetricsDatabase:
             logger.error(f"Failed to get metrics history: {e}")
             return []
     
-    def cleanup_old_data(self, days_to_keep=30):
+    def cleanup_old_data(self, days_to_keep=7):
         """Clean up old metrics data to prevent database bloat"""
         try:
             cutoff_time = time.time() - (days_to_keep * 24 * 60 * 60)
@@ -165,7 +173,7 @@ class MetricsDatabase:
                 deleted_count = cursor.rowcount
                 
                 conn.commit()
-                logger.info(f"Cleaned up {deleted_count} old metrics records")
+                logger.info(f"Cleaned up {deleted_count} old metrics records (keeping last {days_to_keep} days)")
                 return deleted_count
                 
         except Exception as e:

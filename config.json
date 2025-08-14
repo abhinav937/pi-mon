@@ -117,7 +117,15 @@
       "apache2",
       "mosquitto"
     ],
-    "update_interval": "5.0"
+    "update_interval": "5.0",
+    "data_retention_days": 7,
+    "max_history_points": 20000,
+    "time_ranges": [
+      "1 hour (30-min intervals)",
+      "6 hours (3-hour intervals)", 
+      "12 hours (3-hour intervals)",
+      "24 hours (6-hour intervals)"
+    ]
   },
   "security": {
     "authentication": {

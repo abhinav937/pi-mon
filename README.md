@@ -8,6 +8,7 @@ Simple Raspberry Pi monitoring with a lightweight Python HTTP server, systemd, a
 - **Frontend**: React single-page app (served by nginx in production)
 - **Config**: Central `config.json` for ports and service names
 - **Deploy**: One command via `./deploy.sh`
+- **Monitoring**: 24-hour historical data with smart time range options
 
 ## Quick start
 
@@ -50,9 +51,40 @@ Core settings live in `config.json`.
   "services": {
     "backend": { "name": "pi-monitor-backend" },
     "frontend": { "name": "pi-monitor-frontend" }
+  },
+  "monitoring": {
+    "update_interval": "5.0",
+    "data_retention_days": 7,
+    "max_history_points": 20000,
+    "time_ranges": [
+      "1 hour (30-min intervals)",
+      "6 hours (3-hour intervals)", 
+      "12 hours (3-hour intervals)",
+      "24 hours (6-hour intervals)"
+    ]
   }
 }
 ```
+
+## Resource Charts & Time Ranges
+
+The system now supports enhanced time range monitoring with proper x-axis formatting:
+
+### Time Range Options
+- **1 Hour**: Shows last hour with 30-minute intervals
+- **6 Hours**: Shows last 6 hours with 3-hour intervals  
+- **12 Hours**: Shows last 12 hours with 3-hour intervals
+- **24 Hours**: Shows last 24 hours with 6-hour intervals
+
+### X-Axis Formatting
+- **24-hour view**: Date + Time (e.g., "12/25/2024 14:30")
+- **12-hour view**: Time only (e.g., "14:30")
+- **1-hour view**: Time with seconds (e.g., "14:30:45")
+
+### Data Retention
+- **Memory cache**: 20,000 data points (24+ hours at 5-second intervals)
+- **Database**: 7 days of historical data
+- **Real-time updates**: Every 5 seconds
 
 ## Checksum Generation
 

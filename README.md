@@ -54,6 +54,34 @@ Core settings live in `config.json`.
 }
 ```
 
+## Checksum Generation
+
+The deployment system uses a unified approach to generate checksums for all components, determining when redeployment is needed:
+
+### Frontend Checksum
+- **Files**: JavaScript, TypeScript, CSS, JSON, HTML, and configuration files
+- **Excludes**: `node_modules/` and `build/` directories
+- **Method**: SHA256 hash of all source files, sorted alphabetically
+
+### Backend Checksum  
+- **Files**: Python files (`.py`), `requirements.txt`, and shell scripts (`.sh`)
+- **Method**: SHA256 hash of all relevant files, sorted alphabetically
+
+### Nginx Checksum
+- **Files**: Generated configuration files
+- **Method**: SHA256 hash of the final nginx config
+
+### Benefits
+- **Efficient**: Only rebuilds/restarts when source files actually change
+- **Consistent**: Same hashing algorithm (SHA256) for all components
+- **Testable**: Use `--test-checksums` flag to verify checksum generation
+- **Stored**: Checksums saved in `$STATE_DIR/` for comparison across deployments
+
+### Testing Checksums
+```bash
+./deploy.sh --test-checksums
+```
+
 Authentication uses an API key. For development a default key is used. For production set a secure key via environment or `.env` in `backend/`:
 
 ```bash

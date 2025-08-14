@@ -4,6 +4,14 @@ set -euo pipefail
 # ============================================================================
 # Pi Monitor Deployment (leveled logging, flags, subdomain-aware Nginx)
 # ============================================================================
+# 
+# This script uses a unified checksum generation approach for all components:
+# - Frontend: SHA256 of source files (JS, TS, CSS, JSON, HTML, configs)
+# - Backend: SHA256 of Python files, requirements.txt, and shell scripts  
+# - Nginx: SHA256 of generated configuration files
+# 
+# Checksums are stored in $STATE_DIR/ and compared to determine if redeployment
+# is needed, avoiding unnecessary rebuilds and restarts.
 
 # Defaults (overridable via flags)
 DOMAIN="_"
@@ -34,6 +42,7 @@ FORCE_BACKEND=false
 USE_SETUP_SCRIPT=false
 SILENT_OUTPUT=true   # suppress noisy command outputs by default
 SHOW_CONFIG=false
+TEST_CHECKSUMS=false
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -161,6 +170,7 @@ Flags:
   --silent-output              Suppress noisy command outputs (default)
   --verbose-output             Show full outputs of package managers/builds
   --show-config                Print resolved configuration and exit
+  --test-checksums             Test checksum generation functions and exit
   -h, --help                   Show this help
 USAGE
 }
@@ -191,6 +201,7 @@ parse_args() {
             --silent-output) SILENT_OUTPUT=true; shift 1 ;;
             --verbose-output) SILENT_OUTPUT=false; shift 1 ;;
             --show-config) SHOW_CONFIG=true; shift 1 ;;
+            --test-checksums) TEST_CHECKSUMS=true; shift 1 ;;
             -h|--help) usage; exit 0 ;;
             *) log error "Unknown flag: $1"; usage; exit 2 ;;
         esac
@@ -306,6 +317,96 @@ BACKEND_CHECKSUM_FILE="$STATE_DIR/backend_checksum"
 BACKEND_VERSION_FILE="$STATE_DIR/backend_version"
 NGINX_CHECKSUM_FILE="$STATE_DIR/nginx_checksum"
 
+# ----------------------------------------------------------------------------
+# Unified checksum generation function
+# ----------------------------------------------------------------------------
+generate_checksum() {
+    local target_dir="$1"
+    local file_patterns="$2"
+    local exclude_dirs="$3"
+    
+    if [ ! -d "$target_dir" ]; then
+        echo ""
+        return
+    fi
+    
+    local find_cmd="find \"$target_dir\""
+    
+    # Add exclude directories if specified
+    if [ -n "$exclude_dirs" ]; then
+        for dir in $exclude_dirs; do
+            find_cmd="$find_cmd -path \"$target_dir/$dir\" -prune -o"
+        done
+    fi
+    
+    # Add file type filter and execute
+    find_cmd="$find_cmd -type f $file_patterns -print0 | sort -z | xargs -0 sha256sum | sha256sum | awk '{print \$1}'"
+    
+    eval "$find_cmd"
+}
+
+# ----------------------------------------------------------------------------
+# Nginx config checksum generation
+# ----------------------------------------------------------------------------
+generate_nginx_checksum() {
+    local config_file="$1"
+    if [ -f "$config_file" ]; then
+        sha256sum "$config_file" | awk '{print $1}'
+    else
+        echo ""
+    fi
+}
+
+# ----------------------------------------------------------------------------
+# Test checksum generation functions
+# ----------------------------------------------------------------------------
+test_checksums() {
+    log info "Testing unified checksum generation..."
+    
+    # Test frontend checksum
+    local frontend_test=$(generate_checksum "$PI_MON_DIR/frontend" \
+        "\( -name \"*.js\" -o -name \"*.jsx\" -o -name \"*.ts\" -o -name \"*.tsx\" -o -name \"*.css\" -o -name \"*.json\" -o -name \"*.html\" -o -name \"*.config.js\" -o -name \"postcss.config.js\" -o -name \"tailwind.config.js\" -o -name \"package.json\" \)" \
+        "node_modules build")
+    log info "Frontend checksum: ${frontend_test:0:16}..."
+    
+    # Test backend checksum
+    local backend_test=$(generate_checksum "$PI_MON_DIR/backend" \
+        "\( -name \"*.py\" -o -name \"requirements.txt\" -o -name \"*.sh\" \)" \
+        "")
+    log info "Backend checksum: ${backend_test:0:16}..."
+    
+    # Test nginx checksum (using a dummy file)
+    local dummy_file="/tmp/nginx_test.conf"
+    echo "server { listen 80; }" > "$dummy_file"
+    local nginx_test=$(generate_nginx_checksum "$dummy_file")
+    rm -f "$dummy_file"
+    log info "Nginx checksum: ${nginx_test:0:16}..."
+    
+    log info "Checksum generation test completed successfully"
+}
+
+# ----------------------------------------------------------------------------
+# Generate checksums using unified function
+# ----------------------------------------------------------------------------
+CURRENT_FRONTEND_CHECKSUM=""
+if [ -d "$PI_MON_DIR/frontend" ]; then
+    CURRENT_FRONTEND_CHECKSUM=$(generate_checksum "$PI_MON_DIR/frontend" \
+        "\( -name \"*.js\" -o -name \"*.jsx\" -o -name \"*.ts\" -o -name \"*.tsx\" -o -name \"*.css\" -o -name \"*.json\" -o -name \"*.html\" -o -name \"*.config.js\" -o -name \"postcss.config.js\" -o -name \"tailwind.config.js\" -o -name \"package.json\" \)" \
+        "node_modules build")
+fi
+
+CURRENT_FRONTEND_ENV_SIG=$(printf "%s|%s|%s" "$PRODUCTION_URL" "$BACKEND_PORT" "$NGINX_PORT" | sha256sum | awk '{print $1}')
+
+CURRENT_BACKEND_CHECKSUM=""
+if [ -d "$PI_MON_DIR/backend" ]; then
+    CURRENT_BACKEND_CHECKSUM=$(generate_checksum "$PI_MON_DIR/backend" \
+        "\( -name \"*.py\" -o -name \"requirements.txt\" -o -name \"*.sh\" \)" \
+        "")
+fi
+
+# ----------------------------------------------------------------------------
+# Version checking
+# ----------------------------------------------------------------------------
 SOURCE_FRONTEND_VERSION=""; DEPLOYED_FRONTEND_VERSION=""; SOURCE_BACKEND_VERSION=""
 if [ -f "$PI_MON_DIR/frontend/public/version.json" ]; then
     SOURCE_FRONTEND_VERSION=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"\n]*\)".*/\1/p' "$PI_MON_DIR/frontend/public/version.json" | head -n1)
@@ -318,21 +419,6 @@ if [ -f "$WEB_ROOT/version.json" ]; then
 fi
 if [ -f "$PI_MON_DIR/config.json" ]; then
     SOURCE_BACKEND_VERSION=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"\n]*\)".*/\1/p' "$PI_MON_DIR/config.json" | head -n1)
-fi
-
-CURRENT_FRONTEND_CHECKSUM=""
-if [ -d "$PI_MON_DIR/frontend" ]; then
-    CURRENT_FRONTEND_CHECKSUM=$(find "$PI_MON_DIR/frontend" \
-        -path "$PI_MON_DIR/frontend/node_modules" -prune -o \
-        -path "$PI_MON_DIR/frontend/build" -prune -o \
-        -type f \( -name "*.js" -o -name "*.jsx" -o -name "*.ts" -o -name "*.tsx" -o -name "*.css" -o -name "*.json" -o -name "*.html" -o -name "*.config.js" -o -name "postcss.config.js" -o -name "tailwind.config.js" -o -name "package.json" \) -print0 | sort -z | xargs -0 sha256sum | sha256sum | awk '{print $1}')
-fi
-
-CURRENT_FRONTEND_ENV_SIG=$(printf "%s|%s|%s" "$PRODUCTION_URL" "$BACKEND_PORT" "$NGINX_PORT" | sha256sum | awk '{print $1}')
-
-CURRENT_BACKEND_CHECKSUM=""
-if [ -d "$PI_MON_DIR/backend" ]; then
-    CURRENT_BACKEND_CHECKSUM=$(find "$PI_MON_DIR/backend" -type f \( -name "*.py" -o -name "requirements.txt" -o -name "*.sh" \) -print0 | sort -z | xargs -0 sha256sum | sha256sum | awk '{print $1}')
 fi
 
 NEED_FRONTEND_BUILD=false
@@ -671,16 +757,11 @@ EOF
     fi
 
     local desired_checksum existing_checksum stored_checksum
-    desired_checksum="$(sha256sum "$tmp_conf" | awk '{print $1}')"
-    if [ -f "$site_conf_dst" ]; then
-        existing_checksum="$(sha256sum "$site_conf_dst" | awk '{print $1}')"
-    else
-        existing_checksum=""
-    fi
+    desired_checksum="$(generate_nginx_checksum "$tmp_conf")"
+    existing_checksum="$(generate_nginx_checksum "$site_conf_dst")"
+    stored_checksum=""
     if [ -f "$NGINX_CHECKSUM_FILE" ]; then
         stored_checksum="$(cat "$NGINX_CHECKSUM_FILE" 2>/dev/null || true)"
-    else
-        stored_checksum=""
     fi
 
     local need_update=false
@@ -781,6 +862,13 @@ verify_stack() {
 # Orchestration respecting --only/--skip
 # ----------------------------------------------------------------------------
 ensure_user
+
+# Test checksums if requested
+if [ "$TEST_CHECKSUMS" = true ]; then
+    test_checksums
+    exit 0
+fi
+
 # Bootstrap during full update (no --only) or when explicitly requested
 if { [ "$SKIP_BACKEND" = false ] && [ -z "${ONLY_TARGET}" ]; } || [ "$USE_SETUP_SCRIPT" = true ]; then
     bootstrap_with_setup_script

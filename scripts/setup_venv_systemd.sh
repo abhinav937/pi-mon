@@ -58,7 +58,11 @@ fi
 if [[ "$QUIET" != "1" ]]; then echo "==> Creating Python venv and installing backend requirements"; fi
 sudo -u "$APP_USER" mkdir -p "$APP_DIR"
 sudo -u "$APP_USER" python3 -m venv "$VENV_DIR"
-"$VENV_DIR/bin/pip" install --upgrade pip
+if [[ "$QUIET" = "1" ]]; then
+  "$VENV_DIR/bin/pip" install -q --upgrade pip >/dev/null 2>&1
+else
+  "$VENV_DIR/bin/pip" install --upgrade pip
+fi
 if [[ "$QUIET" = "1" ]]; then
   "$VENV_DIR/bin/pip" install -q -r "$BACKEND_DIR/requirements.txt" >/dev/null 2>&1
 else
@@ -126,7 +130,7 @@ if [[ -f /etc/nginx/sites-enabled/default ]]; then rm -f /etc/nginx/sites-enable
 
 # If port 80 is already in use, try to stop common web servers
 if ss -ltnp 2>/dev/null | grep -q ":80 "; then
-  echo "==> Port 80 is in use. Attempting to stop conflicting services (apache2, httpd, lighttpd, nginx)"
+  if [[ "$QUIET" != "1" ]]; then echo "==> Port 80 is in use. Attempting to stop conflicting services (apache2, httpd, lighttpd, nginx)"; fi
   if [[ "$QUIET" = "1" ]]; then true; fi
   systemctl stop apache2 2>/dev/null || true
   systemctl disable apache2 2>/dev/null || true

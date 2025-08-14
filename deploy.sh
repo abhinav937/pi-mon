@@ -88,6 +88,17 @@ log() {
     echo "[$ts] $tag $*" >> "$LOG_FILE" 2>/dev/null || true
 }
 
+# Shorten long hashes for cleaner console output (keeps logs readable)
+short_hash() {
+    local value="${1:-}"
+    local width="${2:-8}"
+    if [ -z "$value" ] || [ "$value" = "none" ]; then
+        echo "none"
+    else
+        echo "${value:0:$width}"
+    fi
+}
+
 run_cmd() {
     if [ "$DRY_RUN" = true ]; then
         log debug "DRY-RUN: $*"
@@ -385,7 +396,11 @@ ensure_venv() {
             run_cmd apt-get install -y python3 python3-venv python3-pip
         fi
         run_cmd sudo -u "$SYSTEM_USER" python3 -m venv "$VENV_DIR"
-        run_cmd "$VENV_DIR/bin/pip" install --upgrade pip
+        if [ "$SILENT_OUTPUT" = true ]; then
+            run_cmd "\"$VENV_DIR/bin/pip\" install -q --upgrade pip >> \"$LOG_FILE\" 2>&1"
+        else
+            run_cmd "$VENV_DIR/bin/pip" install --upgrade pip
+        fi
     fi
     if [ -f "$PI_MON_DIR/backend/requirements.txt" ]; then
         log info "Installing/updating backend dependencies"
@@ -462,7 +477,7 @@ EOF
         [ -f "$BACKEND_CHECKSUM_FILE" ] && previous_backend_checksum="$(cat "$BACKEND_CHECKSUM_FILE" 2>/dev/null || true)"
         [ -f "$BACKEND_VERSION_FILE" ] && previous_backend_version="$(cat "$BACKEND_VERSION_FILE" 2>/dev/null || true)"
         if [ -n "$CURRENT_BACKEND_CHECKSUM" ] && [ "${previous_backend_checksum}" != "${CURRENT_BACKEND_CHECKSUM}" ]; then
-            log info "Backend checksum: '${previous_backend_checksum:-none}' -> '${CURRENT_BACKEND_CHECKSUM}'"
+            log info "Backend checksum: '$(short_hash "${previous_backend_checksum:-}")' -> '$(short_hash "${CURRENT_BACKEND_CHECKSUM}")'"
         fi
         if [ -n "$SOURCE_BACKEND_VERSION$previous_backend_version" ] && [ "${previous_backend_version}" != "${SOURCE_BACKEND_VERSION}" ]; then
             log info "Backend version: '${previous_backend_version:-none}' -> '${SOURCE_BACKEND_VERSION:-unknown}'"
@@ -498,10 +513,10 @@ build_frontend() {
         log info "Frontend version: '${previous_frontend_version:-none}' -> '${SOURCE_FRONTEND_VERSION:-unknown}'"
     fi
     if [ -n "$CURRENT_FRONTEND_ENV_SIG" ] && [ "${previous_frontend_env_sig}" != "${CURRENT_FRONTEND_ENV_SIG}" ]; then
-        log info "Frontend env sig: '${previous_frontend_env_sig:-none}' -> '${CURRENT_FRONTEND_ENV_SIG}'"
+        log info "Frontend env sig: '$(short_hash "${previous_frontend_env_sig:-}")' -> '$(short_hash "${CURRENT_FRONTEND_ENV_SIG}")'"
     fi
     if [ -n "$CURRENT_FRONTEND_CHECKSUM" ] && [ "${previous_frontend_checksum}" != "${CURRENT_FRONTEND_CHECKSUM}" ]; then
-        log info "Frontend checksum: '${previous_frontend_checksum:-none}' -> '${CURRENT_FRONTEND_CHECKSUM}'"
+        log info "Frontend checksum: '$(short_hash "${previous_frontend_checksum:-}")' -> '$(short_hash "${CURRENT_FRONTEND_CHECKSUM}")'"
     fi
     log info "Building frontend"
     if ! command -v npm >/dev/null 2>&1; then
@@ -616,7 +631,7 @@ EOF
     fi
 
     if [ "$need_update" = true ]; then
-        log info "Nginx checksum: '${existing_checksum:-none}' -> '${desired_checksum}'"
+        log info "Nginx checksum: '$(short_hash "${existing_checksum:-}")' -> '$(short_hash "${desired_checksum}")'"
         log info "Updating Nginx config (changes detected)"
         run_cmd cp "$tmp_conf" "$site_conf_dst"
         run_cmd ln -sf "$site_conf_dst" "$NGINX_SITES_ENABLED/$site_name"

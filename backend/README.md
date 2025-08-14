@@ -1,6 +1,6 @@
 # Pi Monitor Backend - Modular Structure
 
-This directory contains the modularized Pi Monitor backend, broken down from the original 3,000+ line `simple_server.py` into logical, maintainable components.
+This directory contains the modularized Pi Monitor backend, broken down from the original 3,000+ line `simple_server.py` into logical, maintainable components
 
 ## File Structure
 

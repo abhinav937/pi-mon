@@ -353,6 +353,24 @@ class UnifiedClient {
     }
   }
 
+  async updateMetricsInterval(intervalSeconds) {
+    try {
+      const response = await this.httpClient.post(`/api/metrics/interval?interval=${intervalSeconds}`);
+      return response.data;
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  async getMetricsInterval() {
+    try {
+      const response = await this.httpClient.get('/api/metrics/interval');
+      return response.data;
+    } catch (error) {
+      throw error;
+    }
+  }
+
   // Network monitoring methods
   async getNetworkInfo() {
     try {

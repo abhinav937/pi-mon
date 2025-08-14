@@ -70,7 +70,7 @@ class MetricsCollector:
     """Collects and manages system metrics"""
     
     def __init__(self):
-        self.collection_interval = 5.0
+        self.collection_interval = 5.0  # Default 5 seconds
         self.is_collecting = False
         self.collection_thread = None
         self.last_collection = 0
@@ -88,6 +88,27 @@ class MetricsCollector:
         self.recent_cache = deque(maxlen=self.max_history)
         # Maintain compatibility with any code referencing metrics_history
         self.metrics_history = self.recent_cache
+    
+    def set_collection_interval(self, interval_seconds):
+        """Update the collection interval (in seconds)"""
+        try:
+            new_interval = float(interval_seconds)
+            if new_interval < 1.0:  # Minimum 1 second
+                new_interval = 1.0
+            elif new_interval > 300.0:  # Maximum 5 minutes
+                new_interval = 300.0
+                
+            with self.collection_lock:
+                self.collection_interval = new_interval
+                logger.info(f"Metrics collection interval updated to {new_interval} seconds")
+            return True
+        except (ValueError, TypeError) as e:
+            logger.error(f"Invalid interval value: {e}")
+            return False
+    
+    def get_collection_interval(self):
+        """Get current collection interval in seconds"""
+        return self.collection_interval
     
     def start_collection(self):
         """Start background metrics collection"""

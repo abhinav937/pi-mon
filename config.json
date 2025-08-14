@@ -118,6 +118,13 @@
       "mosquitto"
     ],
     "update_interval": "5.0",
+    "configurable_intervals": [
+      "2 seconds",
+      "5 seconds", 
+      "10 seconds",
+      "30 seconds",
+      "1 minute"
+    ],
     "data_retention_days": 7,
     "max_history_points": 20000,
     "time_ranges": [

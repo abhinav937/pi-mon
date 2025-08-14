@@ -26,8 +26,36 @@ const SettingsPanel = ({ isDarkMode, setIsDarkMode, onClose, unifiedClient }) =>
         const parsed = JSON.parse(saved);
         setSettings(prev => ({ ...prev, ...parsed }));
       }
+      
+      // Load current refresh interval from backend
+      if (unifiedClient) {
+        loadBackendSettings();
+      }
     } catch (_) {}
-  }, []);
+  }, [unifiedClient]);
+
+  const loadBackendSettings = async () => {
+    try {
+      if (!unifiedClient) return;
+      
+      // Get current metrics interval from backend
+      const intervalResponse = await unifiedClient.getMetricsInterval();
+      if (intervalResponse && intervalResponse.current_interval) {
+        const backendInterval = intervalResponse.current_interval * 1000; // Convert to milliseconds
+        setSettings(prev => ({
+          ...prev,
+          refreshInterval: backendInterval
+        }));
+        // Update localStorage to match backend
+        localStorage.setItem('pi-monitor-settings', JSON.stringify({
+          ...settings,
+          refreshInterval: backendInterval
+        }));
+      }
+    } catch (error) {
+      console.warn('Failed to load backend settings:', error);
+    }
+  };
 
   const handleSettingChange = (key, value) => {
     setSettings(prev => ({
@@ -36,18 +64,30 @@ const SettingsPanel = ({ isDarkMode, setIsDarkMode, onClose, unifiedClient }) =>
     }));
   };
 
-  const handleSave = () => {
-    // Save settings to localStorage
-    localStorage.setItem('pi-monitor-settings', JSON.stringify(settings));
-    
-    // Apply theme change
-    if (settings.theme !== (isDarkMode ? 'dark' : 'light')) {
-      if (setIsDarkMode) {
-        setIsDarkMode(settings.theme === 'dark');
+  const handleSave = async () => {
+    try {
+      // Save settings to localStorage
+      localStorage.setItem('pi-monitor-settings', JSON.stringify(settings));
+      
+      // Send refresh interval to backend
+      if (unifiedClient && settings.refreshInterval) {
+        const intervalSeconds = settings.refreshInterval / 1000; // Convert from milliseconds to seconds
+        await unifiedClient.updateMetricsInterval(intervalSeconds);
+        toast.success('Settings saved and backend updated successfully');
+      } else {
+        toast.success('Settings saved successfully');
       }
+      
+      // Apply theme change
+      if (settings.theme !== (isDarkMode ? 'dark' : 'light')) {
+        if (setIsDarkMode) {
+          setIsDarkMode(settings.theme === 'dark');
+        }
+      }
+    } catch (error) {
+      console.error('Failed to save settings:', error);
+      toast.error('Failed to save settings to backend');
     }
-    
-    toast.success('Settings saved successfully');
   };
 
   const handleReset = () => {

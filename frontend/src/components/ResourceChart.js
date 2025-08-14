@@ -43,7 +43,19 @@ const ResourceChart = ({ unifiedClient }) => {
     return saved ? parseInt(saved) : 60; // Default to last 1 hour
   });
   
-  const SAMPLE_INTERVAL_SECONDS = 5; // Expected real-time sample interval
+  // Get refresh interval from settings (default to 5 seconds if not set)
+  const [refreshInterval, setRefreshInterval] = useState(() => {
+    try {
+      const saved = localStorage.getItem('pi-monitor-settings');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return parsed.refreshInterval || 5000; // Default to 5 seconds
+      }
+    } catch (_) {}
+    return 5000; // Default to 5 seconds
+  });
+  
+  const SAMPLE_INTERVAL_SECONDS = refreshInterval / 1000; // Convert from milliseconds to seconds
   const [maxDataPoints, setMaxDataPoints] = useState(() => {
     const estimated = Math.ceil((timeRange * 60) / SAMPLE_INTERVAL_SECONDS);
     return Math.max(100, estimated);
@@ -57,6 +69,32 @@ const ResourceChart = ({ unifiedClient }) => {
     const estimated = Math.ceil((timeRange * 60) / SAMPLE_INTERVAL_SECONDS);
     setMaxDataPoints(Math.max(100, estimated));
   }, [timeRange]);
+
+  // Listen for settings changes (refresh interval updates)
+  useEffect(() => {
+    const handleSettingsChange = () => {
+      try {
+        const saved = localStorage.getItem('pi-monitor-settings');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (parsed.refreshInterval && parsed.refreshInterval !== refreshInterval) {
+            setRefreshInterval(parsed.refreshInterval);
+          }
+        }
+      } catch (_) {}
+    };
+
+    // Listen for storage events (when settings are changed in another tab/window)
+    window.addEventListener('storage', handleSettingsChange);
+    
+    // Also check periodically for changes
+    const interval = setInterval(handleSettingsChange, 1000);
+    
+    return () => {
+      window.removeEventListener('storage', handleSettingsChange);
+      clearInterval(interval);
+    };
+  }, [refreshInterval]);
 
   // Helper function to format timestamps properly
   const formatTimestamp = (timestamp, range) => {
@@ -597,7 +635,7 @@ const ResourceChart = ({ unifiedClient }) => {
         <div className="mt-2 p-2 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded">
           <Timeline className="inline h-4 w-4 mr-1 text-blue-600" />
           <span className="text-blue-700 dark:text-blue-300">
-            Real-time updates: Active - New data points are added every 5 seconds and displayed immediately.
+            Real-time updates: Active - New data points are added every {refreshInterval / 1000} seconds and displayed immediately.
           </span>
         </div>
         <div className="mt-2 p-2 bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded">

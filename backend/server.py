@@ -177,6 +177,8 @@ class PiMonitorHandler(BaseHTTPRequestHandler):
             self._handle_database_stats()
         elif path == '/api/metrics/export':
             self._handle_metrics_export()
+        elif path == '/api/metrics/interval':
+            self._handle_metrics_interval(query_params)
         elif path == '/api/refresh':
             self._handle_refresh()
         elif path == '/api/power':
@@ -445,6 +447,55 @@ class PiMonitorHandler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps(response).encode())
         except Exception as e:
             self._send_internal_error(f"Failed to export metrics: {str(e)}")
+
+    def _handle_metrics_interval(self, query_params):
+        """Handle metrics interval updates"""
+        if not self._check_auth():
+            self._send_unauthorized()
+            return
+        
+        try:
+            if self.command == 'GET':
+                # Get current interval
+                current_interval = self.server_instance.metrics_collector.get_collection_interval()
+                response = {
+                    "current_interval": current_interval,
+                    "message": f"Current metrics collection interval: {current_interval} seconds"
+                }
+            elif self.command == 'POST':
+                # Update interval
+                interval_str = query_params.get('interval', ['5'])[0]
+                try:
+                    interval_seconds = float(interval_str)
+                    success = self.server_instance.metrics_collector.set_collection_interval(interval_seconds)
+                    if success:
+                        response = {
+                            "success": True,
+                            "message": f"Metrics collection interval updated to {interval_seconds} seconds",
+                            "new_interval": interval_seconds
+                        }
+                    else:
+                        response = {
+                            "success": False,
+                            "message": "Failed to update collection interval"
+                        }
+                except ValueError:
+                    response = {
+                        "success": False,
+                        "message": "Invalid interval value. Must be a number."
+                    }
+            else:
+                response = {
+                    "success": False,
+                    "message": "Method not allowed. Use GET to retrieve or POST to update."
+                }
+            
+            self.send_response(200)
+            self._set_common_headers()
+            self.wfile.write(json.dumps(response).encode())
+            
+        except Exception as e:
+            self._send_internal_error(f"Failed to handle metrics interval: {str(e)}")
 
     def _handle_metrics_clear(self):
         """Clear all metrics from the database"""

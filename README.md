@@ -84,7 +84,17 @@ The system now supports enhanced time range monitoring with proper x-axis format
 ### Data Retention
 - **Memory cache**: 20,000 data points (24+ hours at 5-second intervals)
 - **Database**: 7 days of historical data
-- **Real-time updates**: Every 5 seconds
+- **Real-time updates**: Every 5 seconds (configurable via Settings)
+
+### Configurable Refresh Intervals
+The system now supports dynamic refresh interval configuration:
+- **2 seconds**: High-frequency monitoring for critical systems
+- **5 seconds**: Default interval for balanced performance
+- **10 seconds**: Moderate monitoring for stable systems  
+- **30 seconds**: Low-frequency monitoring for long-term trends
+- **1 minute**: Minimal monitoring for background systems
+
+**Settings Integration**: Refresh intervals can be changed in real-time through the Settings panel and are immediately applied to both frontend and backend systems.
 
 ## Checksum Generation
 

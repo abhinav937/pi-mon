@@ -12,7 +12,7 @@ import {
   Filler,
   TimeScale
 } from 'chart.js';
-import { TrendingUp, BarChart as BarChart3, Timeline as Activity, Storage as HardDrive, DataObject as Database } from '@mui/icons-material';
+import { TrendingUp, BarChart as BarChart3, Timeline, Storage as HardDrive, DataObject as Database } from '@mui/icons-material';
 
 // Register Chart.js components
 ChartJS.register(
@@ -374,7 +374,7 @@ const ResourceChart = ({ unifiedClient }) => {
   };
 
   const metrics = [
-    { id: 'cpu', name: 'CPU Usage', icon: Activity, color: 'text-blue-600' },
+    { id: 'cpu', name: 'CPU Usage', icon: Timeline, color: 'text-blue-600' },
     { id: 'memory', name: 'Memory Usage', icon: BarChart3, color: 'text-purple-600' },
     { id: 'temperature', name: 'Temperature', icon: TrendingUp, color: 'text-red-600' },
     { id: 'disk', name: 'Disk Usage', icon: HardDrive, color: 'text-green-600' },
@@ -478,7 +478,7 @@ const ResourceChart = ({ unifiedClient }) => {
         {isLoadingHistorical ? (
           <div className="h-96 flex items-center justify-center text-gray-500 dark:text-gray-400">
             <div className="text-center">
-              <Activity className="h-12 w-12 mx-auto mb-4 opacity-50" />
+              <Timeline className="h-12 w-12 mx-auto mb-4 opacity-50" />
               <p className="text-lg font-medium mb-2">Loading historical data...</p>
               <p className="text-sm">Fetching data from the backend to display charts.</p>
             </div>
@@ -514,7 +514,7 @@ const ResourceChart = ({ unifiedClient }) => {
         ) : (
           <div className="h-96 flex items-center justify-center text-gray-500 dark:text-gray-400">
             <div className="text-center">
-              <Activity className="h-12 w-12 mx-auto mb-4 opacity-50" />
+              <Timeline className="h-12 w-12 mx-auto mb-4 opacity-50" />
               <p className="text-lg font-medium mb-2">Waiting for data...</p>
               <p className="text-sm">Charts will appear once real-time data starts flowing</p>
             </div>

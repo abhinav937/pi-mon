@@ -554,6 +554,27 @@ EOF
 }
 
 # ----------------------------------------------------------------------------
+# Firewall (optional)
+# ----------------------------------------------------------------------------
+configure_firewall() {
+    # Open port 80 for LAN access if ufw is installed and active
+    if command -v ufw >/dev/null 2>&1; then
+        if ufw status 2>/dev/null | grep -qi active; then
+            log info "Configuring UFW to allow HTTP (80/tcp)"
+            run_cmd ufw allow 80/tcp || true
+        fi
+    fi
+    # firewalld (CentOS/RHEL variants)
+    if command -v firewall-cmd >/dev/null 2>&1; then
+        if firewall-cmd --state >/dev/null 2>&1; then
+            log info "Configuring firewalld to allow HTTP (80/tcp)"
+            run_cmd firewall-cmd --permanent --add-service=http || true
+            run_cmd firewall-cmd --reload || true
+        fi
+    fi
+}
+
+# ----------------------------------------------------------------------------
 # Verification
 # ----------------------------------------------------------------------------
 verify_stack() {
@@ -611,6 +632,7 @@ ensure_venv
 setup_backend_service
 build_frontend
 configure_nginx
+configure_firewall
 verify_stack
 
 log info "Done"

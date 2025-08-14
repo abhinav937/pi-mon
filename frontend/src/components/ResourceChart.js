@@ -595,7 +595,7 @@ const ResourceChart = ({ unifiedClient }) => {
           </span>
         </div>
         <div className="mt-2 p-2 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded">
-          <Activity className="inline h-4 w-4 mr-1 text-blue-600" />
+          <Timeline className="inline h-4 w-4 mr-1 text-blue-600" />
           <span className="text-blue-700 dark:text-blue-300">
             Real-time updates: Active - New data points are added every 5 seconds and displayed immediately.
           </span>

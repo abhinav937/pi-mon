@@ -33,6 +33,7 @@ FORCE_FRONTEND=false
 FORCE_BACKEND=false
 USE_SETUP_SCRIPT=false
 SILENT_OUTPUT=true   # suppress noisy command outputs by default
+SHOW_CONFIG=false
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -40,6 +41,21 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [ -n "$PI_MON_DIR" ] || PI_MON_DIR="$SCRIPT_DIR"
 [ -n "$SYSTEM_USER" ] || SYSTEM_USER="${SUDO_USER:-$(id -un)}"
 [ -n "$PRODUCTION_URL" ] || PRODUCTION_URL="http://localhost"
+
+# Try to populate a sensible default STATIC_IP from config.json (pre-args)
+if [ -z "$STATIC_IP" ] && [ -f "$PI_MON_DIR/config.json" ]; then
+    cfg_ip=$(sed -n 's/.*"api_base"[[:space:]]*:[[:space:]]*"http:\/\/\([^"/:]*\).*/\1/p' "$PI_MON_DIR/config.json" | head -n1)
+    if [ -z "$cfg_ip" ]; then
+        cfg_ip=$(sed -n 's/.*"frontend"[[:space:]]*:[[:space:]]*"http:\/\/\([^"/:]*\).*/\1/p' "$PI_MON_DIR/config.json" | head -n1)
+    fi
+    if [ -z "$cfg_ip" ]; then
+        cfg_ip=$(sed -n 's/.*"backend"[[:space:]]*:[[:space:]]*"http:\/\/\([^"/:]*\).*/\1/p' "$PI_MON_DIR/config.json" | head -n1)
+    fi
+    if [ -n "$cfg_ip" ]; then
+        STATIC_IP="$cfg_ip"
+        PRODUCTION_URL="http://$STATIC_IP"
+    fi
+fi
 
 # ----------------------------------------------------------------------------
 # Color and logging
@@ -144,6 +160,7 @@ Flags:
   --use-setup-script           Run scripts/setup_venv_systemd.sh as a bootstrap (optional)
   --silent-output              Suppress noisy command outputs (default)
   --verbose-output             Show full outputs of package managers/builds
+  --show-config                Print resolved configuration and exit
   -h, --help                   Show this help
 USAGE
 }
@@ -173,6 +190,7 @@ parse_args() {
             --use-setup-script) USE_SETUP_SCRIPT=true; shift 1 ;;
             --silent-output) SILENT_OUTPUT=true; shift 1 ;;
             --verbose-output) SILENT_OUTPUT=false; shift 1 ;;
+            --show-config) SHOW_CONFIG=true; shift 1 ;;
             -h|--help) usage; exit 0 ;;
             *) log error "Unknown flag: $1"; usage; exit 2 ;;
         esac
@@ -205,6 +223,35 @@ if [ -z "$STATIC_IP" ]; then
 fi
 if [ -z "$STATIC_IP" ]; then
     STATIC_IP="127.0.0.1"
+fi
+# Align production URL with resolved STATIC_IP if not explicitly set
+if [ "$PRODUCTION_URL" = "http://localhost" ] || [ -z "$PRODUCTION_URL" ]; then
+    PRODUCTION_URL="http://$STATIC_IP"
+fi
+
+# Show resolved configuration and exit early if requested
+if [ "$SHOW_CONFIG" = true ]; then
+    cat <<CFG
+domain:            $DOMAIN
+static_ip:         $STATIC_IP
+production_url:    $PRODUCTION_URL
+pi_mon_dir:        $PI_MON_DIR
+venv_dir:          $VENV_DIR
+web_root:          $WEB_ROOT
+backend_port:      $BACKEND_PORT
+nginx_port:        $NGINX_PORT
+system_user:       $SYSTEM_USER
+log_level:         $LOG_LEVEL
+only:              ${ONLY_TARGET:-}
+skip_frontend:     $SKIP_FRONTEND
+skip_backend:      $SKIP_BACKEND
+skip_nginx:        $SKIP_NGINX
+force_frontend:    $FORCE_FRONTEND
+force_backend:     $FORCE_BACKEND
+use_setup_script:  $USE_SETUP_SCRIPT
+silent_output:     $SILENT_OUTPUT
+CFG
+    exit 0
 fi
 
 if [[ "$EUID" -ne 0 ]]; then

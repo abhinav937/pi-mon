@@ -543,8 +543,19 @@ EOF
     else
         ( cd "$PI_MON_DIR/frontend" && run_cmd npm install --no-audit --no-fund && run_cmd npm run build )
     fi
+    # Force service worker refresh on every deploy to avoid stale caches on clients
+    if [ -f "$PI_MON_DIR/frontend/build/sw.js" ]; then
+        run_cmd "echo \"// build: \\$(date +%s)\" >> \"$PI_MON_DIR/frontend/build/sw.js\""
+    fi
     run_cmd mkdir -p "$WEB_ROOT"
-    run_cmd cp -r "$PI_MON_DIR/frontend/build/"* "$WEB_ROOT/"
+    # Use rsync with --delete to remove old files from web root
+    if command -v rsync >/dev/null 2>&1; then
+        run_cmd rsync -a --delete "$PI_MON_DIR/frontend/build/" "$WEB_ROOT/"
+    else
+        # Fallback to clean copy if rsync not available
+        run_cmd "find \"$WEB_ROOT\" -mindepth 1 -delete"
+        run_cmd cp -r "$PI_MON_DIR/frontend/build/"* "$WEB_ROOT/"
+    fi
     run_cmd chown -R www-data:www-data "$WEB_ROOT"
     echo "$CURRENT_FRONTEND_CHECKSUM" > "$FRONTEND_CHECKSUM_FILE" || true
     echo "$CURRENT_FRONTEND_ENV_SIG" > "$FRONTEND_ENV_SIG_FILE" || true

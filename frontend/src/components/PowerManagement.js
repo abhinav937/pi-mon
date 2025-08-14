@@ -1,12 +1,56 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useMutation } from 'react-query';
-import { PowerSettingsNew as Power, RestartAlt as RotateCcw, AccessTime as Clock, Warning as AlertTriangle } from '@mui/icons-material';
+import { PowerSettingsNew as Power, RestartAlt as RotateCcw, AccessTime as Clock, Warning as AlertTriangle, Pause as PauseIcon, PlayArrow as PlayIcon } from '@mui/icons-material';
 import toast from 'react-hot-toast';
 
 const PowerManagement = ({ unifiedClient }) => {
   const [selectedAction, setSelectedAction] = useState('shutdown');
   const [delay, setDelay] = useState(0);
   const [showConfirmation, setShowConfirmation] = useState(false);
+  const [timerActive, setTimerActive] = useState(false);
+  const [timeRemaining, setTimeRemaining] = useState(0);
+  const [timerPaused, setTimerPaused] = useState(false);
+  const timerRef = useRef(null);
+  const intervalRef = useRef(null);
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+      }
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+    };
+  }, []);
+
+  // Timer countdown effect
+  useEffect(() => {
+    if (timerActive && timeRemaining > 0 && !timerPaused) {
+      intervalRef.current = setInterval(() => {
+        setTimeRemaining(prev => {
+          if (prev <= 1) {
+            // Timer finished, execute the action
+            clearInterval(intervalRef.current);
+            setTimerActive(false);
+            setTimeRemaining(0);
+            executePowerAction();
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    } else if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+    }
+
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+    };
+  }, [timerActive, timeRemaining, timerPaused]);
 
   const powerMutation = useMutation(
     async ({ action, delay }) => {
@@ -26,16 +70,49 @@ const PowerManagement = ({ unifiedClient }) => {
         toast.success(data.message || `${selectedAction} initiated successfully`);
         setShowConfirmation(false);
         setDelay(0);
+        setTimerActive(false);
+        setTimeRemaining(0);
       },
       onError: (error) => {
         toast.error(error.message || `Failed to ${selectedAction} system`);
         setShowConfirmation(false);
+        setTimerActive(false);
+        setTimeRemaining(0);
       },
     }
   );
 
-  const handleExecutePowerAction = () => {
-    powerMutation.mutate({ action: selectedAction, delay });
+  const executePowerAction = () => {
+    powerMutation.mutate({ action: selectedAction, delay: 0 }); // Always send delay 0 since timer already handled it
+  };
+
+  const startTimer = () => {
+    if (delay > 0) {
+      setTimeRemaining(delay);
+      setTimerActive(true);
+      setTimerPaused(false);
+      setShowConfirmation(false);
+      toast.success(`Timer started! ${selectedAction} will execute in ${formatDelay(delay)}`);
+    } else {
+      // No delay, execute immediately
+      executePowerAction();
+    }
+  };
+
+  const pauseTimer = () => {
+    setTimerPaused(!timerPaused);
+    if (timerPaused) {
+      toast.success('Timer resumed');
+    } else {
+      toast.success('Timer paused');
+    }
+  };
+
+  const cancelTimer = () => {
+    setTimerActive(false);
+    setTimeRemaining(0);
+    setTimerPaused(false);
+    toast.success('Timer cancelled');
   };
 
   const formatDelay = (seconds) => {
@@ -45,6 +122,13 @@ const PowerManagement = ({ unifiedClient }) => {
     const remainingSeconds = seconds % 60;
     if (remainingSeconds === 0) return `${minutes} minute${minutes !== 1 ? 's' : ''}`;
     return `${minutes}m ${remainingSeconds}s`;
+  };
+
+  const formatTimeRemaining = (seconds) => {
+    if (seconds < 60) return `${seconds}s`;
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+    return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
   };
 
   const ConfirmationModal = () => (
@@ -91,7 +175,7 @@ const PowerManagement = ({ unifiedClient }) => {
             Cancel
           </button>
           <button
-            onClick={handleExecutePowerAction}
+            onClick={startTimer}
             className="button-danger flex-1"
             disabled={powerMutation.isLoading}
           >
@@ -207,6 +291,58 @@ const PowerManagement = ({ unifiedClient }) => {
         </div>
       </div>
 
+      {/* Timer Display */}
+      {timerActive && (
+        <div className="metric-card border-l-4 border-blue-500 bg-blue-50 dark:bg-blue-900/20">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-3">
+              <Clock className="h-6 w-6 text-blue-600 dark:text-blue-400" />
+              <div>
+                <h3 className="text-lg font-semibold text-blue-800 dark:text-blue-200">
+                  Timer Active
+                </h3>
+                <p className="text-blue-700 dark:text-blue-300 text-sm">
+                  {selectedAction} will execute in
+                </p>
+              </div>
+            </div>
+            <div className="text-right">
+              <div className="text-3xl font-bold text-blue-800 dark:text-blue-200">
+                {formatTimeRemaining(timeRemaining)}
+              </div>
+              <div className="text-sm text-blue-600 dark:text-blue-400">
+                {timerPaused ? 'Paused' : 'Running'}
+              </div>
+            </div>
+          </div>
+          
+          <div className="mt-4 flex space-x-3">
+            <button
+              onClick={pauseTimer}
+              className="flex-1 px-4 py-2 rounded-lg font-medium transition-colors duration-200 bg-blue-600 hover:bg-blue-700 text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+            >
+              {timerPaused ? (
+                <>
+                  <PlayIcon className="h-4 w-4 inline mr-2" />
+                  Resume
+                </>
+              ) : (
+                <>
+                  <PauseIcon className="h-4 w-4 inline mr-2" />
+                  Pause
+                </>
+              )}
+            </button>
+            <button
+              onClick={cancelTimer}
+              className="flex-1 px-4 py-2 rounded-lg font-medium transition-colors duration-200 bg-gray-600 hover:bg-gray-700 text-white focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2"
+            >
+              Cancel Timer
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Delay Configuration */}
       <div className="metric-card">
         <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
@@ -229,6 +365,7 @@ const PowerManagement = ({ unifiedClient }) => {
               onChange={(e) => setDelay(Math.max(0, Math.min(3600, parseInt(e.target.value) || 0)))}
               className="input-field"
               placeholder="Enter delay in seconds"
+              disabled={timerActive}
             />
             <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
               0 = immediate, maximum 3600 seconds (1 hour)
@@ -256,7 +393,7 @@ const PowerManagement = ({ unifiedClient }) => {
         <div className="text-center">
           <button
             onClick={() => setShowConfirmation(true)}
-            disabled={powerMutation.isLoading || !unifiedClient}
+            disabled={powerMutation.isLoading || !unifiedClient || timerActive}
             className={`px-8 py-4 rounded-lg font-semibold text-white transition-all duration-200 ${
               selectedAction === 'shutdown'
                 ? 'bg-red-600 hover:bg-red-700 focus:ring-red-500'
@@ -267,6 +404,11 @@ const PowerManagement = ({ unifiedClient }) => {
               <>
                 <div className="loading-spinner mr-3"></div>
                 Executing {selectedAction}...
+              </>
+            ) : timerActive ? (
+              <>
+                <Clock className="h-5 w-5 inline mr-2" />
+                Timer Running...
               </>
             ) : (
               <>
@@ -281,8 +423,10 @@ const PowerManagement = ({ unifiedClient }) => {
           </button>
           
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-3">
-            Click to {selectedAction} the Raspberry Pi system
-            {delay > 0 && ` in ${formatDelay(delay)}`}
+            {timerActive 
+              ? `Timer is running - ${selectedAction} will execute automatically`
+              : `Click to ${selectedAction} the Raspberry Pi system${delay > 0 ? ` in ${formatDelay(delay)}` : ''}`
+            }
           </p>
         </div>
       </div>

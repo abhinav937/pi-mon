@@ -42,8 +42,8 @@ command -v python3 >/dev/null 2>&1 || { echo "python3 not found" >&2; exit 1; }
 command -v npm >/dev/null 2>&1 || { echo "npm not found (install Node 18+)" >&2; exit 1; }
 
 echo "==> Installing system packages (nginx, rsync)"
-apt-get update -y
-DEBIAN_FRONTEND=noninteractive apt-get install -y nginx rsync
+apt-get update -y -qq
+DEBIAN_FRONTEND=noninteractive apt-get install -y -qq nginx rsync
 
 echo "==> Creating Python venv and installing backend requirements"
 sudo -u "$APP_USER" mkdir -p "$APP_DIR"
@@ -67,8 +67,8 @@ echo "==> Building frontend"
 # Ensure correct ownership before installing dependencies
 chown -R "$APP_USER":"$APP_GROUP" "$FRONTEND_DIR"
 pushd "$FRONTEND_DIR" >/dev/null
-sudo -u "$APP_USER" npm install --no-audit --no-fund --no-optional
-sudo -u "$APP_USER" npm run build
+sudo -u "$APP_USER" npm install --no-audit --no-fund --no-optional --silent --loglevel=error --no-progress
+DISABLE_ESLINT_PLUGIN=true BROWSERSLIST_IGNORE_OLD_DATA=1 sudo -u "$APP_USER" npm run -s build
 popd >/dev/null
 
 echo "==> Deploying frontend to $WWW_ROOT"
@@ -150,7 +150,7 @@ EOF
 
 systemctl daemon-reload
 systemctl enable --now pi-monitor-backend.service
-systemctl status pi-monitor-backend.service | cat || true
+systemctl status pi-monitor-backend.service | cat >/dev/null 2>&1 || true
 
 echo "==> Backend service installed and started (pi-monitor-backend.service)"
 echo "==> Backend setup complete"

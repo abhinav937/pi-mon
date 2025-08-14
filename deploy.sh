@@ -32,6 +32,7 @@ SKIP_NGINX=false
 FORCE_FRONTEND=false
 FORCE_BACKEND=false
 USE_SETUP_SCRIPT=false
+SILENT_OUTPUT=true   # suppress noisy command outputs by default
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -125,6 +126,8 @@ Flags:
   --force-frontend             Force frontend rebuild
   --force-backend              Force backend restart
   --use-setup-script           Run scripts/setup_venv_systemd.sh as a bootstrap (optional)
+  --silent-output              Suppress noisy command outputs (default)
+  --verbose-output             Show full outputs of package managers/builds
   -h, --help                   Show this help
 USAGE
 }
@@ -152,6 +155,8 @@ parse_args() {
             --force-frontend) FORCE_FRONTEND=true; shift 1 ;;
             --force-backend) FORCE_BACKEND=true; shift 1 ;;
             --use-setup-script) USE_SETUP_SCRIPT=true; shift 1 ;;
+            --silent-output) SILENT_OUTPUT=true; shift 1 ;;
+            --verbose-output) SILENT_OUTPUT=false; shift 1 ;;
             -h|--help) usage; exit 0 ;;
             *) log error "Unknown flag: $1"; usage; exit 2 ;;
         esac
@@ -163,6 +168,9 @@ parse_args "$@"
 
 [ -n "$VENV_DIR" ] || VENV_DIR="$PI_MON_DIR/.venv"
 [ -n "$STATE_DIR" ] || STATE_DIR="$PI_MON_DIR/.deploy_state"
+
+LOG_FILE="$STATE_DIR/deploy.log"
+touch "$LOG_FILE" 2>/dev/null || true
 
 # If STATIC_IP not provided, attempt to detect a primary IPv4 (best-effort)
 if [ -z "$STATIC_IP" ]; then
@@ -326,13 +334,23 @@ bootstrap_with_setup_script() {
     log info "Bootstrapping via scripts/setup_venv_systemd.sh"
     # Ensure prerequisites the bootstrap script expects
     if ! command -v python3 >/dev/null 2>&1; then
-        run_cmd apt-get update -y
-        run_cmd apt-get install -y python3 python3-venv python3-pip
+        if [ "$SILENT_OUTPUT" = true ]; then
+            run_cmd "apt-get update -y -qq >> \"$LOG_FILE\" 2>&1"
+            run_cmd "apt-get install -y -qq python3 python3-venv python3-pip >> \"$LOG_FILE\" 2>&1"
+        else
+            run_cmd apt-get update -y
+            run_cmd apt-get install -y python3 python3-venv python3-pip
+        fi
     fi
     if ! command -v npm >/dev/null 2>&1; then
         log info "Installing Node.js for bootstrap"
-        run_cmd curl -fsSL https://deb.nodesource.com/setup_18.x \| bash -
-        run_cmd apt-get install -y nodejs
+        if [ "$SILENT_OUTPUT" = true ]; then
+            run_cmd "curl -fsSL https://deb.nodesource.com/setup_18.x | bash - >> \"$LOG_FILE\" 2>&1"
+            run_cmd "apt-get install -y -qq nodejs >> \"$LOG_FILE\" 2>&1"
+        else
+            run_cmd curl -fsSL https://deb.nodesource.com/setup_18.x \| bash -
+            run_cmd apt-get install -y nodejs
+        fi
     fi
     run_cmd bash "$setup_script" "$PI_MON_DIR"
     refresh_backend_state
@@ -351,7 +369,11 @@ ensure_venv() {
     fi
     if [ -f "$PI_MON_DIR/backend/requirements.txt" ]; then
         log info "Installing/updating backend dependencies"
-        run_cmd "$VENV_DIR/bin/pip" install -r "$PI_MON_DIR/backend/requirements.txt" --upgrade
+        if [ "$SILENT_OUTPUT" = true ]; then
+            run_cmd "\"$VENV_DIR/bin/pip\" install -q -r \"$PI_MON_DIR/backend/requirements.txt\" --upgrade >> \"$LOG_FILE\" 2>&1"
+        else
+            run_cmd "$VENV_DIR/bin/pip" install -r "$PI_MON_DIR/backend/requirements.txt" --upgrade
+        fi
     fi
 }
 
@@ -438,8 +460,13 @@ build_frontend() {
     log info "Building frontend"
     if ! command -v npm >/dev/null 2>&1; then
         log info "Installing Node.js"
-        run_cmd curl -fsSL https://deb.nodesource.com/setup_18.x \| bash -
-        run_cmd apt-get install -y nodejs
+        if [ "$SILENT_OUTPUT" = true ]; then
+            run_cmd "curl -fsSL https://deb.nodesource.com/setup_18.x | bash - >> \"$LOG_FILE\" 2>&1"
+            run_cmd "apt-get install -y -qq nodejs >> \"$LOG_FILE\" 2>&1"
+        else
+            run_cmd curl -fsSL https://deb.nodesource.com/setup_18.x \| bash -
+            run_cmd apt-get install -y nodejs
+        fi
     fi
     cat > "$PI_MON_DIR/frontend/.env.production" <<EOF
 REACT_APP_SERVER_URL=dynamic
@@ -448,7 +475,13 @@ REACT_APP_ENVIRONMENT=production
 REACT_APP_BACKEND_PORT=${BACKEND_PORT}
 REACT_APP_FRONTEND_PORT=${NGINX_PORT}
 EOF
-    ( cd "$PI_MON_DIR/frontend" && run_cmd npm install --no-audit --no-fund && run_cmd npm run build )
+    if [ "$SILENT_OUTPUT" = true ]; then
+        ( cd "$PI_MON_DIR/frontend" && \
+          run_cmd "npm install --no-audit --no-fund --silent --loglevel=error --no-progress >> \"$LOG_FILE\" 2>&1" && \
+          run_cmd "DISABLE_ESLINT_PLUGIN=true BROWSERSLIST_IGNORE_OLD_DATA=1 npm run -s build >> \"$LOG_FILE\" 2>&1" )
+    else
+        ( cd "$PI_MON_DIR/frontend" && run_cmd npm install --no-audit --no-fund && run_cmd npm run build )
+    fi
     run_cmd mkdir -p "$WEB_ROOT"
     run_cmd cp -r "$PI_MON_DIR/frontend/build/"* "$WEB_ROOT/"
     run_cmd chown -R www-data:www-data "$WEB_ROOT"
@@ -541,7 +574,11 @@ EOF
         run_cmd cp "$tmp_conf" "$site_conf_dst"
         run_cmd ln -sf "$site_conf_dst" "$NGINX_SITES_ENABLED/$site_name"
         if [ -L "$NGINX_SITES_ENABLED/default" ]; then run_cmd rm "$NGINX_SITES_ENABLED/default"; fi
-        run_cmd nginx -t
+        if [ "$SILENT_OUTPUT" = true ]; then
+            run_cmd "nginx -t >/dev/null 2>&1 || nginx -t"
+        else
+            run_cmd nginx -t
+        fi
         run_cmd systemctl restart nginx
         echo "$desired_checksum" > "$NGINX_CHECKSUM_FILE" || true
         run_cmd chown "$SYSTEM_USER":"$SYSTEM_USER" "$NGINX_CHECKSUM_FILE" || true

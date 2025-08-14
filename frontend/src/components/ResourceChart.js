@@ -40,7 +40,7 @@ const ResourceChart = ({ unifiedClient }) => {
   const [isLoadingHistorical, setIsLoadingHistorical] = useState(true);
   const [lastUpdateTime, setLastUpdateTime] = useState(null);
   
-  // Updated time range options with Tesla Powerwall-style intervals
+  // Updated time range options with professional intervals
   const [timeRange, setTimeRange] = useState(() => {
     const saved = localStorage.getItem('pi-monitor-time-range');
     return saved ? parseInt(saved) : 60; // Default to last 1 hour
@@ -97,7 +97,7 @@ const ResourceChart = ({ unifiedClient }) => {
     };
   }, [refreshInterval]);
 
-  // Enhanced timestamp formatting with Tesla Powerwall quality
+  // Enhanced timestamp formatting with professional quality
   const formatChartTimestamp = useCallback((timestamp, range) => {
     if (typeof timestamp === 'string') {
       return timestamp;
@@ -108,7 +108,7 @@ const ResourceChart = ({ unifiedClient }) => {
     const isToday = date.toDateString() === now.toDateString();
     const isYesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000).toDateString() === date.toDateString();
     
-    // Tesla Powerwall-style formatting
+    // Professional formatting
     if (range >= 1440) { // 24+ hours
       if (isToday) {
         return date.toLocaleTimeString([], { 
@@ -158,7 +158,7 @@ const ResourceChart = ({ unifiedClient }) => {
   useEffect(() => {
     if (!unifiedClient) return;
 
-    // Tesla Powerwall-style debounced update for smooth performance
+    // Professional debounced update for smooth performance
     let updateTimeout;
     let pendingUpdates = [];
 
@@ -214,7 +214,7 @@ const ResourceChart = ({ unifiedClient }) => {
                   }
                 }
                 
-                // Update Voltage data
+                // Update Core Voltage data
                 if (systemData.voltage !== undefined && systemData.voltage !== null && !isNaN(systemData.voltage)) {
                   if (!newData.voltage.timestamps.includes(timestamp)) {
                     newData.voltage.timestamps = [...newData.voltage.timestamps, timestamp].slice(-maxDataPoints);
@@ -223,7 +223,7 @@ const ResourceChart = ({ unifiedClient }) => {
                   }
                 }
 
-                // Update Core Current data
+                // Update Core Current data (for voltage overlay only)
                 if (systemData.core_current !== undefined && systemData.core_current !== null && !isNaN(systemData.core_current)) {
                   if (!newData.core_current.timestamps.includes(timestamp)) {
                     newData.core_current.timestamps = [...newData.core_current.timestamps, timestamp].slice(-maxDataPoints);
@@ -285,12 +285,6 @@ const ResourceChart = ({ unifiedClient }) => {
         newData.voltage.labels = [...prevData.voltage.labels, formattedTimestamp].slice(-maxDataPoints);
         newData.voltage.data = [...prevData.voltage.data, parseFloat(latest.voltage)].slice(-maxDataPoints);
       }
-
-      if (latest.core_current != null && !isNaN(latest.core_current) && !prevData.core_current.timestamps.includes(timestamp)) {
-        newData.core_current.timestamps = [...prevData.core_current.timestamps, timestamp].slice(-maxDataPoints);
-        newData.core_current.labels = [...prevData.core_current.labels, formattedTimestamp].slice(-maxDataPoints);
-        newData.core_current.data = [...prevData.core_current.data, parseFloat(latest.core_current)].slice(-maxDataPoints);
-      }
       
       return newData;
     });
@@ -310,14 +304,13 @@ const ResourceChart = ({ unifiedClient }) => {
         const memoryData = metrics.map(m => m.memory_percent || 0);
         const temperatureData = metrics.map(m => m.temperature || 0);
         const voltageData = metrics.map(m => m.voltage || 0);
-        const coreCurrentData = metrics.map(m => m.core_current || 0);
 
         setChartData({
           cpu: { labels, data: cpuData, timestamps },
           memory: { labels, data: memoryData, timestamps },
           temperature: { labels, data: temperatureData, timestamps },
           voltage: { labels, data: voltageData, timestamps },
-          core_current: { labels, data: coreCurrentData, timestamps },
+          core_current: { labels, data: metrics.map(m => m.core_current || 0), timestamps },
         });
 
         if (chartRef.current) {
@@ -340,7 +333,7 @@ const ResourceChart = ({ unifiedClient }) => {
     return () => clearInterval(interval);
   }, [unifiedClient, timeRange, fetchHistoricalData]);
 
-  // Tesla Powerwall-quality chart configuration
+  // Professional chart configuration
   const getChartConfig = useCallback((metric) => {
     const isDarkMode = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
     const intervals = getTickIntervals(timeRange);
@@ -677,7 +670,6 @@ const ResourceChart = ({ unifiedClient }) => {
                 let unit = '%';
                 if (metric === 'temperature') unit = '°C';
                 else if (metric === 'voltage') unit = 'V';
-                else if (metric === 'core_current') unit = 'A';
                 const datasetLabel = context.dataset && context.dataset.label ? context.dataset.label : '';
                 if (value == null || isNaN(value)) return datasetLabel;
                 const precision = metric === 'voltage' ? 3 : 1;
@@ -701,7 +693,7 @@ const ResourceChart = ({ unifiedClient }) => {
               },
               padding: 8,
               callback: function(value, index, ticks) {
-                // Tesla Powerwall-style tick formatting
+                // Professional tick formatting
                 const label = this.getLabelForValue(value);
                 if (!label) return '';
                 
@@ -733,19 +725,18 @@ const ResourceChart = ({ unifiedClient }) => {
           y: {
             display: true,
             min: 0,
-            max: metric === 'temperature' ? 100 : metric === 'voltage' ? 1.0 : metric === 'core_current' ? 10 : 100,
+            max: metric === 'temperature' ? 100 : metric === 'voltage' ? 1.0 : 100,
             ticks: {
               color: isDarkMode ? '#9ca3af' : '#6b7280',
               font: {
                 size: 11,
                 weight: '500',
               },
-              stepSize: metric === 'temperature' ? 20 : metric === 'voltage' ? 0.1 : metric === 'core_current' ? 2 : 25,
+              stepSize: metric === 'temperature' ? 20 : metric === 'voltage' ? 0.1 : 25,
               padding: 8,
               callback: function(value) {
                 if (metric === 'temperature') return `${value}°C`;
                 else if (metric === 'voltage') return `${value}V`;
-                else if (metric === 'core_current') return `${value}A`;
                 else return `${value}%`;
               }
             },
@@ -770,7 +761,7 @@ const ResourceChart = ({ unifiedClient }) => {
             hitRadius: 10,
           },
         },
-        // Tesla Powerwall-style animations
+        // Professional animations
         animation: {
           duration: 0,
         },
@@ -794,14 +785,13 @@ const ResourceChart = ({ unifiedClient }) => {
   }, [chartData, timeRange, lastUpdateTime]);
 
   const metrics = [
-    { id: 'cpu', name: 'CPU Usage', icon: Timeline, color: 'text-blue-600' },
-    { id: 'memory', name: 'Memory Usage', icon: BarChart3, color: 'text-purple-600' },
+    { id: 'cpu', name: 'CPU Usage', icon: TrendingUp, color: 'text-blue-600' },
+    { id: 'memory', name: 'Memory Usage', icon: TrendingUp, color: 'text-purple-600' },
     { id: 'temperature', name: 'Temperature', icon: TrendingUp, color: 'text-red-600' },
     { id: 'voltage', name: 'Core Voltage', icon: Bolt, color: 'text-green-600' },
-    { id: 'core_current', name: 'Core Current', icon: Database, color: 'text-gray-600' },
   ];
 
-  // Tesla Powerwall-style time range options
+  // Professional time range options
   const timeRangeOptions = [
     { value: 60, label: '1 Hour', description: 'High-resolution view with 5-min intervals' },
     { value: 360, label: '6 Hours', description: 'Balanced view with 30-min intervals' },
@@ -824,7 +814,7 @@ const ResourceChart = ({ unifiedClient }) => {
           Resource Charts
         </h2>
         <div className="text-sm text-gray-500 dark:text-gray-400">
-          Tesla Powerwall-quality monitoring with intelligent time scaling
+          Professional monitoring with intelligent time scaling
         </div>
       </div>
 
@@ -896,14 +886,14 @@ const ResourceChart = ({ unifiedClient }) => {
             <div className="text-center">
               <Timeline className="h-12 w-12 mx-auto mb-4 opacity-50" />
               <p className="text-lg font-medium mb-2">Loading historical data...</p>
-              <p className="text-sm">Fetching data with Tesla Powerwall-quality formatting</p>
+              <p className="text-sm">Fetching data with professional formatting</p>
             </div>
           </div>
         ) : hasData ? (
           <div className="chart-responsive" style={{ height: '450px', minHeight: '400px' }}>
             {(() => {
               try {
-                // Ensure all data points are valid numbers and add Tesla Powerwall-quality data validation
+                // Ensure all data points are valid numbers and add professional data validation
                 const validatedData = {
                   ...chartConfig,
                   data: {
@@ -912,15 +902,13 @@ const ResourceChart = ({ unifiedClient }) => {
                       ...dataset,
                       data: dataset.data.map(val => {
                         const numVal = val !== null && val !== undefined && !isNaN(val) ? parseFloat(val) : 0;
-                        // Tesla Powerwall-style data validation: clamp values to reasonable ranges
+                        // Professional data validation: clamp values to reasonable ranges
                         if (dataset.label.includes('Temperature')) {
                           return Math.max(-20, Math.min(120, numVal)); // -20°C to 120°C
                         } else if (dataset.label.includes('Usage')) {
                           return Math.max(0, Math.min(100, numVal)); // 0% to 100%
                         } else if (dataset.label.includes('Voltage')) {
                           return Math.max(0, Math.min(1.0, numVal)); // 0V to 1.0V
-                        } else if (dataset.label.includes('Core Current')) {
-                          return Math.max(0, Math.min(10, numVal)); // 0A to 10A
                         }
                         return numVal;
                       })
@@ -977,7 +965,6 @@ const ResourceChart = ({ unifiedClient }) => {
                    const value = Number(chartData[selectedMetric].data[chartData[selectedMetric].data.length - 1]);
                    if (selectedMetric === 'temperature') return `${value.toFixed(1)}°C`;
                    else if (selectedMetric === 'voltage') return `${value.toFixed(3)}V`;
-                   else if (selectedMetric === 'core_current') return `${value.toFixed(1)}A`;
                    else return `${value.toFixed(1)}%`;
                  })()
                 : 'N/A'
@@ -999,7 +986,6 @@ const ResourceChart = ({ unifiedClient }) => {
                     const average = validData.reduce((a, b) => a + b, 0) / validData.length;
                     if (selectedMetric === 'temperature') return `${Number(average).toFixed(1)}°C`;
                     else if (selectedMetric === 'voltage') return `${Number(average).toFixed(3)}V`;
-                    else if (selectedMetric === 'core_current') return `${Number(average).toFixed(1)}A`;
                     else return `${Number(average).toFixed(1)}%`;
                   })()
                 : 'N/A'
@@ -1021,7 +1007,6 @@ const ResourceChart = ({ unifiedClient }) => {
                     const maxValue = Math.max(...validData);
                     if (selectedMetric === 'temperature') return `${Number(maxValue).toFixed(1)}°C`;
                     else if (selectedMetric === 'voltage') return `${Number(maxValue).toFixed(3)}V`;
-                    else if (selectedMetric === 'core_current') return `${Number(maxValue).toFixed(1)}A`;
                     else return `${Number(maxValue).toFixed(1)}%`;
                   })()
                 : 'N/A'
@@ -1049,7 +1034,7 @@ const ResourceChart = ({ unifiedClient }) => {
       {/* Enhanced Chart Info */}
       <div className="text-sm text-gray-500 dark:text-gray-400">
         <p>
-          Tesla Powerwall-quality charts with intelligent time scaling, professional formatting, and smooth animations. 
+          Professional charts with intelligent time scaling, professional formatting, and smooth animations. 
           The x-axis automatically adapts to your selected time range with optimal tick placement and context-aware labeling.
         </p>
         <div className="mt-2 p-2 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded">
@@ -1061,7 +1046,7 @@ const ResourceChart = ({ unifiedClient }) => {
         <div className="mt-2 p-2 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded">
           <Timeline className="inline h-4 w-4 mr-1 text-blue-600" />
           <span className="text-blue-700 dark:text-blue-300">
-            Professional formatting: Context-aware time labels with Tesla Powerwall-quality precision
+            Professional formatting: Context-aware time labels with high precision
           </span>
         </div>
         <div className="mt-2 p-2 bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded">

@@ -14,8 +14,14 @@ logger = logging.getLogger(__name__)
 class MetricsDatabase:
     """SQLite database for storing metrics data"""
     
-    def __init__(self, db_path='pi_monitor.db'):
-        self.db_path = db_path
+    def __init__(self, db_path=None):
+        if db_path is None:
+            # Use absolute path in backend directory to prevent database resets
+            import os
+            backend_dir = os.path.dirname(os.path.abspath(__file__))
+            self.db_path = os.path.join(backend_dir, 'pi_monitor.db')
+        else:
+            self.db_path = db_path
         self.init_database()
     
     def init_database(self):

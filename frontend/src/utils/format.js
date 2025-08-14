@@ -15,7 +15,7 @@ export const formatSpeed = (bytesPerSecond) => {
   return `${formatBytes(bytesPerSecond)}/s`;
 };
 
-// Tesla Powerwall-style time formatting utilities
+// Professional time formatting utilities
 export const formatTimestamp = (timestamp, timeRange, options = {}) => {
   if (typeof timestamp === 'string') {
     return timestamp;

@@ -1,6 +1,6 @@
 # Pi Monitor
 
-Simple Raspberry Pi monitoring with a lightweight Python HTTP server, systemd, and nginx. No heavy frameworks or Docker required.
+Simple Raspberry Pi monitoring with a lightweight Python HTTP server, systemd, and nginx. No heavy frameworks or Docker required
 
 ## Overview
 

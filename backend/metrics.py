@@ -170,7 +170,7 @@ class MetricsCollector:
             memory = psutil.virtual_memory()
             disk = psutil.disk_usage('/')
             temperature = self._get_temperature()
-            voltage = self._get_voltage()
+            voltage_data = self._get_voltage()
             network = psutil.net_io_counters()
             disk_io = psutil.disk_io_counters()
             
@@ -180,7 +180,8 @@ class MetricsCollector:
                 "memory_percent": round(memory.percent, 1),
                 "disk_percent": round(disk.percent, 1),
                 "temperature": temperature,
-                "voltage": voltage,
+                "voltage": voltage_data.get("voltage") if voltage_data else None,
+                "core_current": voltage_data.get("current") if voltage_data else None,
                 "network": {
                     "bytes_sent": network.bytes_sent if network else 0,
                     "bytes_recv": network.bytes_recv if network else 0,
@@ -242,15 +243,22 @@ class MetricsCollector:
     def _get_voltage(self):
         """Get system voltage using multiple methods"""
         try:
-            # Try Raspberry Pi specific path
-            if os.path.exists('/sys/class/power_supply/battery/voltage_now'):
-                with open('/sys/class/power_supply/battery/voltage_now', 'r') as f:
-                    voltage_raw = f.read().strip()
-                    voltage_value = float(voltage_raw) / 1_000_000_000.0 # Convert nanovolts to volts
-                    if voltage_value > 0 and voltage_value < 20: # Sanity check
-                        return round(voltage_value, 2)
+            # Try vcgencmd pmic_read_adc for Raspberry Pi (most accurate)
+            try:
+                import subprocess
+                result = subprocess.run(['vcgencmd', 'pmic_read_adc'], capture_output=True, text=True, timeout=5)
+                if result.returncode == 0:
+                    import re
+                    # Look for VDD_CORE_V voltage reading
+                    voltage_match = re.search(r'VDD_CORE_V volt\(15\)=(\d+\.?\d*)V', result.stdout)
+                    if voltage_match:
+                        voltage_value = float(voltage_match.group(1))
+                        if voltage_value > 0 and voltage_value < 2.0:  # Sanity check for core voltage
+                            return round(voltage_value, 3)
+            except:
+                pass
             
-            # Try vcgencmd for Raspberry Pi
+            # Try vcgencmd measure_volts as fallback
             try:
                 import subprocess
                 result = subprocess.run(['vcgencmd', 'measure_volts'], capture_output=True, text=True, timeout=5)
@@ -259,8 +267,8 @@ class MetricsCollector:
                     voltage_match = re.search(r'volt=(\d+\.?\d*)', result.stdout)
                     if voltage_match:
                         voltage_value = float(voltage_match.group(1))
-                        if voltage_value > 0 and voltage_value < 20: # Sanity check
-                            return round(voltage_value, 2)
+                        if voltage_value > 0 and voltage_value < 2.0:  # Sanity check
+                            return round(voltage_value, 3)
             except:
                 pass
                 
@@ -268,7 +276,7 @@ class MetricsCollector:
             logger.error(f"Failed to get voltage: {e}")
         
         # Return a safe default value if all methods fail
-        return 5.0 # Default voltage as safe default
+        return 0.7  # Default core voltage as safe default
     
     def get_metrics_history(self, minutes=60):
         """Get metrics history for the last N minutes"""

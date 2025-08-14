@@ -220,7 +220,7 @@ const Dashboard = ({ unifiedClient }) => {
               </div>
               <div>
                 <p className="metric-label text-xs sm:text-sm">Core Voltage</p>
-                <p className={`metric-value text-xl sm:text-3xl ${(currentData.voltage || 0) > 1.35 ? 'text-red-600' : (currentData.voltage || 0) < 1.1 ? 'text-red-600' : (currentData.voltage || 0) > 1.3 ? 'text-yellow-600' : 'text-green-600'}`}>
+                <p className={`metric-value text-xl sm:text-3xl ${(currentData.voltage || 0) > 0.95 ? 'text-red-600' : (currentData.voltage || 0) < 0.65 ? 'text-red-600' : (currentData.voltage || 0) > 0.9 ? 'text-yellow-600' : 'text-green-600'}`}>
                   {currentData.voltage !== null && currentData.voltage !== undefined && !isNaN(currentData.voltage)
                     ? `${currentData.voltage.toFixed(3)}V`
                     : 'N/A'
@@ -230,10 +230,10 @@ const Dashboard = ({ unifiedClient }) => {
             </div>
           </div>
           <div className="text-sm text-gray-500 dark:text-gray-400">
-            {currentData.voltage !== null && currentData.voltage !== undefined && !isNaN(currentData.voltage) && (currentData.voltage > 1.35 || currentData.voltage < 1.1) && (
+            {currentData.voltage !== null && currentData.voltage !== undefined && !isNaN(currentData.voltage) && (currentData.voltage > 0.95 || currentData.voltage < 0.65) && (
               <span className="status-badge-error">Voltage Alert</span>
             )}
-            {currentData.voltage !== null && currentData.voltage !== undefined && !isNaN(currentData.voltage) && currentData.voltage <= 1.35 && currentData.voltage >= 1.1 && (
+            {currentData.voltage !== null && currentData.voltage !== undefined && !isNaN(currentData.voltage) && currentData.voltage <= 0.95 && currentData.voltage >= 0.65 && (
               <span className="status-badge-success">Normal</span>
             )}
           </div>

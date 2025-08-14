@@ -35,6 +35,7 @@ const ResourceChart = ({ unifiedClient }) => {
     memory: { labels: [], data: [], timestamps: [] },
     temperature: { labels: [], data: [], timestamps: [] },
     voltage: { labels: [], data: [], timestamps: [] },
+    core_current: { labels: [], data: [], timestamps: [] },
   });
   const [isLoadingHistorical, setIsLoadingHistorical] = useState(true);
   const [lastUpdateTime, setLastUpdateTime] = useState(null);
@@ -221,6 +222,15 @@ const ResourceChart = ({ unifiedClient }) => {
                     newData.voltage.data = [...newData.voltage.data, parseFloat(systemData.voltage)].slice(-maxDataPoints);
                   }
                 }
+
+                // Update Core Current data
+                if (systemData.core_current !== undefined && systemData.core_current !== null && !isNaN(systemData.core_current)) {
+                  if (!newData.core_current.timestamps.includes(timestamp)) {
+                    newData.core_current.timestamps = [...newData.core_current.timestamps, timestamp].slice(-maxDataPoints);
+                    newData.core_current.labels = [...newData.core_current.labels, formattedTimestamp].slice(-maxDataPoints);
+                    newData.core_current.data = [...newData.core_current.data, parseFloat(systemData.core_current)].slice(-maxDataPoints);
+                  }
+                }
               });
               
               // Clear processed updates
@@ -275,6 +285,12 @@ const ResourceChart = ({ unifiedClient }) => {
         newData.voltage.labels = [...prevData.voltage.labels, formattedTimestamp].slice(-maxDataPoints);
         newData.voltage.data = [...prevData.voltage.data, parseFloat(latest.voltage)].slice(-maxDataPoints);
       }
+
+      if (latest.core_current != null && !isNaN(latest.core_current) && !prevData.core_current.timestamps.includes(timestamp)) {
+        newData.core_current.timestamps = [...prevData.core_current.timestamps, timestamp].slice(-maxDataPoints);
+        newData.core_current.labels = [...prevData.core_current.labels, formattedTimestamp].slice(-maxDataPoints);
+        newData.core_current.data = [...prevData.core_current.data, parseFloat(latest.core_current)].slice(-maxDataPoints);
+      }
       
       return newData;
     });
@@ -294,12 +310,14 @@ const ResourceChart = ({ unifiedClient }) => {
         const memoryData = metrics.map(m => m.memory_percent || 0);
         const temperatureData = metrics.map(m => m.temperature || 0);
         const voltageData = metrics.map(m => m.voltage || 0);
+        const coreCurrentData = metrics.map(m => m.core_current || 0);
 
         setChartData({
           cpu: { labels, data: cpuData, timestamps },
           memory: { labels, data: memoryData, timestamps },
           temperature: { labels, data: temperatureData, timestamps },
           voltage: { labels, data: voltageData, timestamps },
+          core_current: { labels, data: coreCurrentData, timestamps },
         });
 
         if (chartRef.current) {
@@ -352,8 +370,239 @@ const ResourceChart = ({ unifiedClient }) => {
         point: 'rgb(34, 197, 94)',
         hover: 'rgba(34, 197, 94, 0.2)',
       },
+      core_current: {
+        background: 'rgba(107, 114, 128, 0.08)', // A neutral color for current
+        border: 'rgb(107, 114, 128)',
+        point: 'rgb(107, 114, 128)',
+        hover: 'rgba(107, 114, 128, 0.2)',
+      },
     };
 
+    // Special configuration for voltage chart to overlay current
+    if (metric === 'voltage') {
+      return {
+        data: {
+          labels: chartData[metric].labels,
+          datasets: [
+            {
+              label: 'Core Voltage (V)',
+              data: chartData[metric].data,
+              borderColor: colors[metric].border,
+              backgroundColor: colors[metric].background,
+              pointBackgroundColor: colors[metric].point,
+              pointBorderColor: colors[metric].border,
+              pointRadius: 0,
+              pointHoverRadius: 6,
+              pointHitRadius: 10,
+              tension: 0.3,
+              fill: true,
+              borderWidth: 2,
+              fillOpacity: 0.1,
+              yAxisID: 'y',
+            },
+            {
+              label: 'Core Current (A)',
+              data: chartData.core_current.data,
+              borderColor: colors.core_current.border,
+              backgroundColor: colors.core_current.background,
+              pointBackgroundColor: colors.core_current.point,
+              pointBorderColor: colors.core_current.border,
+              pointRadius: 0,
+              pointHoverRadius: 6,
+              pointHitRadius: 10,
+              tension: 0.3,
+              fill: false,
+              borderWidth: 2,
+              yAxisID: 'y1',
+            }
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          interaction: {
+            mode: 'nearest',
+            axis: 'x',
+            intersect: false,
+          },
+          plugins: {
+            legend: {
+              position: 'top',
+              labels: {
+                color: isDarkMode ? '#e5e7eb' : '#374151',
+                font: {
+                  size: 12,
+                  weight: '500',
+                },
+                usePointStyle: true,
+                pointStyle: 'circle',
+                padding: 20,
+              },
+            },
+            title: {
+              display: false,
+            },
+            tooltip: {
+              mode: 'index',
+              intersect: false,
+              backgroundColor: isDarkMode ? '#1f2937' : '#ffffff',
+              titleColor: isDarkMode ? '#f9fafb' : '#111827',
+              bodyColor: isDarkMode ? '#e5e7eb' : '#374151',
+              borderColor: isDarkMode ? '#4b5563' : '#d1d5db',
+              borderWidth: 1,
+              borderRadius: 8,
+              padding: 12,
+              displayColors: true,
+              callbacks: {
+                title: function(context) {
+                  const label = context[0].label;
+                  if (lastUpdateTime && label.includes('Just now')) {
+                    return `${label} (${formatRelativeTime(lastUpdateTime.getTime() / 1000)})`;
+                  }
+                  return label;
+                },
+                label: function(context) {
+                  const value = context.parsed && context.parsed.y != null ? context.parsed.y : null;
+                  const datasetLabel = context.dataset && context.dataset.label ? context.dataset.label : '';
+                  if (value == null || isNaN(value)) return datasetLabel;
+                  
+                  if (datasetLabel.includes('Voltage')) {
+                    return `${datasetLabel}: ${Number(value).toFixed(3)}V`;
+                  } else if (datasetLabel.includes('Current')) {
+                    return `${datasetLabel}: ${Number(value).toFixed(3)}A`;
+                  }
+                  return datasetLabel;
+                }
+              }
+            },
+          },
+          scales: {
+            x: {
+              type: 'category',
+              ticks: {
+                maxTicksLimit: intervals.maxTicks,
+                autoSkip: true,
+                maxRotation: 0,
+                minRotation: 0,
+                color: isDarkMode ? '#9ca3af' : '#6b7280',
+                font: {
+                  size: 11,
+                  weight: '500',
+                },
+                padding: 8,
+                callback: function(value, index, ticks) {
+                  const label = this.getLabelForValue(value);
+                  if (!label) return '';
+                  
+                  if (timeRange >= 1440) {
+                    return label;
+                  } else if (timeRange >= 720) {
+                    return label.split(' ').pop();
+                  } else {
+                    return label;
+                  }
+                }
+              },
+              grid: {
+                color: isDarkMode ? '#374151' : '#e5e7eb',
+                lineWidth: 0.5,
+              },
+              border: {
+                color: isDarkMode ? '#4b5563' : '#d1d5db',
+              },
+              title: {
+                display: false,
+              }
+            },
+            y: {
+              type: 'linear',
+              display: true,
+              position: 'left',
+              min: 0,
+              max: 1.0,
+              ticks: {
+                color: isDarkMode ? '#9ca3af' : '#6b7280',
+                font: {
+                  size: 11,
+                  weight: '500',
+                },
+                stepSize: 0.1,
+                padding: 8,
+                callback: function(value) {
+                  return `${value}V`;
+                }
+              },
+              grid: {
+                color: isDarkMode ? '#374151' : '#e5e7eb',
+                lineWidth: 0.5,
+              },
+              border: {
+                color: isDarkMode ? '#4b5563' : '#d1d5db',
+              },
+              title: {
+                display: false,
+              }
+            },
+            y1: {
+              type: 'linear',
+              display: true,
+              position: 'right',
+              min: 0,
+              max: 10,
+              ticks: {
+                color: isDarkMode ? '#9ca3af' : '#6b7280',
+                font: {
+                  size: 11,
+                  weight: '500',
+                },
+                stepSize: 2,
+                padding: 8,
+                callback: function(value) {
+                  return `${value}A`;
+                }
+              },
+              grid: {
+                drawOnChartArea: false,
+              },
+              border: {
+                color: isDarkMode ? '#4b5563' : '#d1d5db',
+              },
+              title: {
+                display: false,
+              }
+            }
+          },
+          elements: {
+            line: {
+              borderWidth: 2,
+            },
+            point: {
+              hoverRadius: 6,
+              hitRadius: 10,
+            },
+          },
+          animation: {
+            duration: 0,
+          },
+          animations: {
+            y: { 
+              duration: 0 
+            },
+            x: { 
+              duration: 300, 
+              easing: 'easeOutQuart' 
+            }
+          },
+          responsiveBreakpoints: {
+            mobile: 768,
+            tablet: 1024,
+            desktop: 1200,
+          },
+        },
+      };
+    }
+
+    // Standard configuration for other metrics
     return {
       data: {
         labels: chartData[metric].labels,
@@ -362,7 +611,8 @@ const ResourceChart = ({ unifiedClient }) => {
             label: metric === 'cpu' ? 'CPU Usage (%)' : 
                    metric === 'memory' ? 'Memory Usage (%)' : 
                    metric === 'temperature' ? 'Temperature (°C)' :
-                   'Core Voltage (V)',
+                   metric === 'voltage' ? 'Core Voltage (V)' :
+                   'Core Current (A)',
             data: chartData[metric].data,
             borderColor: colors[metric].border,
             backgroundColor: colors[metric].background,
@@ -427,6 +677,7 @@ const ResourceChart = ({ unifiedClient }) => {
                 let unit = '%';
                 if (metric === 'temperature') unit = '°C';
                 else if (metric === 'voltage') unit = 'V';
+                else if (metric === 'core_current') unit = 'A';
                 const datasetLabel = context.dataset && context.dataset.label ? context.dataset.label : '';
                 if (value == null || isNaN(value)) return datasetLabel;
                 const precision = metric === 'voltage' ? 3 : 1;
@@ -482,18 +733,19 @@ const ResourceChart = ({ unifiedClient }) => {
           y: {
             display: true,
             min: 0,
-            max: metric === 'temperature' ? 100 : metric === 'voltage' ? 2.0 : 100,
+            max: metric === 'temperature' ? 100 : metric === 'voltage' ? 1.0 : metric === 'core_current' ? 10 : 100,
             ticks: {
               color: isDarkMode ? '#9ca3af' : '#6b7280',
               font: {
                 size: 11,
                 weight: '500',
               },
-              stepSize: metric === 'temperature' ? 20 : metric === 'voltage' ? 0.2 : 25,
+              stepSize: metric === 'temperature' ? 20 : metric === 'voltage' ? 0.1 : metric === 'core_current' ? 2 : 25,
               padding: 8,
               callback: function(value) {
                 if (metric === 'temperature') return `${value}°C`;
                 else if (metric === 'voltage') return `${value}V`;
+                else if (metric === 'core_current') return `${value}A`;
                 else return `${value}%`;
               }
             },
@@ -546,6 +798,7 @@ const ResourceChart = ({ unifiedClient }) => {
     { id: 'memory', name: 'Memory Usage', icon: BarChart3, color: 'text-purple-600' },
     { id: 'temperature', name: 'Temperature', icon: TrendingUp, color: 'text-red-600' },
     { id: 'voltage', name: 'Core Voltage', icon: Bolt, color: 'text-green-600' },
+    { id: 'core_current', name: 'Core Current', icon: Database, color: 'text-gray-600' },
   ];
 
   // Tesla Powerwall-style time range options
@@ -665,7 +918,9 @@ const ResourceChart = ({ unifiedClient }) => {
                         } else if (dataset.label.includes('Usage')) {
                           return Math.max(0, Math.min(100, numVal)); // 0% to 100%
                         } else if (dataset.label.includes('Voltage')) {
-                          return Math.max(0, Math.min(2.0, numVal)); // 0V to 2.0V
+                          return Math.max(0, Math.min(1.0, numVal)); // 0V to 1.0V
+                        } else if (dataset.label.includes('Core Current')) {
+                          return Math.max(0, Math.min(10, numVal)); // 0A to 10A
                         }
                         return numVal;
                       })
@@ -722,6 +977,7 @@ const ResourceChart = ({ unifiedClient }) => {
                    const value = Number(chartData[selectedMetric].data[chartData[selectedMetric].data.length - 1]);
                    if (selectedMetric === 'temperature') return `${value.toFixed(1)}°C`;
                    else if (selectedMetric === 'voltage') return `${value.toFixed(3)}V`;
+                   else if (selectedMetric === 'core_current') return `${value.toFixed(1)}A`;
                    else return `${value.toFixed(1)}%`;
                  })()
                 : 'N/A'
@@ -743,6 +999,7 @@ const ResourceChart = ({ unifiedClient }) => {
                     const average = validData.reduce((a, b) => a + b, 0) / validData.length;
                     if (selectedMetric === 'temperature') return `${Number(average).toFixed(1)}°C`;
                     else if (selectedMetric === 'voltage') return `${Number(average).toFixed(3)}V`;
+                    else if (selectedMetric === 'core_current') return `${Number(average).toFixed(1)}A`;
                     else return `${Number(average).toFixed(1)}%`;
                   })()
                 : 'N/A'
@@ -764,6 +1021,7 @@ const ResourceChart = ({ unifiedClient }) => {
                     const maxValue = Math.max(...validData);
                     if (selectedMetric === 'temperature') return `${Number(maxValue).toFixed(1)}°C`;
                     else if (selectedMetric === 'voltage') return `${Number(maxValue).toFixed(3)}V`;
+                    else if (selectedMetric === 'core_current') return `${Number(maxValue).toFixed(1)}A`;
                     else return `${Number(maxValue).toFixed(1)}%`;
                   })()
                 : 'N/A'

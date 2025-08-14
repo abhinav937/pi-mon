@@ -133,7 +133,7 @@ class SystemMonitor:
             memory = psutil.virtual_memory()
             disk = psutil.disk_usage('/')
             temperature = self._get_temperature()
-            voltage = self._get_voltage()
+            voltage_data = self._get_voltage()
             network = psutil.net_io_counters()
             disk_io = psutil.disk_io_counters()
             uptime = self.get_uptime()
@@ -146,7 +146,8 @@ class SystemMonitor:
                 "memory_percent": round(float(memory.percent) if memory.percent is not None else 0.0, 1),
                 "disk_percent": round(float(disk.percent) if disk.percent is not None else 0.0, 1),
                 "temperature": float(temperature) if temperature is not None else 0.0,
-                "voltage": float(voltage) if voltage is not None else 0.0,
+                "voltage": float(voltage_data.get("voltage", 0)) if voltage_data and voltage_data.get("voltage") is not None else 0.0,
+                "core_current": float(voltage_data.get("current", 0)) if voltage_data and voltage_data.get("current") is not None else 0.0,
                 "network": {
                     "bytes_sent": network.bytes_sent if network else 0,
                     "bytes_recv": network.bytes_recv if network else 0,
@@ -181,6 +182,7 @@ class SystemMonitor:
                 "disk_percent": round(sum(float(m['disk_percent']) if m['disk_percent'] is not None else 0.0 for m in recent_metrics) / len(recent_metrics), 1),
                 "temperature": round(sum(float(m['temperature']) if m['temperature'] is not None else 0.0 for m in recent_metrics) / len(recent_metrics), 1),
                 "voltage": round(sum(float(m['voltage']) if m['voltage'] is not None else 0.0 for m in recent_metrics) / len(recent_metrics), 3),
+                "core_current": round(sum(float(m.get('core_current', 0)) if m.get('core_current') is not None else 0.0 for m in recent_metrics) / len(recent_metrics), 3),
                 "network": {
                     "bytes_sent": sum(m['network']['bytes_sent'] if m['network'] and m['network']['bytes_sent'] is not None else 0 for m in recent_metrics),
                     "bytes_recv": sum(m['network']['bytes_recv'] if m['network'] and m['network']['bytes_recv'] is not None else 0 for m in recent_metrics),
@@ -248,6 +250,10 @@ class SystemMonitor:
                     "volts": basic_stats["voltage"],
                     "millivolts": round(basic_stats["voltage"] * 1000, 0),
                     "status": self._get_voltage_status(basic_stats["voltage"])
+                },
+                "core_current": {
+                    "amperes": basic_stats.get("core_current", 0),
+                    "milliamperes": round((basic_stats.get("core_current", 0) * 1000), 0)
                 },
                 "network": {
                     "bytes_sent": basic_stats["network"]["bytes_sent"],
@@ -466,52 +472,76 @@ class SystemMonitor:
     def _get_voltage(self):
         """Get core voltage using multiple methods"""
         try:
-            import os
-            # Try Raspberry Pi specific path for voltage
-            if os.path.exists('/sys/devices/platform/soc/soc:firmware/kobs-ng/voltage'):
-                with open('/sys/devices/platform/soc/soc:firmware/kobs-ng/voltage', 'r') as f:
-                    voltage_raw = f.read().strip()
-                    voltage_value = float(voltage_raw) / 1000.0  # Convert mV to V
-                    if voltage_value > 0 and voltage_value < 10:  # Sanity check
-                        return round(voltage_value, 3)
+            voltage_value = None
+            current_value = None
             
-            # Try vcgencmd for Raspberry Pi core voltage
+            # Try vcgencmd pmic_read_adc for Raspberry Pi (most accurate)
             try:
                 import subprocess
-                result = subprocess.run(['vcgencmd', 'measure_volts', 'core'], capture_output=True, text=True, timeout=5)
+                result = subprocess.run(['vcgencmd', 'pmic_read_adc'], capture_output=True, text=True, timeout=5)
                 if result.returncode == 0:
                     import re
-                    voltage_match = re.search(r'volt=(\d+\.?\d*)', result.stdout)
+                    # Look for VDD_CORE_V voltage reading
+                    voltage_match = re.search(r'VDD_CORE_V volt\(15\)=(\d+\.?\d*)V', result.stdout)
                     if voltage_match:
                         voltage_value = float(voltage_match.group(1))
-                        if voltage_value > 0 and voltage_value < 10:  # Sanity check
-                            return round(voltage_value, 3)
+                        if voltage_value > 0 and voltage_value < 2.0:  # Sanity check for core voltage
+                            voltage_value = round(voltage_value, 3)
+                    
+                    # Look for VDD_CORE_A current reading
+                    current_match = re.search(r'VDD_CORE_A current\(7\)=(\d+\.?\d*)A', result.stdout)
+                    if current_match:
+                        current_value = float(current_match.group(1))
+                        if current_value > 0 and current_value < 10:  # Sanity check for core current
+                            current_value = round(current_value, 3)
             except:
                 pass
-                
+            
+            # Try vcgencmd measure_volts core as fallback
+            if not voltage_value:
+                try:
+                    import subprocess
+                    result = subprocess.run(['vcgencmd', 'measure_volts', 'core'], capture_output=True, text=True, timeout=5)
+                    if result.returncode == 0:
+                        import re
+                        voltage_match = re.search(r'volt=(\d+\.?\d*)', result.stdout)
+                        if voltage_match:
+                            voltage_value = float(voltage_match.group(1))
+                            if voltage_value > 0 and voltage_value < 2.0:  # Sanity check
+                                voltage_value = round(voltage_value, 3)
+                except:
+                    pass
+                    
             # Try alternative vcgencmd command
-            try:
-                import subprocess
-                result = subprocess.run(['vcgencmd', 'get_config', 'int'], capture_output=True, text=True, timeout=5)
-                if result.returncode == 0:
-                    import re
-                    # Look for voltage-related config values
-                    voltage_match = re.search(r'over_voltage=(\d+)', result.stdout)
-                    if voltage_match:
-                        # This is overvoltage setting, not actual voltage, but can be used as fallback
-                        overvoltage = int(voltage_match.group(1))
-                        # Base voltage is typically 1.2V, overvoltage adds 0.025V per step
-                        base_voltage = 1.2
-                        voltage_value = base_voltage + (overvoltage * 0.025)
-                        return round(voltage_value, 3)
-            except:
-                pass
+            if not voltage_value:
+                try:
+                    import subprocess
+                    result = subprocess.run(['vcgencmd', 'get_config', 'int'], capture_output=True, text=True, timeout=5)
+                    if result.returncode == 0:
+                        import re
+                        # Look for voltage-related config values
+                        voltage_match = re.search(r'over_voltage=(\d+)', result.stdout)
+                        if voltage_match:
+                            # This is overvoltage setting, not actual voltage, but can be used as fallback
+                            overvoltage = int(voltage_match.group(1))
+                            # Base voltage is typically 0.7V, overvoltage adds 0.025V per step
+                            base_voltage = 0.7
+                            voltage_value = base_voltage + (overvoltage * 0.025)
+                            voltage_value = round(voltage_value, 3)
+                except:
+                    pass
+                    
+            # Return both voltage and current if available
+            if voltage_value and current_value:
+                return {"voltage": voltage_value, "current": current_value}
+            elif voltage_value:
+                return {"voltage": voltage_value, "current": None}
+            else:
+                return {"voltage": 0.7, "current": None}  # Default core voltage as safe default
                 
         except Exception as e:
             logger.error(f"Failed to get voltage: {e}")
-        
-        # Return a safe default value if all methods fail
-        return 1.2  # Default core voltage as safe default
+            return {"voltage": 0.7, "current": None}  # Default core voltage as safe default
     
     def _get_cpu_status(self, cpu_percent):
         """Get CPU status indicator based on usage percentage"""
@@ -559,13 +589,13 @@ class SystemMonitor:
     
     def _get_voltage_status(self, voltage):
         """Get voltage status indicator based on voltage value"""
-        if voltage >= 1.4:
+        if voltage >= 0.95:
             return {"level": "critical", "color": "red", "message": "Overvoltage"}
-        elif voltage >= 1.35:
+        elif voltage >= 0.9:
             return {"level": "high", "color": "orange", "message": "High"}
-        elif voltage <= 1.0:
+        elif voltage <= 0.65:
             return {"level": "critical", "color": "red", "message": "Undervoltage"}
-        elif voltage <= 1.1:
+        elif voltage <= 0.7:
             return {"level": "high", "color": "orange", "message": "Low"}
         else:
             return {"level": "normal", "color": "green", "message": "Normal"}

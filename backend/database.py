@@ -34,6 +34,7 @@ class MetricsDatabase:
                         disk_percent REAL,
                         temperature REAL,
                         voltage REAL,
+                        core_current REAL,
                         network_bytes_sent INTEGER,
                         network_bytes_recv INTEGER,
                         network_packets_sent INTEGER,
@@ -74,10 +75,10 @@ class MetricsDatabase:
                 
                 cursor.execute('''
                     INSERT INTO metrics (
-                        timestamp, cpu_percent, memory_percent, disk_percent, temperature, voltage,
+                        timestamp, cpu_percent, memory_percent, disk_percent, temperature, voltage, core_current,
                         network_bytes_sent, network_bytes_recv, network_packets_sent, network_packets_recv,
                         disk_read_bytes, disk_write_bytes, disk_read_count, disk_write_count
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     metrics_data.get('timestamp', time.time()),
                     metrics_data.get('cpu_percent'),
@@ -85,6 +86,7 @@ class MetricsDatabase:
                     metrics_data.get('disk_percent'),
                     metrics_data.get('temperature'),
                     metrics_data.get('voltage'),
+                    metrics_data.get('core_current'),
                     metrics_data.get('network', {}).get('bytes_sent', 0),
                     metrics_data.get('network', {}).get('bytes_recv', 0),
                     metrics_data.get('network', {}).get('packets_sent', 0),
@@ -121,7 +123,7 @@ class MetricsDatabase:
                 cursor = conn.cursor()
                 
                 cursor.execute('''
-                    SELECT timestamp, cpu_percent, memory_percent, disk_percent, temperature, voltage,
+                    SELECT timestamp, cpu_percent, memory_percent, disk_percent, temperature, voltage, core_current,
                            network_bytes_sent, network_bytes_recv, network_packets_sent, network_packets_recv,
                            disk_read_bytes, disk_write_bytes, disk_read_count, disk_write_count
                     FROM metrics 
@@ -143,17 +145,18 @@ class MetricsDatabase:
                         'disk_percent': row[3],
                         'temperature': row[4],
                         'voltage': row[5],
+                        'core_current': row[6],
                         'network': {
-                            'bytes_sent': row[6],
-                            'bytes_recv': row[7],
-                            'packets_sent': row[8],
-                            'packets_recv': row[9]
+                            'bytes_sent': row[7],
+                            'bytes_recv': row[8],
+                            'packets_sent': row[9],
+                            'packets_recv': row[10]
                         },
                         'disk_io': {
-                            'read_bytes': row[10],
-                            'write_bytes': row[11],
-                            'read_count': row[12],
-                            'write_count': row[13]
+                            'read_bytes': row[11],
+                            'write_bytes': row[12],
+                            'read_count': row[13],
+                            'write_count': row[14]
                         }
                     })
                 

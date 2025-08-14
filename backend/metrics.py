@@ -241,42 +241,75 @@ class MetricsCollector:
         return 25.0  # Room temperature as safe default
     
     def _get_voltage(self):
-        """Get system voltage using multiple methods"""
+        """Get core voltage and current using multiple methods.
+
+        Returns a dict: {"voltage": float or None, "current": float or None}
+        """
         try:
+            voltage_value = None
+            current_value = None
+
             # Try vcgencmd pmic_read_adc for Raspberry Pi (most accurate)
             try:
                 import subprocess
                 result = subprocess.run(['vcgencmd', 'pmic_read_adc'], capture_output=True, text=True, timeout=5)
                 if result.returncode == 0:
                     import re
-                    # Look for VDD_CORE_V voltage reading
+                    # VDD_CORE_V voltage
                     voltage_match = re.search(r'VDD_CORE_V volt\(15\)=(\d+\.?\d*)V', result.stdout)
                     if voltage_match:
-                        voltage_value = float(voltage_match.group(1))
-                        if voltage_value > 0 and voltage_value < 2.0:  # Sanity check for core voltage
-                            return round(voltage_value, 3)
-            except:
+                        v = float(voltage_match.group(1))
+                        if 0 < v < 2.0:
+                            voltage_value = round(v, 3)
+                    # VDD_CORE_A current
+                    current_match = re.search(r'VDD_CORE_A current\(7\)=(\d+\.?\d*)A', result.stdout)
+                    if current_match:
+                        a = float(current_match.group(1))
+                        if 0 <= a < 10:
+                            current_value = round(a, 3)
+            except Exception:
                 pass
-            
-            # Try vcgencmd measure_volts as fallback
-            try:
-                import subprocess
-                result = subprocess.run(['vcgencmd', 'measure_volts'], capture_output=True, text=True, timeout=5)
-                if result.returncode == 0:
-                    import re
-                    voltage_match = re.search(r'volt=(\d+\.?\d*)', result.stdout)
-                    if voltage_match:
-                        voltage_value = float(voltage_match.group(1))
-                        if voltage_value > 0 and voltage_value < 2.0:  # Sanity check
-                            return round(voltage_value, 3)
-            except:
-                pass
-                
+
+            # Try vcgencmd measure_volts core as fallback for voltage
+            if voltage_value is None:
+                try:
+                    import subprocess
+                    result = subprocess.run(['vcgencmd', 'measure_volts', 'core'], capture_output=True, text=True, timeout=5)
+                    if result.returncode == 0:
+                        import re
+                        voltage_match = re.search(r'volt=(\d+\.?\d*)', result.stdout)
+                        if voltage_match:
+                            v = float(voltage_match.group(1))
+                            if 0 < v < 2.0:
+                                voltage_value = round(v, 3)
+                except Exception:
+                    pass
+
+            # As a last resort, derive from over_voltage config (rough heuristic)
+            if voltage_value is None:
+                try:
+                    import subprocess
+                    result = subprocess.run(['vcgencmd', 'get_config', 'int'], capture_output=True, text=True, timeout=5)
+                    if result.returncode == 0:
+                        import re
+                        ov_match = re.search(r'over_voltage=(\d+)', result.stdout)
+                        if ov_match:
+                            overvoltage = int(ov_match.group(1))
+                            base_voltage = 0.7
+                            voltage_value = round(base_voltage + (overvoltage * 0.025), 3)
+                except Exception:
+                    pass
+
+            # Always return a dict
+            if voltage_value is not None and current_value is not None:
+                return {"voltage": voltage_value, "current": current_value}
+            if voltage_value is not None:
+                return {"voltage": voltage_value, "current": None}
+            return {"voltage": 0.7, "current": None}
+
         except Exception as e:
             logger.error(f"Failed to get voltage: {e}")
-        
-        # Return a safe default value if all methods fail
-        return 0.7  # Default core voltage as safe default
+            return {"voltage": 0.7, "current": None}
     
     def get_metrics_history(self, minutes=60):
         """Get metrics history for the last N minutes"""

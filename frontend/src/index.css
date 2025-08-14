@@ -113,6 +113,50 @@
     @apply bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4 sm:p-6;
   }
 
+  /* Tesla Powerwall-quality chart styling */
+  .chart-responsive {
+    @apply relative w-full;
+  }
+
+  .chart-responsive canvas {
+    @apply max-w-full h-auto;
+  }
+
+  /* Enhanced chart tooltips */
+  .chartjs-tooltip {
+    @apply bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg shadow-lg p-3;
+  }
+
+  /* Chart legend styling */
+  .chartjs-legend {
+    @apply flex flex-wrap items-center justify-center gap-4 mt-4;
+  }
+
+  .chartjs-legend-item {
+    @apply flex items-center space-x-2 cursor-pointer transition-opacity duration-200 hover:opacity-80;
+  }
+
+  .chartjs-legend-color {
+    @apply w-3 h-3 rounded-full;
+  }
+
+  /* Responsive chart breakpoints */
+  @media (max-width: 768px) {
+    .chart-responsive {
+      height: 300px !important;
+    }
+    
+    .chartjs-legend {
+      @apply flex-col gap-2;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .chart-responsive {
+      height: 250px !important;
+    }
+  }
+
   /* Mobile-optimized components */
   .mobile-card {
     @apply bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4 transition-all duration-200;

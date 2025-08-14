@@ -153,9 +153,13 @@ const ResourceChart = ({ unifiedClient }) => {
     }
   }, []);
 
-  // Listen for real-time updates with enhanced data handling
+  // Listen for real-time updates with enhanced data handling and performance optimization
   useEffect(() => {
     if (!unifiedClient) return;
+
+    // Tesla Powerwall-style debounced update for smooth performance
+    let updateTimeout;
+    let pendingUpdates = [];
 
     const handleUpdate = (data) => {
       if (data.type === 'initial_stats' || data.type === 'periodic_update' || data.type === 'mqtt_update') {
@@ -164,55 +168,76 @@ const ResourceChart = ({ unifiedClient }) => {
         const formattedTimestamp = formatChartTimestamp(timestamp, timeRange);
         const systemData = data.data || data;
 
-        setChartData(prevData => {
-          const newData = { ...prevData };
-          
-          // Update CPU data with proper timestamp handling
-          if (systemData.cpu_percent !== undefined && systemData.cpu_percent !== null && !isNaN(systemData.cpu_percent)) {
-            if (!prevData.cpu.timestamps.includes(timestamp)) {
-              newData.cpu.timestamps = [...prevData.cpu.timestamps, timestamp].slice(-maxDataPoints);
-              newData.cpu.labels = [...prevData.cpu.labels, formattedTimestamp].slice(-maxDataPoints);
-              newData.cpu.data = [...prevData.cpu.data, parseFloat(systemData.cpu_percent)].slice(-maxDataPoints);
-            }
-          }
-          
-          // Update Memory data
-          if (systemData.memory_percent !== undefined && systemData.memory_percent !== null && !isNaN(systemData.memory_percent)) {
-            if (!prevData.memory.timestamps.includes(timestamp)) {
-              newData.memory.timestamps = [...prevData.memory.timestamps, timestamp].slice(-maxDataPoints);
-              newData.memory.labels = [...prevData.memory.labels, formattedTimestamp].slice(-maxDataPoints);
-              newData.memory.data = [...prevData.memory.data, parseFloat(systemData.memory_percent)].slice(-maxDataPoints);
-            }
-          }
-          
-          // Update Temperature data
-          if (systemData.temperature !== undefined && systemData.temperature !== null && !isNaN(systemData.temperature)) {
-            if (!prevData.temperature.timestamps.includes(timestamp)) {
-              newData.temperature.timestamps = [...prevData.temperature.timestamps, timestamp].slice(-maxDataPoints);
-              newData.temperature.labels = [...prevData.temperature.labels, formattedTimestamp].slice(-maxDataPoints);
-              newData.temperature.data = [...prevData.temperature.data, parseFloat(systemData.temperature)].slice(-maxDataPoints);
-            }
-          }
-          
-          // Update Disk data
-          if (systemData.disk_percent !== undefined && systemData.disk_percent !== null && !isNaN(systemData.disk_percent)) {
-            if (!prevData.disk.timestamps.includes(timestamp)) {
-              newData.disk.timestamps = [...prevData.disk.timestamps, timestamp].slice(-maxDataPoints);
-              newData.disk.labels = [...prevData.disk.labels, formattedTimestamp].slice(-maxDataPoints);
-              newData.disk.data = [...prevData.disk.data, parseFloat(systemData.disk_percent)].slice(-maxDataPoints);
-            }
-          }
-          
-          return newData;
+        // Collect updates for batch processing
+        pendingUpdates.push({
+          timestamp,
+          formattedTimestamp,
+          systemData
         });
-        
-        setLastUpdateTime(now);
+
+        // Clear existing timeout and set new one for debounced update
+        clearTimeout(updateTimeout);
+        updateTimeout = setTimeout(() => {
+          if (pendingUpdates.length > 0) {
+            setChartData(prevData => {
+              const newData = { ...prevData };
+              
+              // Process all pending updates in batch
+              pendingUpdates.forEach(update => {
+                const { timestamp, formattedTimestamp, systemData } = update;
+                
+                // Update CPU data with proper timestamp handling
+                if (systemData.cpu_percent !== undefined && systemData.cpu_percent !== null && !isNaN(systemData.cpu_percent)) {
+                  if (!newData.cpu.timestamps.includes(timestamp)) {
+                    newData.cpu.timestamps = [...newData.cpu.timestamps, timestamp].slice(-maxDataPoints);
+                    newData.cpu.labels = [...newData.cpu.labels, formattedTimestamp].slice(-maxDataPoints);
+                    newData.cpu.data = [...newData.cpu.data, parseFloat(systemData.cpu_percent)].slice(-maxDataPoints);
+                  }
+                }
+                
+                // Update Memory data
+                if (systemData.memory_percent !== undefined && systemData.memory_percent !== null && !isNaN(systemData.memory_percent)) {
+                  if (!newData.memory.timestamps.includes(timestamp)) {
+                    newData.memory.timestamps = [...newData.memory.timestamps, timestamp].slice(-maxDataPoints);
+                    newData.memory.labels = [...newData.memory.labels, formattedTimestamp].slice(-maxDataPoints);
+                    newData.memory.data = [...newData.memory.data, parseFloat(systemData.memory_percent)].slice(-maxDataPoints);
+                  }
+                }
+                
+                // Update Temperature data
+                if (systemData.temperature !== undefined && systemData.temperature !== null && !isNaN(systemData.temperature)) {
+                  if (!newData.temperature.timestamps.includes(timestamp)) {
+                    newData.temperature.timestamps = [...newData.temperature.timestamps, timestamp].slice(-maxDataPoints);
+                    newData.temperature.labels = [...newData.temperature.labels, formattedTimestamp].slice(-maxDataPoints);
+                    newData.temperature.data = [...newData.temperature.data, parseFloat(systemData.temperature)].slice(-maxDataPoints);
+                  }
+                }
+                
+                // Update Disk data
+                if (systemData.disk_percent !== undefined && systemData.disk_percent !== null && !isNaN(systemData.disk_percent)) {
+                  if (!newData.disk.timestamps.includes(timestamp)) {
+                    newData.disk.timestamps = [...newData.disk.timestamps, timestamp].slice(-maxDataPoints);
+                    newData.disk.labels = [...newData.disk.labels, formattedTimestamp].slice(-maxDataPoints);
+                    newData.disk.data = [...newData.disk.data, parseFloat(systemData.disk_percent)].slice(-maxDataPoints);
+                  }
+                }
+              });
+              
+              // Clear processed updates
+              pendingUpdates = [];
+              return newData;
+            });
+            
+            setLastUpdateTime(now);
+          }
+        }, 100); // 100ms debounce for smooth performance
       }
     };
 
     const unsubscribe = unifiedClient.addDataListener(handleUpdate);
     return () => {
       if (unsubscribe) unsubscribe();
+      clearTimeout(updateTimeout);
     };
   }, [unifiedClient, timeRange, maxDataPoints, formatChartTimestamp]);
 
@@ -408,16 +433,7 @@ const ResourceChart = ({ unifiedClient }) => {
         },
         scales: {
           x: {
-            type: 'time',
-            time: {
-              unit: intervals.format,
-              displayFormats: {
-                hour: 'HH:mm',
-                minute: 'HH:mm',
-                second: 'HH:mm:ss'
-              },
-              tooltipFormat: 'MMM dd, HH:mm'
-            },
+            type: 'category',
             ticks: {
               maxTicksLimit: intervals.maxTicks,
               autoSkip: true,
@@ -431,29 +447,20 @@ const ResourceChart = ({ unifiedClient }) => {
               padding: 8,
               callback: function(value, index, ticks) {
                 // Tesla Powerwall-style tick formatting
-                const date = new Date(value);
-                const now = new Date();
-                const isToday = date.toDateString() === now.toDateString();
+                const label = this.getLabelForValue(value);
+                if (!label) return '';
                 
-                if (timeRange >= 1440) { // 24+ hours
-                  if (isToday) {
-                    return date.toLocaleTimeString([], { 
-                      hour: '2-digit', 
-                      minute: '2-digit',
-                      hour12: false 
-                    });
-                  } else {
-                    return date.toLocaleDateString([], { 
-                      month: 'short', 
-                      day: 'numeric' 
-                    });
-                  }
-                } else {
-                  return date.toLocaleTimeString([], { 
-                    hour: '2-digit', 
-                    minute: '2-digit',
-                    hour12: false 
-                  });
+                // For 24-hour view, show date and time
+                if (timeRange >= 1440) {
+                  return label;
+                }
+                // For 12-hour view, show time only
+                else if (timeRange >= 720) {
+                  return label.split(' ').pop(); // Get time part only
+                }
+                // For shorter views, show time with seconds
+                else {
+                  return label;
                 }
               }
             },
@@ -634,19 +641,26 @@ const ResourceChart = ({ unifiedClient }) => {
             </div>
           </div>
         ) : hasData ? (
-          <div className="chart-responsive" style={{ height: '400px' }}>
+          <div className="chart-responsive" style={{ height: '450px', minHeight: '400px' }}>
             {(() => {
               try {
-                // Ensure all data points are valid numbers
+                // Ensure all data points are valid numbers and add Tesla Powerwall-quality data validation
                 const validatedData = {
                   ...chartConfig,
                   data: {
                     ...chartConfig.data,
                     datasets: chartConfig.data.datasets.map(dataset => ({
                       ...dataset,
-                      data: dataset.data.map(val => 
-                        val !== null && val !== undefined && !isNaN(val) ? parseFloat(val) : 0
-                      )
+                      data: dataset.data.map(val => {
+                        const numVal = val !== null && val !== undefined && !isNaN(val) ? parseFloat(val) : 0;
+                        // Tesla Powerwall-style data validation: clamp values to reasonable ranges
+                        if (dataset.label.includes('Temperature')) {
+                          return Math.max(-20, Math.min(120, numVal)); // -20°C to 120°C
+                        } else if (dataset.label.includes('Usage')) {
+                          return Math.max(0, Math.min(100, numVal)); // 0% to 100%
+                        }
+                        return numVal;
+                      })
                     }))
                   }
                 };
@@ -655,7 +669,19 @@ const ResourceChart = ({ unifiedClient }) => {
                 console.error('Chart error:', error);
                 return (
                   <div className="h-full flex items-center justify-center text-red-500">
-                    Chart failed to load: {error.message}. Please refresh.
+                    <div className="text-center">
+                      <svg className="w-12 h-12 mx-auto mb-4 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                      </svg>
+                      <p className="text-lg font-medium mb-2">Chart Error</p>
+                      <p className="text-sm">{error.message}</p>
+                      <button 
+                        onClick={() => window.location.reload()} 
+                        className="mt-3 px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors"
+                      >
+                        Refresh Page
+                      </button>
+                    </div>
                   </div>
                 );
               }
@@ -730,6 +756,21 @@ const ResourceChart = ({ unifiedClient }) => {
         </div>
       )}
 
+      {/* Real-time Status Indicator */}
+      {lastUpdateTime && (
+        <div className="flex items-center justify-between p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+          <div className="flex items-center space-x-2">
+            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+            <span className="text-sm font-medium text-blue-700 dark:text-blue-300">
+              Real-time monitoring active
+            </span>
+          </div>
+          <div className="text-xs text-blue-600 dark:text-blue-400">
+            Last update: {formatRelativeTime(lastUpdateTime.getTime() / 1000)}
+          </div>
+        </div>
+      )}
+
       {/* Enhanced Chart Info */}
       <div className="text-sm text-gray-500 dark:text-gray-400">
         <p>
@@ -752,6 +793,14 @@ const ResourceChart = ({ unifiedClient }) => {
           <Timeline className="inline h-4 w-4 mr-1 text-purple-600" />
           <span className="text-purple-700 dark:text-purple-300">
             Smooth animations: 300ms easing transitions with responsive breakpoints for all devices
+          </span>
+        </div>
+        <div className="mt-2 p-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded">
+          <svg className="inline h-4 w-4 mr-1 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+          </svg>
+          <span className="text-amber-700 dark:text-amber-300">
+            Performance optimized: Data validation, smooth scrolling, and responsive design for all devices
           </span>
         </div>
       </div>

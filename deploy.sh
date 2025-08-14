@@ -456,6 +456,17 @@ EOF
     fi
 
     if [ "$NEED_BACKEND_RESTART" = true ]; then
+        # Show why a backend restart is happening
+        previous_backend_checksum=""
+        previous_backend_version=""
+        [ -f "$BACKEND_CHECKSUM_FILE" ] && previous_backend_checksum="$(cat "$BACKEND_CHECKSUM_FILE" 2>/dev/null || true)"
+        [ -f "$BACKEND_VERSION_FILE" ] && previous_backend_version="$(cat "$BACKEND_VERSION_FILE" 2>/dev/null || true)"
+        if [ -n "$CURRENT_BACKEND_CHECKSUM" ] && [ "${previous_backend_checksum}" != "${CURRENT_BACKEND_CHECKSUM}" ]; then
+            log info "Backend checksum: '${previous_backend_checksum:-none}' -> '${CURRENT_BACKEND_CHECKSUM}'"
+        fi
+        if [ -n "$SOURCE_BACKEND_VERSION$previous_backend_version" ] && [ "${previous_backend_version}" != "${SOURCE_BACKEND_VERSION}" ]; then
+            log info "Backend version: '${previous_backend_version:-none}' -> '${SOURCE_BACKEND_VERSION:-unknown}'"
+        fi
         log info "Restarting backend (changes detected)"
         run_cmd systemctl restart pi-monitor-backend.service || true
         sleep 2
@@ -476,6 +487,21 @@ build_frontend() {
         local v="$DEPLOYED_FRONTEND_VERSION"; [ -z "$v" ] && v="$SOURCE_FRONTEND_VERSION"
         log info "Frontend up-to-date${v:+ (version $v)}"
         return 0
+    fi
+    # Show why a frontend rebuild is happening
+    previous_frontend_checksum=""
+    previous_frontend_env_sig=""
+    previous_frontend_version="$DEPLOYED_FRONTEND_VERSION"
+    [ -f "$FRONTEND_CHECKSUM_FILE" ] && previous_frontend_checksum="$(cat "$FRONTEND_CHECKSUM_FILE" 2>/dev/null || true)"
+    [ -f "$FRONTEND_ENV_SIG_FILE" ] && previous_frontend_env_sig="$(cat "$FRONTEND_ENV_SIG_FILE" 2>/dev/null || true)"
+    if [ -n "$SOURCE_FRONTEND_VERSION$previous_frontend_version" ] && [ "${previous_frontend_version}" != "${SOURCE_FRONTEND_VERSION}" ]; then
+        log info "Frontend version: '${previous_frontend_version:-none}' -> '${SOURCE_FRONTEND_VERSION:-unknown}'"
+    fi
+    if [ -n "$CURRENT_FRONTEND_ENV_SIG" ] && [ "${previous_frontend_env_sig}" != "${CURRENT_FRONTEND_ENV_SIG}" ]; then
+        log info "Frontend env sig: '${previous_frontend_env_sig:-none}' -> '${CURRENT_FRONTEND_ENV_SIG}'"
+    fi
+    if [ -n "$CURRENT_FRONTEND_CHECKSUM" ] && [ "${previous_frontend_checksum}" != "${CURRENT_FRONTEND_CHECKSUM}" ]; then
+        log info "Frontend checksum: '${previous_frontend_checksum:-none}' -> '${CURRENT_FRONTEND_CHECKSUM}'"
     fi
     log info "Building frontend"
     if ! command -v npm >/dev/null 2>&1; then
@@ -590,6 +616,7 @@ EOF
     fi
 
     if [ "$need_update" = true ]; then
+        log info "Nginx checksum: '${existing_checksum:-none}' -> '${desired_checksum}'"
         log info "Updating Nginx config (changes detected)"
         run_cmd cp "$tmp_conf" "$site_conf_dst"
         run_cmd ln -sf "$site_conf_dst" "$NGINX_SITES_ENABLED/$site_name"

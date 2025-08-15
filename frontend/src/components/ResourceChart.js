@@ -814,7 +814,7 @@ const ResourceChart = ({ unifiedClient }) => {
           Resource Charts
         </h2>
         <div className="text-sm text-gray-500 dark:text-gray-400">
-          Professional monitoring with intelligent time scaling
+          Resource monitoring with time scaling
         </div>
       </div>
 
@@ -875,7 +875,7 @@ const ResourceChart = ({ unifiedClient }) => {
         </div>
         <div className="text-sm text-gray-500 dark:text-gray-400">
           <Database className="inline h-4 w-4 mr-1" />
-          Intelligent time scaling with {getTickIntervals(timeRange).maxTicks} optimal ticks
+          Time scaling with {getTickIntervals(timeRange).maxTicks} ticks
         </div>
       </div>
 
@@ -1030,40 +1030,6 @@ const ResourceChart = ({ unifiedClient }) => {
           </div>
         </div>
       )}
-
-      {/* Enhanced Chart Info */}
-      <div className="text-sm text-gray-500 dark:text-gray-400">
-        <p>
-          Professional charts with intelligent time scaling, professional formatting, and smooth animations. 
-          The x-axis automatically adapts to your selected time range with optimal tick placement and context-aware labeling.
-        </p>
-        <div className="mt-2 p-2 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded">
-          <Database className="inline h-4 w-4 mr-1 text-green-600" />
-          <span className="text-green-700 dark:text-green-300">
-            Smart time scaling: {getTickIntervals(timeRange).maxTicks} optimal ticks for {timeRange >= 1440 ? 'daily' : timeRange >= 720 ? '12-hour' : timeRange >= 120 ? 'hourly' : 'minute-by-minute'} view
-          </span>
-        </div>
-        <div className="mt-2 p-2 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded">
-          <Timeline className="inline h-4 w-4 mr-1 text-blue-600" />
-          <span className="text-blue-700 dark:text-blue-300">
-            Professional formatting: Context-aware time labels with high precision
-          </span>
-        </div>
-        <div className="mt-2 p-2 bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded">
-          <Timeline className="inline h-4 w-4 mr-1 text-purple-600" />
-          <span className="text-purple-700 dark:text-purple-300">
-            Smooth animations: 300ms easing transitions with responsive breakpoints for all devices
-          </span>
-        </div>
-        <div className="mt-2 p-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded">
-          <svg className="inline h-4 w-4 mr-1 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-          </svg>
-          <span className="text-amber-700 dark:text-amber-300">
-            Performance optimized: Data validation, smooth scrolling, and responsive design for all devices
-          </span>
-        </div>
-      </div>
     </div>
   );
 };

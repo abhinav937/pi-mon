@@ -581,6 +581,21 @@ const ResourceChart = ({ unifiedClient, isDarkMode }) => {
     }
 
     // Standard configuration for other metrics
+    // Dynamic y-axis for CPU: if recent values are <= 1%, zoom to 0–1 with 0.1% precision
+    const isCpuMetric = metric === 'cpu';
+    let dynamicYMax = 100;
+    let dynamicYStep = 25;
+    if (metric === 'temperature') {
+      dynamicYMax = 100;
+      dynamicYStep = 20;
+    } else if (isCpuMetric) {
+      const validCpuData = (chartData.cpu?.data || []).filter(val => val !== null && val !== undefined && !isNaN(val));
+      const maxCpu = validCpuData.length > 0 ? Math.max(...validCpuData) : null;
+      if (maxCpu != null && isFinite(maxCpu) && maxCpu <= 1.5) {
+        dynamicYMax = 1.5;
+        dynamicYStep = 0.1;
+      }
+    }
     return {
       data: {
         labels: chartData[metric].labels,
@@ -704,14 +719,14 @@ const ResourceChart = ({ unifiedClient, isDarkMode }) => {
           y: {
             display: true,
             min: 0,
-            max: metric === 'temperature' ? 100 : metric === 'voltage' ? 1.0 : 100,
+            max: metric === 'voltage' ? 1.0 : dynamicYMax,
             ticks: {
               color: themeIsDark ? '#9ca3af' : '#6b7280',
               font: {
                 size: 11,
                 weight: '500',
               },
-              stepSize: metric === 'temperature' ? 20 : metric === 'voltage' ? 0.1 : 25,
+              stepSize: metric === 'voltage' ? 0.1 : dynamicYStep,
               padding: 8,
               callback: function(value) {
                 if (metric === 'temperature') return `${value}°C`;

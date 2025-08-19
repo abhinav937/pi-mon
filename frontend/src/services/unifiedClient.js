@@ -164,6 +164,15 @@ class UnifiedClient {
     
     this.backendInfo = null;
     this.backendHeaders = {};
+    // Frontend polling interval (ms), default 5000, can be overridden by saved settings
+    try {
+      const savedSettingsRaw = localStorage.getItem('pi-monitor-settings');
+      const savedSettings = savedSettingsRaw ? JSON.parse(savedSettingsRaw) : null;
+      this.frontendPollMs = Math.max(1000, Number(savedSettings?.refreshInterval) || 5000);
+    } catch (_) {
+      this.frontendPollMs = 5000;
+    }
+
     this.initializeConnection();
   }
 
@@ -227,6 +236,14 @@ class UnifiedClient {
   }
 
   startPolling() {
+    this.schedulePolling();
+  }
+
+  schedulePolling() {
+    if (this.pollingInterval) {
+      clearInterval(this.pollingInterval);
+    }
+    const intervalMs = Math.max(1000, Number(this.frontendPollMs) || 5000);
     this.pollingInterval = setInterval(async () => {
       try {
         if (this.connectionState === CONNECTION_STATES.CONNECTED) {
@@ -236,7 +253,20 @@ class UnifiedClient {
       } catch (error) {
         console.error('Polling error:', error);
       }
-    }, 5000);
+    }, intervalMs);
+  }
+
+  setFrontendPollingInterval(intervalMs) {
+    try {
+      const parsed = Math.max(1000, Number(intervalMs) || 5000);
+      this.frontendPollMs = parsed;
+      this.schedulePolling();
+      logDebug('Frontend polling interval updated', { intervalMs: parsed });
+      return true;
+    } catch (e) {
+      logDebug('Failed to update frontend polling interval', { error: e?.message }, 'error');
+      return false;
+    }
   }
 
   async getSystemStats() {
@@ -371,7 +401,7 @@ class UnifiedClient {
 
   async updateMetricsInterval(intervalSeconds) {
     try {
-      const response = await this.httpClient.post(`/api/metrics/interval?interval=${intervalSeconds}`);
+      const response = await this.httpClient.post('/api/metrics/interval', { interval: intervalSeconds });
       return response.data;
     } catch (error) {
       throw error;

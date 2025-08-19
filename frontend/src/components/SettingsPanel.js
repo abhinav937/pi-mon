@@ -1,19 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Close as X, Save, Refresh as RefreshCw, Monitor, Notifications as Bell, Shield, Palette, DataObject as Database } from '@mui/icons-material';
+import { Close as X, Save, Refresh as RefreshCw, Monitor, DataObject as Database } from '@mui/icons-material';
 import toast from 'react-hot-toast';
 
 const SettingsPanel = ({ isDarkMode, setIsDarkMode, onClose, unifiedClient }) => {
   const [settings, setSettings] = useState({
     refreshInterval: 5000,
-    notifications: true,
-    soundAlerts: false,
-    autoRefresh: true,
-    dataRetention: 24,
-    theme: isDarkMode ? 'dark' : 'light',
-    language: 'en',
-    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-    dateFormat: 'MM/DD/YYYY',
-    timeFormat: '12h'
+    theme: isDarkMode ? 'dark' : 'light'
   });
 
   const [activeTab, setActiveTab] = useState('general');
@@ -42,15 +34,16 @@ const SettingsPanel = ({ isDarkMode, setIsDarkMode, onClose, unifiedClient }) =>
       const intervalResponse = await unifiedClient.getMetricsInterval();
       if (intervalResponse && intervalResponse.current_interval) {
         const backendInterval = intervalResponse.current_interval * 1000; // Convert to milliseconds
-        setSettings(prev => ({
-          ...prev,
-          refreshInterval: backendInterval
-        }));
-        // Update localStorage to match backend
-        localStorage.setItem('pi-monitor-settings', JSON.stringify({
-          ...settings,
-          refreshInterval: backendInterval
-        }));
+        setSettings(prev => ({ ...prev, refreshInterval: backendInterval }));
+        // Update localStorage to match backend (preserve theme)
+        try {
+          const savedRaw = localStorage.getItem('pi-monitor-settings');
+          const saved = savedRaw ? JSON.parse(savedRaw) : {};
+          localStorage.setItem('pi-monitor-settings', JSON.stringify({
+            theme: saved.theme ?? (isDarkMode ? 'dark' : 'light'),
+            refreshInterval: backendInterval
+          }));
+        } catch (_) {}
       }
     } catch (error) {
       console.warn('Failed to load backend settings:', error);
@@ -73,6 +66,10 @@ const SettingsPanel = ({ isDarkMode, setIsDarkMode, onClose, unifiedClient }) =>
       if (unifiedClient && settings.refreshInterval) {
         const intervalSeconds = settings.refreshInterval / 1000; // Convert from milliseconds to seconds
         await unifiedClient.updateMetricsInterval(intervalSeconds);
+        // Also update frontend polling interval immediately
+        if (unifiedClient.setFrontendPollingInterval) {
+          unifiedClient.setFrontendPollingInterval(settings.refreshInterval);
+        }
         toast.success('Settings saved and backend updated successfully');
       } else {
         toast.success('Settings saved successfully');
@@ -94,15 +91,7 @@ const SettingsPanel = ({ isDarkMode, setIsDarkMode, onClose, unifiedClient }) =>
     if (window.confirm('Are you sure you want to reset all settings to default values?')) {
       const defaultSettings = {
         refreshInterval: 5000,
-        notifications: true,
-        soundAlerts: false,
-        autoRefresh: true,
-        dataRetention: 24,
-        theme: 'auto',
-        language: 'en',
-        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-        dateFormat: 'MM/DD/YYYY',
-        timeFormat: '12h'
+        theme: 'auto'
       };
       setSettings(defaultSettings);
       toast.success('Settings reset to default');
@@ -111,10 +100,7 @@ const SettingsPanel = ({ isDarkMode, setIsDarkMode, onClose, unifiedClient }) =>
 
   const tabs = [
     { id: 'general', name: 'General', icon: Monitor },
-    { id: 'notifications', name: 'Notifications', icon: Bell },
-    { id: 'appearance', name: 'Appearance', icon: Palette },
-    { id: 'data', name: 'Data & Storage', icon: Database },
-    { id: 'security', name: 'Security', icon: Shield }
+    { id: 'data', name: 'Data & Storage', icon: Database }
   ];
 
   const renderGeneralSettings = () => (
@@ -141,133 +127,6 @@ const SettingsPanel = ({ isDarkMode, setIsDarkMode, onClose, unifiedClient }) =>
 
       <div>
         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-          Language
-        </label>
-        <select
-          value={settings.language}
-          onChange={(e) => handleSettingChange('language', e.target.value)}
-          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-        >
-          <option value="en">English</option>
-          <option value="es">Español</option>
-          <option value="fr">Français</option>
-          <option value="de">Deutsch</option>
-          <option value="it">Italiano</option>
-        </select>
-      </div>
-
-      <div>
-        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-          Timezone
-        </label>
-        <select
-          value={settings.timezone}
-          onChange={(e) => handleSettingChange('timezone', e.target.value)}
-          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-        >
-          <option value="UTC">UTC</option>
-          <option value="America/New_York">Eastern Time</option>
-          <option value="America/Chicago">Central Time</option>
-          <option value="America/Denver">Mountain Time</option>
-          <option value="America/Los_Angeles">Pacific Time</option>
-          <option value="Europe/London">London</option>
-          <option value="Europe/Paris">Paris</option>
-          <option value="Asia/Tokyo">Tokyo</option>
-        </select>
-      </div>
-
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-            Date Format
-          </label>
-          <select
-            value={settings.dateFormat}
-            onChange={(e) => handleSettingChange('dateFormat', e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-          >
-            <option value="MM/DD/YYYY">MM/DD/YYYY</option>
-            <option value="DD/MM/YYYY">DD/MM/YYYY</option>
-            <option value="YYYY-MM-DD">YYYY-MM-DD</option>
-          </select>
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-            Time Format
-          </label>
-          <select
-            value={settings.timeFormat}
-            onChange={(e) => handleSettingChange('timeFormat', e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-          >
-            <option value="12h">12-hour</option>
-            <option value="24h">24-hour</option>
-          </select>
-        </div>
-      </div>
-    </div>
-  );
-
-  const renderNotificationSettings = () => (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-            Enable Notifications
-          </label>
-          <p className="text-xs text-gray-500 dark:text-gray-400">
-            Show toast notifications for system events
-          </p>
-        </div>
-        <input
-          type="checkbox"
-          checked={settings.notifications}
-          onChange={(e) => handleSettingChange('notifications', e.target.checked)}
-          className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-        />
-      </div>
-
-      <div className="flex items-center justify-between">
-        <div>
-          <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-            Sound Alerts
-          </label>
-          <p className="text-xs text-gray-500 dark:text-gray-400">
-            Play sounds for important notifications
-          </p>
-        </div>
-        <input
-          type="checkbox"
-          checked={settings.soundAlerts}
-          onChange={(e) => handleSettingChange('soundAlerts', e.target.checked)}
-          className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-        />
-      </div>
-
-      <div className="flex items-center justify-between">
-        <div>
-          <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-            Auto-refresh
-          </label>
-          <p className="text-xs text-gray-500 dark:text-gray-400">
-            Automatically refresh data in background
-          </p>
-        </div>
-        <input
-          type="checkbox"
-          checked={settings.autoRefresh}
-          onChange={(e) => handleSettingChange('autoRefresh', e.target.checked)}
-          className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-        />
-      </div>
-    </div>
-  );
-
-  const renderAppearanceSettings = () => (
-    <div className="space-y-6">
-      <div>
-        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
           Theme
         </label>
         <select
@@ -283,33 +142,10 @@ const SettingsPanel = ({ isDarkMode, setIsDarkMode, onClose, unifiedClient }) =>
           Current theme: {isDarkMode ? 'Dark' : 'Light'}
         </p>
       </div>
-
-      <div>
-        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-          Accent Color
-        </label>
-        <div className="grid grid-cols-5 gap-2">
-          {['blue', 'green', 'purple', 'red', 'yellow'].map(color => (
-            <button
-              key={color}
-              className={`w-8 h-8 rounded-full border-2 ${
-                settings.accentColor === color 
-                  ? 'border-gray-900 dark:border-white' 
-                  : 'border-gray-300 dark:border-gray-600'
-              } ${
-                color === 'blue' ? 'bg-blue-500' :
-                color === 'green' ? 'bg-green-500' :
-                color === 'purple' ? 'bg-purple-500' :
-                color === 'red' ? 'bg-red-500' :
-                'bg-yellow-500'
-              }`}
-              onClick={() => handleSettingChange('accentColor', color)}
-            />
-          ))}
-        </div>
-      </div>
     </div>
   );
+
+  // Removed Notifications, Appearance extras, and Security settings for simplicity
 
   const renderDataSettings = () => (
     <div className="space-y-6">
@@ -318,8 +154,8 @@ const SettingsPanel = ({ isDarkMode, setIsDarkMode, onClose, unifiedClient }) =>
           Data Retention (hours)
         </label>
         <select
-          value={settings.dataRetention}
-          onChange={(e) => handleSettingChange('dataRetention', Number(e.target.value))}
+          value={24}
+          onChange={() => {}}
           className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
         >
           <option value={1}>1 hour</option>
@@ -396,73 +232,12 @@ const SettingsPanel = ({ isDarkMode, setIsDarkMode, onClose, unifiedClient }) =>
     </div>
   );
 
-  const renderSecuritySettings = () => (
-    <div className="space-y-6">
-      <div>
-        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-          Session Timeout (minutes)
-        </label>
-        <select
-          value={settings.sessionTimeout || 30}
-          onChange={(e) => handleSettingChange('sessionTimeout', Number(e.target.value))}
-          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-        >
-          <option value={15}>15 minutes</option>
-          <option value={30}>30 minutes</option>
-          <option value={60}>1 hour</option>
-          <option value={120}>2 hours</option>
-          <option value={0}>Never</option>
-        </select>
-      </div>
-
-      <div className="flex items-center justify-between">
-        <div>
-          <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-            Require Authentication
-          </label>
-          <p className="text-xs text-gray-500 dark:text-gray-400">
-            Force login for all users
-          </p>
-        </div>
-        <input
-          type="checkbox"
-          checked={settings.requireAuth || false}
-          onChange={(e) => handleSettingChange('requireAuth', e.target.checked)}
-          className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-        />
-      </div>
-
-      <div className="flex items-center justify-between">
-        <div>
-          <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-            HTTPS Only
-          </label>
-          <p className="text-xs text-gray-500 dark:text-gray-400">
-            Require secure connections
-          </p>
-        </div>
-        <input
-          type="checkbox"
-          checked={settings.httpsOnly || false}
-          onChange={(e) => handleSettingChange('httpsOnly', e.target.checked)}
-          className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-        />
-      </div>
-    </div>
-  );
-
   const renderTabContent = () => {
     switch (activeTab) {
       case 'general':
         return renderGeneralSettings();
-      case 'notifications':
-        return renderNotificationSettings();
-      case 'appearance':
-        return renderAppearanceSettings();
       case 'data':
         return renderDataSettings();
-      case 'security':
-        return renderSecuritySettings();
       default:
         return renderGeneralSettings();
     }

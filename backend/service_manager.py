@@ -81,16 +81,7 @@ class ServiceManager:
                 continue
             unit, load, active_col, sub, description = parts
 
-            # Skip templated/systemd-internal/user sessions to reduce noise
-            if any([
-                '@' in unit,
-                unit.startswith('user@'),
-                unit.startswith('sysinit-'),
-                unit.startswith('systemd-'),
-                unit.startswith('dbus-'),
-            ]):
-                continue
-
+            # Include ALL units, including templated and internal ones, as requested
             name = unit.replace('.service', '')
             status = normalize_status(active_col)
             active = (status == 'running')
@@ -103,9 +94,9 @@ class ServiceManager:
                 'description': description or f'{name} service'
             })
 
-        # Reasonable cap to avoid rendering thousands; sort by active first then name
+        # Sort by active first then name; return all services
         services.sort(key=lambda s: (not s['active'], s['name']))
-        return services[:500]
+        return services
 
     def _list_windows_services(self):
         """Enumerate services on Windows using 'sc query' output."""

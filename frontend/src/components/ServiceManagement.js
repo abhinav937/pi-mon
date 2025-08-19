@@ -33,12 +33,18 @@ function ServiceManagement({ unifiedClient }) {
     },
     {
       onSuccess: (data, variables) => {
-        toast.success(data.message || `Service ${variables.action} completed`);
+        if (data && data.success) {
+          toast.success(data.message || `Service ${variables.action} completed`);
+        } else {
+          const errMsg = (data && (data.message || data.error)) || `Failed to ${variables.action} service ${variables.serviceName}`;
+          toast.error(errMsg);
+        }
         // Refetch services to get updated status
         queryClient.invalidateQueries('services');
       },
       onError: (error, variables) => {
-        toast.error(error.message || `Failed to ${variables.action} service ${variables.serviceName}`);
+        const apiMsg = error?.response?.data?.message || error?.response?.data?.error;
+        toast.error(apiMsg || error.message || `Failed to ${variables.action} service ${variables.serviceName}`);
       },
     }
   );

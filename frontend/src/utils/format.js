@@ -25,51 +25,20 @@ export const formatTimestamp = (timestamp, timeRange, options = {}) => {
   const now = new Date();
   const isToday = date.toDateString() === now.toDateString();
   const isYesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000).toDateString() === date.toDateString();
+  const hm = { hour: '2-digit', minute: '2-digit', hour12: false };
   
-  // Format based on time range and context
-  if (timeRange >= 1440) { // 24+ hours
-    if (isToday) {
-      return date.toLocaleTimeString([], { 
-        hour: '2-digit', 
-        minute: '2-digit',
-        hour12: false 
-      });
-    } else if (isYesterday) {
-      return `Yesterday ${date.toLocaleTimeString([], { 
-        hour: '2-digit', 
-        minute: '2-digit',
-        hour12: false 
-      })}`;
-    } else {
-      return date.toLocaleDateString([], { 
-        month: 'short', 
-        day: 'numeric' 
-      }) + ' ' + date.toLocaleTimeString([], { 
-        hour: '2-digit', 
-        minute: '2-digit',
-        hour12: false 
-      });
-    }
-  } else if (timeRange >= 720) { // 12+ hours
-    return date.toLocaleTimeString([], { 
-      hour: '2-digit', 
-      minute: '2-digit',
-      hour12: false 
-    });
-  } else if (timeRange >= 120) { // 2+ hours
-    return date.toLocaleTimeString([], { 
-      hour: '2-digit', 
-      minute: '2-digit',
-      hour12: false 
-    });
-  } else { // < 2 hours
-    return date.toLocaleTimeString([], { 
-      hour: '2-digit', 
-      minute: '2-digit', 
-      second: '2-digit',
-      hour12: false 
-    });
+  // Always exclude seconds; prefix Yesterday when applicable
+  if (isYesterday) {
+    return `Yesterday ${date.toLocaleTimeString([], hm)}`;
   }
+  if (isToday) {
+    return date.toLocaleTimeString([], hm);
+  }
+  return (
+    date.toLocaleDateString([], { month: 'short', day: 'numeric' }) +
+    ' ' +
+    date.toLocaleTimeString([], hm)
+  );
 };
 
 // Generate optimal tick intervals for different time ranges

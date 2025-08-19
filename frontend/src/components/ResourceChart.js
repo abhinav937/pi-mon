@@ -1,3 +1,4 @@
+/* eslint-disable no-console */
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Line } from 'react-chartjs-2';
 import {
@@ -12,8 +13,8 @@ import {
   Filler,
   TimeScale
 } from 'chart.js';
-import { TrendingUp, BarChart as BarChart3, Timeline, Bolt, DataObject as Database } from '@mui/icons-material';
-import { formatTimestamp, getTickIntervals, formatRelativeTime } from '../utils/format';
+import { TrendingUp, Timeline, Bolt, DataObject as Database } from '@mui/icons-material';
+import { getTickIntervals, formatRelativeTime } from '../utils/format';
 
 // Register Chart.js components
 ChartJS.register(
@@ -65,7 +66,6 @@ const ResourceChart = ({ unifiedClient }) => {
   });
   
   const chartRef = useRef(null);
-  const chartInstanceRef = useRef(null);
 
   // Save time range to localStorage whenever it changes and recompute max points
   useEffect(() => {
@@ -97,7 +97,7 @@ const ResourceChart = ({ unifiedClient }) => {
     };
   }, [refreshInterval]);
 
-  // Enhanced timestamp formatting with professional quality
+  // Enhanced timestamp formatting: HH:MM only, with Yesterday prefix when applicable
   const formatChartTimestamp = useCallback((timestamp, range) => {
     if (typeof timestamp === 'string') {
       return timestamp;
@@ -107,51 +107,21 @@ const ResourceChart = ({ unifiedClient }) => {
     const now = new Date();
     const isToday = date.toDateString() === now.toDateString();
     const isYesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000).toDateString() === date.toDateString();
+    const hm = { hour: '2-digit', minute: '2-digit', hour12: false };
     
-    // Professional formatting
-    if (range >= 1440) { // 24+ hours
-      if (isToday) {
-        return date.toLocaleTimeString([], { 
-          hour: '2-digit', 
-          minute: '2-digit',
-          hour12: false 
-        });
-      } else if (isYesterday) {
-        return `Yesterday ${date.toLocaleTimeString([], { 
-          hour: '2-digit', 
-          minute: '2-digit',
-          hour12: false 
-        })}`;
-      } else {
-        return date.toLocaleDateString([], { 
-          month: 'short', 
-          day: 'numeric' 
-        }) + ' ' + date.toLocaleTimeString([], { 
-          hour: '2-digit', 
-          minute: '2-digit',
-          hour12: false 
-        });
-      }
-    } else if (range >= 720) { // 12+ hours
-      return date.toLocaleTimeString([], { 
-        hour: '2-digit', 
-        minute: '2-digit',
-        hour12: false 
-      });
-    } else if (range >= 120) { // 2+ hours
-      return date.toLocaleTimeString([], { 
-        hour: '2-digit', 
-        minute: '2-digit',
-        hour12: false 
-      });
-    } else { // < 2 hours
-      return date.toLocaleTimeString([], { 
-        hour: '2-digit', 
-        minute: '2-digit', 
-        second: '2-digit',
-        hour12: false 
-      });
+    // HH:MM everywhere; prefix Yesterday when applicable; include date for older points
+    if (isYesterday) {
+      return `Yesterday ${date.toLocaleTimeString([], hm)}`;
     }
+    if (isToday) {
+      return date.toLocaleTimeString([], hm);
+    }
+    // For data older than yesterday, show short date + HH:MM
+    return (
+      date.toLocaleDateString([], { month: 'short', day: 'numeric' }) +
+      ' ' +
+      date.toLocaleTimeString([], hm)
+    );
   }, []);
 
   // Listen for real-time updates with enhanced data handling and performance optimization
@@ -336,7 +306,12 @@ const ResourceChart = ({ unifiedClient }) => {
   // Professional chart configuration
   const getChartConfig = useCallback((metric) => {
     const isDarkMode = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const isMobile = window.matchMedia && window.matchMedia('(max-width: 640px)').matches;
     const intervals = getTickIntervals(timeRange);
+    const computedMaxTicks = isMobile ? Math.max(3, Math.floor(intervals.maxTicks * 0.6)) : intervals.maxTicks;
+    const tickFontSize = isMobile ? 9 : 11;
+    const tickPadding = isMobile ? 4 : 8;
+    const tickRotation = isMobile ? 30 : 0;
     
     const colors = {
       cpu: {
@@ -473,27 +448,25 @@ const ResourceChart = ({ unifiedClient }) => {
             x: {
               type: 'category',
               ticks: {
-                maxTicksLimit: intervals.maxTicks,
+                maxTicksLimit: computedMaxTicks,
                 autoSkip: true,
-                maxRotation: 0,
-                minRotation: 0,
+                maxRotation: tickRotation,
+                minRotation: tickRotation,
                 color: isDarkMode ? '#9ca3af' : '#6b7280',
                 font: {
-                  size: 11,
+                  size: tickFontSize,
                   weight: '500',
                 },
-                padding: 8,
+                padding: tickPadding,
                 callback: function(value, index, ticks) {
                   const label = this.getLabelForValue(value);
                   if (!label) return '';
-                  
-                  if (timeRange >= 1440) {
-                    return label;
-                  } else if (timeRange >= 720) {
-                    return label.split(' ').pop();
-                  } else {
-                    return label;
-                  }
+                  // On mobile, show every other label to reduce crowding
+                  if (isMobile && (index % 2 === 1)) return '';
+                  // Keep 'Yesterday ' prefix if present; otherwise for 12h view show time only
+                  if (timeRange >= 1440) return label;
+                  if (timeRange >= 720) return label.startsWith('Yesterday ') ? label : label.split(' ').pop();
+                  return label;
                 }
               },
               grid: {
@@ -682,33 +655,25 @@ const ResourceChart = ({ unifiedClient }) => {
           x: {
             type: 'category',
             ticks: {
-              maxTicksLimit: intervals.maxTicks,
+              maxTicksLimit: computedMaxTicks,
               autoSkip: true,
-              maxRotation: 0,
-              minRotation: 0,
+              maxRotation: tickRotation,
+              minRotation: tickRotation,
               color: isDarkMode ? '#9ca3af' : '#6b7280',
               font: {
-                size: 11,
+                size: tickFontSize,
                 weight: '500',
               },
-              padding: 8,
+              padding: tickPadding,
               callback: function(value, index, ticks) {
-                // Professional tick formatting
+                // Tick formatting without seconds; preserve 'Yesterday'
                 const label = this.getLabelForValue(value);
                 if (!label) return '';
-                
-                // For 24-hour view, show date and time
-                if (timeRange >= 1440) {
-                  return label;
-                }
-                // For 12-hour view, show time only
-                else if (timeRange >= 720) {
-                  return label.split(' ').pop(); // Get time part only
-                }
-                // For shorter views, show time with seconds
-                else {
-                  return label;
-                }
+                // On mobile, show every other label to reduce crowding
+                if (isMobile && (index % 2 === 1)) return '';
+                if (timeRange >= 1440) return label;
+                if (timeRange >= 720) return label.startsWith('Yesterday ') ? label : label.split(' ').pop();
+                return label;
               }
             },
             grid: {

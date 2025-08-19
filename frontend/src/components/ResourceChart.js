@@ -60,6 +60,7 @@ const ResourceChart = ({ unifiedClient, isDarkMode }) => {
   });
   
   const chartRef = useRef(null);
+  const lastDbTimestampRef = useRef(null);
   
   useEffect(() => {
     if (chartRef.current && typeof chartRef.current.update === 'function') {
@@ -150,6 +151,7 @@ const ResourceChart = ({ unifiedClient, isDarkMode }) => {
           voltage: { labels, data: voltageData, timestamps },
           core_current: { labels, data: metrics.map(m => m.core_current || 0), timestamps },
         });
+        lastDbTimestampRef.current = timestamps.length > 0 ? timestamps[timestamps.length - 1] : null;
 
         setLastUpdateTime(new Date());
 
@@ -164,13 +166,95 @@ const ResourceChart = ({ unifiedClient, isDarkMode }) => {
     }
   }, [unifiedClient, timeRange, formatChartTimestamp]);
 
-  // Fetch historical metrics data
+  const fetchIncrementalData = useCallback(async () => {
+    if (!unifiedClient) return;
+    try {
+      const nowSec = Date.now() / 1000;
+      const cutoffStart = nowSec - (timeRange * 60);
+      const startTs = lastDbTimestampRef.current != null ? Math.max(lastDbTimestampRef.current, cutoffStart) : cutoffStart;
+      const endTs = nowSec;
+
+      const response = await unifiedClient.getMetricsRange({ start: startTs, end: endTs });
+      const newMetrics = response && response.metrics ? response.metrics : [];
+
+      setChartData(prev => {
+        // Trim existing data to cutoff and then append new ones without duplicates
+        const existingTsSet = new Set((prev.cpu.timestamps || []).filter(ts => ts >= cutoffStart));
+        const base = {
+          cpu: {
+            timestamps: (prev.cpu.timestamps || []).filter(ts => ts >= cutoffStart),
+            labels: (prev.cpu.labels || []).slice(-(prev.cpu.timestamps || []).length).filter((_, idx) => (prev.cpu.timestamps || [])[idx] >= cutoffStart),
+            data: (prev.cpu.data || []).slice(-(prev.cpu.timestamps || []).length).filter((_, idx) => (prev.cpu.timestamps || [])[idx] >= cutoffStart),
+          },
+          memory: {
+            timestamps: (prev.memory.timestamps || []).filter(ts => ts >= cutoffStart),
+            labels: (prev.memory.labels || []).slice(-(prev.memory.timestamps || []).length).filter((_, idx) => (prev.memory.timestamps || [])[idx] >= cutoffStart),
+            data: (prev.memory.data || []).slice(-(prev.memory.timestamps || []).length).filter((_, idx) => (prev.memory.timestamps || [])[idx] >= cutoffStart),
+          },
+          temperature: {
+            timestamps: (prev.temperature.timestamps || []).filter(ts => ts >= cutoffStart),
+            labels: (prev.temperature.labels || []).slice(-(prev.temperature.timestamps || []).length).filter((_, idx) => (prev.temperature.timestamps || [])[idx] >= cutoffStart),
+            data: (prev.temperature.data || []).slice(-(prev.temperature.timestamps || []).length).filter((_, idx) => (prev.temperature.timestamps || [])[idx] >= cutoffStart),
+          },
+          voltage: {
+            timestamps: (prev.voltage.timestamps || []).filter(ts => ts >= cutoffStart),
+            labels: (prev.voltage.labels || []).slice(-(prev.voltage.timestamps || []).length).filter((_, idx) => (prev.voltage.timestamps || [])[idx] >= cutoffStart),
+            data: (prev.voltage.data || []).slice(-(prev.voltage.timestamps || []).length).filter((_, idx) => (prev.voltage.timestamps || [])[idx] >= cutoffStart),
+          },
+          core_current: {
+            timestamps: (prev.core_current.timestamps || []).filter(ts => ts >= cutoffStart),
+            labels: (prev.core_current.labels || []).slice(-(prev.core_current.timestamps || []).length).filter((_, idx) => (prev.core_current.timestamps || [])[idx] >= cutoffStart),
+            data: (prev.core_current.data || []).slice(-(prev.core_current.timestamps || []).length).filter((_, idx) => (prev.core_current.timestamps || [])[idx] >= cutoffStart),
+          }
+        };
+
+        if (newMetrics.length > 0) {
+          newMetrics.forEach(m => {
+            const ts = m.timestamp;
+            if (ts < cutoffStart) return;
+            if (existingTsSet.has(ts)) return;
+            const label = formatChartTimestamp(ts, timeRange);
+            base.cpu.timestamps.push(ts);
+            base.cpu.labels.push(label);
+            base.cpu.data.push(m.cpu_percent || 0);
+            base.memory.timestamps.push(ts);
+            base.memory.labels.push(label);
+            base.memory.data.push(m.memory_percent || 0);
+            base.temperature.timestamps.push(ts);
+            base.temperature.labels.push(label);
+            base.temperature.data.push(m.temperature || 0);
+            base.voltage.timestamps.push(ts);
+            base.voltage.labels.push(label);
+            base.voltage.data.push(m.voltage || 0);
+            base.core_current.timestamps.push(ts);
+            base.core_current.labels.push(label);
+            base.core_current.data.push(m.core_current || 0);
+            existingTsSet.add(ts);
+          });
+        }
+        return base;
+      });
+
+      if (newMetrics.length > 0) {
+        lastDbTimestampRef.current = newMetrics[newMetrics.length - 1].timestamp;
+        setLastUpdateTime(new Date());
+        if (chartRef.current) {
+          try { chartRef.current.update('none'); } catch (_) { chartRef.current.update(); }
+        }
+      }
+    } catch (error) {
+      // Non-fatal; keep previous data
+    }
+  }, [unifiedClient, timeRange, formatChartTimestamp]);
+
+  // Fetch historical metrics on mount and on time range change, then incrementally append
   useEffect(() => {
     if (!unifiedClient) return;
+    lastDbTimestampRef.current = null;
     fetchHistoricalData();
-    const interval = setInterval(fetchHistoricalData, Math.max(1000, Number(refreshInterval) || 5000));
+    const interval = setInterval(fetchIncrementalData, Math.max(1000, Number(refreshInterval) || 5000));
     return () => clearInterval(interval);
-  }, [unifiedClient, timeRange, refreshInterval, fetchHistoricalData]);
+  }, [unifiedClient, timeRange, refreshInterval, fetchHistoricalData, fetchIncrementalData]);
 
   // Professional chart configuration
   const getChartConfig = useCallback((metric) => {

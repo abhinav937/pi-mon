@@ -8,6 +8,7 @@ import sqlite3
 import os
 import time
 import logging
+import math
 
 logger = logging.getLogger(__name__)
 
@@ -126,35 +127,49 @@ class MetricsDatabase:
             return False
     
     def get_metrics_history(self, minutes=60, limit=1000):
-        """Get metrics history from database for the last N minutes"""
+        """Get metrics history from database for the last N minutes.
+
+        Returns the most recent points within the time window, ensuring latest data is included.
+        """
         try:
             cutoff_time = time.time() - (minutes * 60)
             
             logger.info(f"Database query: minutes={minutes}, cutoff_time={cutoff_time}, limit={limit}")
-            
-            # Increase limit for longer time ranges to get more data points
-            if minutes >= 1440:  # 24 hours or more
-                effective_limit = min(limit * 4, 50000)  # Allow up to 50k records for 24hr+ views
-            elif minutes >= 720:  # 12 hours or more
-                effective_limit = min(limit * 2, 25000)  # Allow up to 25k records for 12hr+ views
-            else:
-                effective_limit = limit
+
+            # Try to approximate the needed number of points based on stored collection interval
+            try:
+                from database import MetricsDatabase  # local import safe here
+                # We are already inside MetricsDatabase; use self
+                stored_interval = self.get_system_info('collection_interval_seconds')
+                interval_seconds = float(stored_interval) if stored_interval is not None else 5.0
+                if interval_seconds <= 0:
+                    interval_seconds = 5.0
+            except Exception:
+                interval_seconds = 5.0
+
+            estimated_points = int(math.ceil((minutes * 60.0) / interval_seconds))
+            # Add a small buffer and cap
+            desired_points = min(estimated_points + 50, 50000)
+            # Ensure we request at least the caller-provided limit
+            effective_limit = max(int(limit), desired_points)
             
             with self._connect() as conn:
                 cursor = conn.cursor()
                 
+                # Fetch the most recent points within the window, then reverse to ascending for the frontend
                 cursor.execute('''
                     SELECT timestamp, cpu_percent, memory_percent, disk_percent, temperature, voltage, core_current,
                            network_bytes_sent, network_bytes_recv, network_packets_sent, network_packets_recv,
                            disk_read_bytes, disk_write_bytes, disk_read_count, disk_write_count
                     FROM metrics 
                     WHERE timestamp > ? 
-                    ORDER BY timestamp ASC 
+                    ORDER BY timestamp DESC 
                     LIMIT ?
                 ''', (cutoff_time, effective_limit))
                 
-                rows = cursor.fetchall()
-                logger.info(f"Database returned {len(rows)} rows (requested: {effective_limit})")
+                rows_desc = cursor.fetchall()
+                rows = list(reversed(rows_desc))
+                logger.info(f"Database returned {len(rows)} rows (requested: {effective_limit}, interval={interval_seconds}s)")
                 
                 # Convert to the format expected by frontend
                 metrics = []

@@ -182,7 +182,7 @@ if [[ "$QUIET" != "1" ]]; then echo "==> Configuring passwordless sudo for pi-mo
 SUDOERS_FILE="/etc/sudoers.d/pi-monitor"
 if [[ ! -f "$SUDOERS_FILE" ]]; then
   cat > "$SUDOERS_FILE" <<EOF
-$APP_USER ALL=(ALL) NOPASSWD: /sbin/reboot, /sbin/shutdown, /bin/systemctl, /usr/bin/tail
+$APP_USER ALL=(ALL) NOPASSWD: /sbin/reboot, /sbin/shutdown, /bin/systemctl, /usr/bin/systemctl, /usr/bin/tail
 EOF
   chmod 0440 "$SUDOERS_FILE"
   if visudo -c -f "$SUDOERS_FILE" >/dev/null 2>&1; then

@@ -175,22 +175,40 @@ class ServiceManager:
                     return {"success": True, "message": f"Service {service_name} status checked"}
                 elif action in ['start', 'stop', 'restart']:
                     try:
+                        # Resolve absolute paths to match sudoers rules
+                        systemctl_path = shutil.which('systemctl') or 'systemctl'
+                        service_path = shutil.which('service') or 'service'
+                        sudo_path = shutil.which('sudo')
+
                         # Try plain systemctl first
-                        result = subprocess.run(['systemctl', action, service_name], capture_output=True, text=True)
+                        result = subprocess.run([systemctl_path, action, service_name], capture_output=True, text=True)
                         if result.returncode == 0:
                             return {"success": True, "message": f"Service {service_name} {action} successful"}
 
                         # If we hit an auth error, try sudo non-interactively (requires sudoers NOPASSWD)
                         stderr = (result.stderr or '').lower()
-                        if any(word in stderr for word in ['access denied', 'permission', 'authentication is required', 'not authorized']):
-                            sudo_path = shutil.which('sudo')
+                        if any(word in stderr for word in ['access denied', 'permission', 'authentication is required', 'not authorized', 'polkit']):
                             if sudo_path:
-                                sudo_result = subprocess.run([sudo_path, '-n', 'systemctl', action, service_name], capture_output=True, text=True)
+                                sudo_result = subprocess.run([sudo_path, '-n', systemctl_path, action, service_name], capture_output=True, text=True)
                                 if sudo_result.returncode == 0:
                                     return {"success": True, "message": f"Service {service_name} {action} successful (sudo)"}
+                                else:
+                                    # Try sudo with service command as a fallback
+                                    service_cmd = [sudo_path, '-n', service_path, service_name, action]
+                                    svc_result = subprocess.run(service_cmd, capture_output=True, text=True)
+                                    if svc_result.returncode == 0:
+                                        return {"success": True, "message": f"Service {service_name} {action} successful via 'service' (sudo)"}
+                                    # Return combined stderr for diagnostics
+                                    combined_err = (sudo_result.stderr or '') + '\n' + (svc_result.stderr or '')
+                                    return {"success": False, "message": f"Service control failed (sudo): {combined_err.strip()}"}
 
                         # Fallback to alternatives
-                        return self._handle_service_action_alternative(service_name, action)
+                        alt = self._handle_service_action_alternative(service_name, action)
+                        # If alternative failed, include original stderr for context
+                        if not alt.get('success'):
+                            alt_msg = alt.get('message') or alt.get('error') or 'unknown error'
+                            return {"success": False, "message": f"Service control failed: {alt_msg}. systemctl stderr: {(result.stderr or '').strip()}"}
+                        return alt
                     except FileNotFoundError:
                         return self._handle_service_action_alternative(service_name, action)
                     except Exception as e:

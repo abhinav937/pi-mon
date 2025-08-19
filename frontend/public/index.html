@@ -105,10 +105,32 @@
           navigator.serviceWorker.register('/sw.js')
             .then(function(registration) {
               console.log('SW registered: ', registration);
+              // If there's an updated SW, activate it immediately
+              if (registration.waiting) {
+                registration.waiting.postMessage({ type: 'SKIP_WAITING' });
+              }
+              registration.addEventListener('updatefound', function() {
+                var newWorker = registration.installing;
+                if (!newWorker) return;
+                newWorker.addEventListener('statechange', function() {
+                  if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                    if (registration.waiting) {
+                      registration.waiting.postMessage({ type: 'SKIP_WAITING' });
+                    }
+                  }
+                });
+              });
             })
             .catch(function(registrationError) {
               console.log('SW registration failed: ', registrationError);
             });
+          // Reload the page when the new SW takes control
+          var refreshing = false;
+          navigator.serviceWorker.addEventListener('controllerchange', function() {
+            if (refreshing) return;
+            refreshing = true;
+            window.location.reload();
+          });
         });
       }
       

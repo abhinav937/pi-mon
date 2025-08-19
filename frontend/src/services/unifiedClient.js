@@ -82,7 +82,13 @@ class UnifiedClient {
     
     this.httpClient = axios.create({
       baseURL: this.serverUrl.replace(/\/$/, ''),
-      timeout: 10000
+      timeout: 10000,
+      // Ensure we bypass any intermediary caches for dynamic data
+      headers: {
+        'Cache-Control': 'no-cache, no-store, max-age=0, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0'
+      }
     });
     
     // Add request interceptor to include auth token and log requests
@@ -271,7 +277,7 @@ class UnifiedClient {
 
   async getSystemStats() {
     try {
-      const response = await this.httpClient.get('/api/system');
+      const response = await this.httpClient.get('/api/system', { params: { _ts: Date.now() } });
       return response.data;
     } catch (error) {
       throw error;
@@ -289,7 +295,7 @@ class UnifiedClient {
 
   async getEnhancedSystemStats() {
     try {
-      const response = await this.httpClient.get('/api/system/enhanced');
+      const response = await this.httpClient.get('/api/system/enhanced', { params: { _ts: Date.now() } });
       return response.data;
     } catch (error) {
       throw error;
@@ -349,7 +355,7 @@ class UnifiedClient {
 
   async getMetricsHistory(minutes = 60) {
     try {
-      const response = await this.httpClient.get(`/api/metrics/history?minutes=${minutes}`);
+      const response = await this.httpClient.get(`/api/metrics/history?minutes=${minutes}`, { params: { _ts: Date.now() } });
       return response.data;
     } catch (error) {
       throw error;

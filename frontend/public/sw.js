@@ -82,19 +82,38 @@ self.addEventListener('fetch', (event) => {
 
 // Handle API requests with network-first strategy
 async function handleApiRequest(request) {
+  const url = new URL(request.url);
+  const isRealtimeMetrics = url.pathname === '/api/system';
+  const isMetricsHistory = url.pathname.startsWith('/api/metrics/history');
   try {
     // Try network first
     const networkResponse = await fetch(request);
     
-    // Cache successful responses
+    // Cache successful responses only when allowed
     if (networkResponse.ok) {
-      const cache = await caches.open(DYNAMIC_CACHE);
-      cache.put(request, networkResponse.clone());
+      const cacheControl = (networkResponse.headers.get('Cache-Control') || '').toLowerCase();
+      const shouldSkipCache = cacheControl.includes('no-store') || cacheControl.includes('no-cache') || isRealtimeMetrics || isMetricsHistory;
+      if (!shouldSkipCache) {
+        const cache = await caches.open(DYNAMIC_CACHE);
+        cache.put(request, networkResponse.clone());
+      }
     }
     
     return networkResponse;
   } catch (error) {
-    // Fallback to cache if network fails
+    // For highly dynamic endpoints, do NOT serve stale cached data
+    if (isRealtimeMetrics || isMetricsHistory) {
+      return new Response(
+        JSON.stringify({ error: 'Offline - API not available' }),
+        {
+          status: 503,
+          statusText: 'Service Unavailable',
+          headers: { 'Content-Type': 'application/json' }
+        }
+      );
+    }
+
+    // Fallback to cache for other API requests if available
     const cachedResponse = await caches.match(request);
     if (cachedResponse) {
       return cachedResponse;

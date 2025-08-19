@@ -59,12 +59,6 @@ const ResourceChart = ({ unifiedClient, isDarkMode }) => {
     return 5000; // Default to 5 seconds
   });
   
-  const SAMPLE_INTERVAL_SECONDS = refreshInterval / 1000;
-  const [maxDataPoints, setMaxDataPoints] = useState(() => {
-    const estimated = Math.ceil((timeRange * 60) / SAMPLE_INTERVAL_SECONDS);
-    return Math.max(100, estimated);
-  });
-  
   const chartRef = useRef(null);
   
   useEffect(() => {
@@ -77,12 +71,10 @@ const ResourceChart = ({ unifiedClient, isDarkMode }) => {
     }
   }, [isDarkMode]);
 
-  // Save time range to localStorage whenever it changes and recompute max points
+  // Save time range to localStorage whenever it changes
   useEffect(() => {
     localStorage.setItem('pi-monitor-time-range', timeRange.toString());
-    const estimated = Math.ceil((timeRange * 60) / SAMPLE_INTERVAL_SECONDS);
-    setMaxDataPoints(Math.max(100, estimated));
-  }, [timeRange, SAMPLE_INTERVAL_SECONDS]);
+  }, [timeRange]);
 
   // Listen for settings changes (refresh interval updates)
   useEffect(() => {
@@ -134,141 +126,7 @@ const ResourceChart = ({ unifiedClient, isDarkMode }) => {
     );
   }, []);
 
-  // Listen for real-time updates with enhanced data handling and performance optimization
-  useEffect(() => {
-    if (!unifiedClient) return;
-
-    // Professional debounced update for smooth performance
-    let updateTimeout;
-    let pendingUpdates = [];
-
-    const handleUpdate = (data) => {
-      if (data.type === 'initial_stats' || data.type === 'periodic_update' || data.type === 'mqtt_update') {
-        const now = new Date();
-        const timestamp = now.getTime() / 1000;
-        const formattedTimestamp = formatChartTimestamp(timestamp, timeRange);
-        const systemData = data.data || data;
-
-        // Collect updates for batch processing
-        pendingUpdates.push({
-          timestamp,
-          formattedTimestamp,
-          systemData
-        });
-
-        // Clear existing timeout and set new one for debounced update
-        clearTimeout(updateTimeout);
-        updateTimeout = setTimeout(() => {
-          if (pendingUpdates.length > 0) {
-            setChartData(prevData => {
-              const newData = { ...prevData };
-              
-              // Process all pending updates in batch
-              pendingUpdates.forEach(update => {
-                const { timestamp, formattedTimestamp, systemData } = update;
-                
-                // Update CPU data with proper timestamp handling
-                if (systemData.cpu_percent !== undefined && systemData.cpu_percent !== null && !isNaN(systemData.cpu_percent)) {
-                  if (!newData.cpu.timestamps.includes(timestamp)) {
-                    newData.cpu.timestamps = [...newData.cpu.timestamps, timestamp].slice(-maxDataPoints);
-                    newData.cpu.labels = [...newData.cpu.labels, formattedTimestamp].slice(-maxDataPoints);
-                    newData.cpu.data = [...newData.cpu.data, parseFloat(systemData.cpu_percent)].slice(-maxDataPoints);
-                  }
-                }
-                
-                // Update Memory data
-                if (systemData.memory_percent !== undefined && systemData.memory_percent !== null && !isNaN(systemData.memory_percent)) {
-                  if (!newData.memory.timestamps.includes(timestamp)) {
-                    newData.memory.timestamps = [...newData.memory.timestamps, timestamp].slice(-maxDataPoints);
-                    newData.memory.labels = [...newData.memory.labels, formattedTimestamp].slice(-maxDataPoints);
-                    newData.memory.data = [...newData.memory.data, parseFloat(systemData.memory_percent)].slice(-maxDataPoints);
-                  }
-                }
-                
-                // Update Temperature data
-                if (systemData.temperature !== undefined && systemData.temperature !== null && !isNaN(systemData.temperature)) {
-                  if (!newData.temperature.timestamps.includes(timestamp)) {
-                    newData.temperature.timestamps = [...newData.temperature.timestamps, timestamp].slice(-maxDataPoints);
-                    newData.temperature.labels = [...newData.temperature.labels, formattedTimestamp].slice(-maxDataPoints);
-                    newData.temperature.data = [...newData.temperature.data, parseFloat(systemData.temperature)].slice(-maxDataPoints);
-                  }
-                }
-                
-                // Update Core Voltage data
-                if (systemData.voltage !== undefined && systemData.voltage !== null && !isNaN(systemData.voltage)) {
-                  if (!newData.voltage.timestamps.includes(timestamp)) {
-                    newData.voltage.timestamps = [...newData.voltage.timestamps, timestamp].slice(-maxDataPoints);
-                    newData.voltage.labels = [...newData.voltage.labels, formattedTimestamp].slice(-maxDataPoints);
-                    newData.voltage.data = [...newData.voltage.data, parseFloat(systemData.voltage)].slice(-maxDataPoints);
-                  }
-                }
-
-                // Update Core Current data (for voltage overlay only)
-                if (systemData.core_current !== undefined && systemData.core_current !== null && !isNaN(systemData.core_current)) {
-                  if (!newData.core_current.timestamps.includes(timestamp)) {
-                    newData.core_current.timestamps = [...newData.core_current.timestamps, timestamp].slice(-maxDataPoints);
-                    newData.core_current.labels = [...newData.core_current.labels, formattedTimestamp].slice(-maxDataPoints);
-                    newData.core_current.data = [...newData.core_current.data, parseFloat(systemData.core_current)].slice(-maxDataPoints);
-                  }
-                }
-              });
-              
-              // Clear processed updates
-              pendingUpdates = [];
-              return newData;
-            });
-            
-            setLastUpdateTime(now);
-          }
-        }, 100); // 100ms debounce for smooth performance
-      }
-    };
-
-    const unsubscribe = unifiedClient.addDataListener(handleUpdate);
-    return () => {
-      if (unsubscribe) unsubscribe();
-      clearTimeout(updateTimeout);
-    };
-  }, [unifiedClient, timeRange, maxDataPoints, formatChartTimestamp]);
-
-  // Seed with latest cached stats immediately on mount
-  useEffect(() => {
-    if (!unifiedClient) return;
-    const latest = unifiedClient.getLatestStats && unifiedClient.getLatestStats();
-    if (!latest) return;
-    
-    const now = new Date();
-    const timestamp = now.getTime() / 1000;
-    const formattedTimestamp = formatChartTimestamp(timestamp, timeRange);
-    
-    setChartData(prevData => {
-      const newData = { ...prevData };
-      
-      if (latest.cpu_percent != null && !isNaN(latest.cpu_percent) && !prevData.cpu.timestamps.includes(timestamp)) {
-        newData.cpu.timestamps = [...prevData.cpu.timestamps, timestamp].slice(-maxDataPoints);
-        newData.cpu.labels = [...prevData.cpu.labels, formattedTimestamp].slice(-maxDataPoints);
-        newData.cpu.data = [...prevData.cpu.data, parseFloat(latest.cpu_percent)].slice(-maxDataPoints);
-      }
-      if (latest.memory_percent != null && !isNaN(latest.memory_percent) && !prevData.memory.timestamps.includes(timestamp)) {
-        newData.memory.timestamps = [...prevData.memory.timestamps, timestamp].slice(-maxDataPoints);
-        newData.memory.labels = [...prevData.memory.labels, formattedTimestamp].slice(-maxDataPoints);
-        newData.memory.data = [...prevData.memory.data, parseFloat(latest.memory_percent)].slice(-maxDataPoints);
-      }
-      if (latest.temperature != null && !isNaN(latest.temperature) && !prevData.temperature.timestamps.includes(timestamp)) {
-        newData.temperature.timestamps = [...prevData.temperature.timestamps, timestamp].slice(-maxDataPoints);
-        newData.temperature.labels = [...prevData.temperature.labels, formattedTimestamp].slice(-maxDataPoints);
-        newData.temperature.data = [...prevData.temperature.data, parseFloat(latest.temperature)].slice(-maxDataPoints);
-      }
-      
-      if (latest.voltage != null && !isNaN(latest.voltage) && !prevData.voltage.timestamps.includes(timestamp)) {
-        newData.voltage.timestamps = [...prevData.voltage.timestamps, timestamp].slice(-maxDataPoints);
-        newData.voltage.labels = [...prevData.voltage.labels, formattedTimestamp].slice(-maxDataPoints);
-        newData.voltage.data = [...prevData.voltage.data, parseFloat(latest.voltage)].slice(-maxDataPoints);
-      }
-      
-      return newData;
-    });
-  }, [unifiedClient, timeRange, maxDataPoints, formatChartTimestamp]);
+  // Removed real-time append logic; we'll rely on periodic DB fetches only
 
   const fetchHistoricalData = useCallback(async () => {
     if (!unifiedClient) return;
@@ -293,6 +151,8 @@ const ResourceChart = ({ unifiedClient, isDarkMode }) => {
           core_current: { labels, data: metrics.map(m => m.core_current || 0), timestamps },
         });
 
+        setLastUpdateTime(new Date());
+
         if (chartRef.current) {
           chartRef.current.update();
         }
@@ -308,10 +168,9 @@ const ResourceChart = ({ unifiedClient, isDarkMode }) => {
   useEffect(() => {
     if (!unifiedClient) return;
     fetchHistoricalData();
-    const refreshInterval = Math.max(30000, timeRange * 1000 / 10);
-    const interval = setInterval(fetchHistoricalData, refreshInterval);
+    const interval = setInterval(fetchHistoricalData, Math.max(1000, Number(refreshInterval) || 5000));
     return () => clearInterval(interval);
-  }, [unifiedClient, timeRange, fetchHistoricalData]);
+  }, [unifiedClient, timeRange, refreshInterval, fetchHistoricalData]);
 
   // Professional chart configuration
   const getChartConfig = useCallback((metric) => {

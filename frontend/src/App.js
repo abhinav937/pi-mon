@@ -2,7 +2,7 @@
 import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { QueryClient, QueryClientProvider } from 'react-query';
 import { Toaster } from 'react-hot-toast';
-import { ErrorOutline as AlertCircle, Wifi, WifiOff, LightMode as Sun, DarkMode as Moon, Settings, Refresh as RefreshCw, Menu, Close as X, Dashboard as LayoutDashboard, BarChart, Bolt as Zap, Build as Wrench, Public as Globe, Article as FileText } from '@mui/icons-material';
+import { ErrorOutline as AlertCircle, LightMode as Sun, DarkMode as Moon, Settings, Refresh as RefreshCw, Menu, Close as X, Dashboard as LayoutDashboard, BarChart, Bolt as Zap, Build as Wrench, Public as Globe, Article as FileText } from '@mui/icons-material';
 
 import { UnifiedClient } from './services/unifiedClient';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -67,6 +67,13 @@ function App() {
   const [lastUpdate, setLastUpdate] = useState(null);
   const [backendInfo, setBackendInfo] = useState(null);
   const [isDarkMode, setIsDarkMode] = useState(() => {
+    try {
+      const settingsRaw = localStorage.getItem('pi-monitor-settings');
+      const settings = settingsRaw ? JSON.parse(settingsRaw) : null;
+      const themePref = settings?.theme;
+      if (themePref === 'dark') return true;
+      if (themePref === 'light') return false;
+    } catch (_) {}
     const saved = localStorage.getItem('darkMode');
     return saved ? JSON.parse(saved) : window.matchMedia('(prefers-color-scheme: dark)').matches;
   });
@@ -103,10 +110,10 @@ function App() {
     };
   }, []);
 
-  // Apply accent color from settings on load and when it changes
+  // Apply accent color and respond to settings/theme changes without polling
   useEffect(() => {
-    try {
-      const applyAccent = () => {
+    const applyAccent = () => {
+      try {
         const savedRaw = localStorage.getItem('pi-monitor-settings');
         const saved = savedRaw ? JSON.parse(savedRaw) : {};
         const accent = saved.accentColor || 'blue';
@@ -130,11 +137,46 @@ function App() {
         root.style.setProperty('--accent-700', p[7]);
         root.style.setProperty('--accent-800', p[8]);
         root.style.setProperty('--accent-900', p[9]);
-      };
+      } catch (_) {}
+    };
+
+    const applyThemeIfNeeded = () => {
+      try {
+        const savedRaw = localStorage.getItem('pi-monitor-settings');
+        const saved = savedRaw ? JSON.parse(savedRaw) : {};
+        const themePref = saved.theme;
+        if (themePref === 'dark') setIsDarkMode(true);
+        else if (themePref === 'light') setIsDarkMode(false);
+        else if (themePref === 'auto') setIsDarkMode(window.matchMedia('(prefers-color-scheme: dark)').matches);
+      } catch (_) {}
+    };
+
+    applyAccent();
+    applyThemeIfNeeded();
+
+    const handleStorage = () => {
       applyAccent();
-      const interval = setInterval(applyAccent, 1000);
-      return () => clearInterval(interval);
-    } catch (_) {}
+      applyThemeIfNeeded();
+    };
+    window.addEventListener('storage', handleStorage);
+
+    // React to system theme changes when on Auto
+    const media = window.matchMedia('(prefers-color-scheme: dark)');
+    const handleMedia = (e) => {
+      try {
+        const savedRaw = localStorage.getItem('pi-monitor-settings');
+        const saved = savedRaw ? JSON.parse(savedRaw) : {};
+        if (saved.theme === 'auto') setIsDarkMode(!!e.matches);
+      } catch (_) {}
+    };
+    if (media.addEventListener) media.addEventListener('change', handleMedia);
+    else if (media.addListener) media.addListener(handleMedia);
+
+    return () => {
+      window.removeEventListener('storage', handleStorage);
+      if (media.removeEventListener) media.removeEventListener('change', handleMedia);
+      else if (media.removeListener) media.removeListener(handleMedia);
+    };
   }, []);
 
   // Load frontend version from public/version.json if available
@@ -244,27 +286,7 @@ function App() {
     }
   };
 
-  const getConnectionStatusColor = () => {
-    switch (connectionStatus) {
-      case 'connected':
-        return 'text-green-500';
-      case 'disconnected':
-        return 'text-red-500';
-      case 'connecting':
-        return 'text-yellow-500';
-      case 'error':
-        return 'text-red-600';
-      default:
-        return 'text-gray-500';
-    }
-  };
-
-  const getConnectionStatusIcon = () => {
-    if (!isOnline) return <WifiOff className="h-4 w-4 text-red-500" />;
-    return connectionStatus === 'connected' ? 
-      <Wifi className="h-4 w-4 text-green-500" /> :
-      <WifiOff className={`h-4 w-4 ${getConnectionStatusColor()}`} />;
-  };
+  
 
   return (
     <QueryClientProvider client={queryClient}>
@@ -334,6 +356,15 @@ function App() {
                   isMobile={true}
                 />
 
+                {/* Mobile Theme Toggle */}
+                <button
+                  onClick={() => setIsDarkMode(!isDarkMode)}
+                  className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-200"
+                  title={`Switch to ${isDarkMode ? 'light' : 'dark'} mode`}
+                >
+                  {isDarkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+                </button>
+
                 {/* Mobile Menu Toggle */}
                 <button
                   onClick={toggleMobileMenu}
@@ -350,7 +381,7 @@ function App() {
         {/* Mobile Menu Overlay */}
         {isMobileMenuOpen && (
           <div className="md:hidden fixed inset-0 z-50 bg-black bg-opacity-50">
-            <div className="fixed inset-y-0 right-0 max-w-xs w-full bg-white dark:bg-gray-800 shadow-xl">
+            <div className="fixed inset-y-0 right-0 max-w-xs w-full bg-white dark:bg-gray-800 shadow-xl h-full flex flex-col">
               <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
                 <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Menu</h2>
                 <button
@@ -362,7 +393,7 @@ function App() {
               </div>
               
               {/* Mobile Navigation */}
-              <nav className="p-4 space-y-2">
+              <nav className="p-4 space-y-2 overflow-y-auto flex-1">
                 {TABS.map((tab) => (
                   <button
                     key={tab.id}

@@ -83,10 +83,14 @@ const SettingsPanel = ({ isDarkMode, setIsDarkMode, onClose, unifiedClient }) =>
         toast.success('Settings saved successfully');
       }
       
-      // Apply theme change
-      if (settings.theme !== (isDarkMode ? 'dark' : 'light')) {
-        if (setIsDarkMode) {
-          setIsDarkMode(settings.theme === 'dark');
+      // Apply theme change: respect 'auto' and system preference
+      if (setIsDarkMode) {
+        if (settings.theme === 'dark') {
+          setIsDarkMode(true);
+        } else if (settings.theme === 'light') {
+          setIsDarkMode(false);
+        } else if (settings.theme === 'auto') {
+          setIsDarkMode(window.matchMedia('(prefers-color-scheme: dark)').matches);
         }
       }
     } catch (error) {

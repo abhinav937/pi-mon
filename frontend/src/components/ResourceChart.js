@@ -29,7 +29,7 @@ ChartJS.register(
   TimeScale
 );
 
-const ResourceChart = ({ unifiedClient }) => {
+const ResourceChart = ({ unifiedClient, isDarkMode }) => {
   const [selectedMetric, setSelectedMetric] = useState('cpu');
   const [chartData, setChartData] = useState({
     cpu: { labels: [], data: [], timestamps: [] },
@@ -66,6 +66,16 @@ const ResourceChart = ({ unifiedClient }) => {
   });
   
   const chartRef = useRef(null);
+  
+  useEffect(() => {
+    if (chartRef.current && typeof chartRef.current.update === 'function') {
+      try {
+        chartRef.current.update('none');
+      } catch (_) {
+        chartRef.current.update();
+      }
+    }
+  }, [isDarkMode]);
 
   // Save time range to localStorage whenever it changes and recompute max points
   useEffect(() => {
@@ -305,7 +315,7 @@ const ResourceChart = ({ unifiedClient }) => {
 
   // Professional chart configuration
   const getChartConfig = useCallback((metric) => {
-    const isDarkMode = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const themeIsDark = !!isDarkMode;
     const isMobile = window.matchMedia && window.matchMedia('(max-width: 640px)').matches;
     const intervals = getTickIntervals(timeRange);
     const computedMaxTicks = isMobile ? Math.max(3, Math.floor(intervals.maxTicks * 0.6)) : intervals.maxTicks;
@@ -397,7 +407,7 @@ const ResourceChart = ({ unifiedClient }) => {
             legend: {
               position: 'top',
               labels: {
-                color: isDarkMode ? '#ffffff' : '#111827',
+                color: themeIsDark ? '#ffffff' : '#111827',
                 font: {
                   size: 13,
                   weight: '600',
@@ -415,10 +425,10 @@ const ResourceChart = ({ unifiedClient }) => {
             tooltip: {
               mode: 'index',
               intersect: false,
-              backgroundColor: isDarkMode ? '#1f2937' : '#ffffff',
-              titleColor: isDarkMode ? '#f9fafb' : '#111827',
-              bodyColor: isDarkMode ? '#e5e7eb' : '#374151',
-              borderColor: isDarkMode ? '#4b5563' : '#d1d5db',
+              backgroundColor: themeIsDark ? '#1f2937' : '#ffffff',
+              titleColor: themeIsDark ? '#f9fafb' : '#111827',
+              bodyColor: themeIsDark ? '#e5e7eb' : '#374151',
+              borderColor: themeIsDark ? '#4b5563' : '#d1d5db',
               borderWidth: 1,
               borderRadius: 8,
               padding: 12,
@@ -454,7 +464,7 @@ const ResourceChart = ({ unifiedClient }) => {
                 autoSkip: true,
                 maxRotation: tickRotation,
                 minRotation: tickRotation,
-                color: isDarkMode ? '#9ca3af' : '#6b7280',
+                color: themeIsDark ? '#9ca3af' : '#6b7280',
                 font: {
                   size: tickFontSize,
                   weight: '500',
@@ -472,11 +482,11 @@ const ResourceChart = ({ unifiedClient }) => {
                 }
               },
               grid: {
-                color: isDarkMode ? '#374151' : '#e5e7eb',
+                color: themeIsDark ? '#374151' : '#e5e7eb',
                 lineWidth: 0.5,
               },
               border: {
-                color: isDarkMode ? '#4b5563' : '#d1d5db',
+                color: themeIsDark ? '#4b5563' : '#d1d5db',
               },
               title: {
                 display: false,
@@ -489,7 +499,7 @@ const ResourceChart = ({ unifiedClient }) => {
               min: 0,
               max: 1.0,
               ticks: {
-                color: isDarkMode ? '#9ca3af' : '#6b7280',
+                color: themeIsDark ? '#9ca3af' : '#6b7280',
                 font: {
                   size: 11,
                   weight: '500',
@@ -501,11 +511,11 @@ const ResourceChart = ({ unifiedClient }) => {
                 }
               },
               grid: {
-                color: isDarkMode ? '#374151' : '#e5e7eb',
+                color: themeIsDark ? '#374151' : '#e5e7eb',
                 lineWidth: 0.5,
               },
               border: {
-                color: isDarkMode ? '#4b5563' : '#d1d5db',
+                color: themeIsDark ? '#4b5563' : '#d1d5db',
               },
               title: {
                 display: false,
@@ -518,7 +528,7 @@ const ResourceChart = ({ unifiedClient }) => {
               min: 0,
               max: 10,
               ticks: {
-                color: isDarkMode ? '#9ca3af' : '#6b7280',
+                color: themeIsDark ? '#9ca3af' : '#6b7280',
                 font: {
                   size: 11,
                   weight: '500',
@@ -533,7 +543,7 @@ const ResourceChart = ({ unifiedClient }) => {
                 drawOnChartArea: false,
               },
               border: {
-                color: isDarkMode ? '#4b5563' : '#d1d5db',
+                color: themeIsDark ? '#4b5563' : '#d1d5db',
               },
               title: {
                 display: false,
@@ -608,7 +618,7 @@ const ResourceChart = ({ unifiedClient }) => {
           legend: {
             position: 'top',
             labels: {
-              color: isDarkMode ? '#ffffff' : '#111827',
+              color: themeIsDark ? '#ffffff' : '#111827',
               font: {
                 size: 13,
                 weight: '600',
@@ -626,10 +636,10 @@ const ResourceChart = ({ unifiedClient }) => {
           tooltip: {
             mode: 'index',
             intersect: false,
-            backgroundColor: isDarkMode ? '#1f2937' : '#ffffff',
-            titleColor: isDarkMode ? '#f9fafb' : '#111827',
-            bodyColor: isDarkMode ? '#e5e7eb' : '#374151',
-            borderColor: isDarkMode ? '#4b5563' : '#d1d5db',
+            backgroundColor: themeIsDark ? '#1f2937' : '#ffffff',
+            titleColor: themeIsDark ? '#f9fafb' : '#111827',
+            bodyColor: themeIsDark ? '#e5e7eb' : '#374151',
+            borderColor: themeIsDark ? '#4b5563' : '#d1d5db',
             borderWidth: 1,
             borderRadius: 8,
             padding: 12,
@@ -663,7 +673,7 @@ const ResourceChart = ({ unifiedClient }) => {
               autoSkip: true,
               maxRotation: tickRotation,
               minRotation: tickRotation,
-              color: isDarkMode ? '#9ca3af' : '#6b7280',
+              color: themeIsDark ? '#9ca3af' : '#6b7280',
               font: {
                 size: tickFontSize,
                 weight: '500',
@@ -681,11 +691,11 @@ const ResourceChart = ({ unifiedClient }) => {
               }
             },
             grid: {
-              color: isDarkMode ? '#374151' : '#e5e7eb',
+              color: themeIsDark ? '#374151' : '#e5e7eb',
               lineWidth: 0.5,
             },
             border: {
-              color: isDarkMode ? '#4b5563' : '#d1d5db',
+              color: themeIsDark ? '#4b5563' : '#d1d5db',
             },
             title: {
               display: false, // Cleaner without axis title
@@ -696,7 +706,7 @@ const ResourceChart = ({ unifiedClient }) => {
             min: 0,
             max: metric === 'temperature' ? 100 : metric === 'voltage' ? 1.0 : 100,
             ticks: {
-              color: isDarkMode ? '#9ca3af' : '#6b7280',
+              color: themeIsDark ? '#9ca3af' : '#6b7280',
               font: {
                 size: 11,
                 weight: '500',
@@ -710,11 +720,11 @@ const ResourceChart = ({ unifiedClient }) => {
               }
             },
             grid: {
-              color: isDarkMode ? '#374151' : '#e5e7eb',
+              color: themeIsDark ? '#374151' : '#e5e7eb',
               lineWidth: 0.5,
             },
             border: {
-              color: isDarkMode ? '#4b5563' : '#d1d5db',
+              color: themeIsDark ? '#4b5563' : '#d1d5db',
             },
             title: {
               display: false,
@@ -751,7 +761,7 @@ const ResourceChart = ({ unifiedClient }) => {
         },
       },
     };
-  }, [chartData, timeRange, lastUpdateTime]);
+  }, [chartData, timeRange, lastUpdateTime, isDarkMode]);
 
   const metrics = [
     { id: 'cpu', name: 'CPU Usage', icon: TrendingUp, color: 'accent-text' },

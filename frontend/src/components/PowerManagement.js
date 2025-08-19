@@ -317,15 +317,15 @@ const PowerManagement = ({ unifiedClient }) => {
 
       {/* Timer Display */}
       {timerActive && (
-        <div className="metric-card border-l-4 border-blue-500 bg-blue-50 dark:bg-blue-900/20">
+        <div className="metric-card border-l-4 accent-border accent-soft">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3">
-              <Clock className="h-6 w-6 text-blue-600 dark:text-blue-400" />
+              <Clock className="h-6 w-6 accent-text" />
               <div>
                 <h3 className="text-lg font-semibold text-blue-800 dark:text-blue-200">
                   Timer Active
                 </h3>
-                <p className="text-blue-700 dark:text-blue-300 text-sm">
+                <p className="accent-text text-sm">
                   {selectedAction} will execute in
                 </p>
               </div>
@@ -334,7 +334,7 @@ const PowerManagement = ({ unifiedClient }) => {
               <div className="text-3xl font-bold text-blue-800 dark:text-blue-200">
                 {formatTimeRemaining(timeRemaining)}
               </div>
-              <div className="text-sm text-blue-600 dark:text-blue-400">
+              <div className="text-sm accent-text">
                 {timerPaused ? 'Paused' : 'Running'}
               </div>
             </div>
@@ -343,7 +343,8 @@ const PowerManagement = ({ unifiedClient }) => {
           <div className="mt-4 flex space-x-3">
             <button
               onClick={pauseTimer}
-              className="flex-1 px-4 py-2 rounded-lg font-medium transition-colors duration-200 bg-blue-600 hover:bg-blue-700 text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+              className="flex-1 px-4 py-2 rounded-lg font-medium transition-colors duration-200 text-white focus:outline-none"
+              style={{ backgroundColor: 'var(--accent-600)' }}
             >
               {timerPaused ? (
                 <>

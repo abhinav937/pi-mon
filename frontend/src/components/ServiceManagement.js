@@ -128,7 +128,8 @@ function ServiceManagement({ unifiedClient }) {
         <button
           onClick={() => handleServiceAction(service.name, 'restart')}
           disabled={serviceMutation.isLoading}
-          className="flex-1 flex items-center justify-center px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-md transition-colors duration-200 disabled:opacity-50"
+          className="flex-1 flex items-center justify-center px-3 py-2 text-white text-sm font-medium rounded-md transition-colors duration-200 disabled:opacity-50"
+          style={{ backgroundColor: 'var(--accent-600)' }}
         >
           <RotateCcw className="h-4 w-4 mr-1" />
           Restart

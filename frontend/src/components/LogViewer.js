@@ -75,7 +75,7 @@ const LogViewer = ({ unifiedClient }) => {
       case 'warn':
         return <AlertTriangle className="h-4 w-4 text-yellow-600" />;
       case 'info':
-        return <Info className="h-4 w-4 text-blue-600" />;
+        return <Info className="h-4 w-4 accent-text" />;
       default:
         return <Info className="h-4 w-4 text-gray-600" />;
     }
@@ -90,7 +90,7 @@ const LogViewer = ({ unifiedClient }) => {
       case 'warn':
         return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200';
       case 'info':
-        return 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200';
+        return 'accent-soft';
       default:
         return 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200';
     }
@@ -255,7 +255,8 @@ const LogViewer = ({ unifiedClient }) => {
         <div className="flex items-end space-x-2">
           <button
             onClick={downloadLog}
-            className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-md transition-colors duration-200 flex items-center space-x-2"
+            className="px-3 py-2 text-white text-sm font-medium rounded-md transition-colors duration-200 flex items-center space-x-2"
+            style={{ backgroundColor: 'var(--accent-600)' }}
           >
             <Download className="h-4 w-4" />
             <span>Download</span>

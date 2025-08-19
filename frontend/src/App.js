@@ -103,6 +103,40 @@ function App() {
     };
   }, []);
 
+  // Apply accent color from settings on load and when it changes
+  useEffect(() => {
+    try {
+      const applyAccent = () => {
+        const savedRaw = localStorage.getItem('pi-monitor-settings');
+        const saved = savedRaw ? JSON.parse(savedRaw) : {};
+        const accent = saved.accentColor || 'blue';
+        const palettes = {
+          blue: ['#eff6ff','#dbeafe','#bfdbfe','#93c5fd','#60a5fa','#3b82f6','#2563eb','#1d4ed8','#1e40af','#1e3a8a'],
+          green: ['#ecfdf5','#d1fae5','#a7f3d0','#6ee7b7','#34d399','#10b981','#059669','#047857','#065f46','#064e3b'],
+          purple: ['#f5f3ff','#ede9fe','#ddd6fe','#c4b5fd','#a78bfa','#8b5cf6','#7c3aed','#6d28d9','#5b21b6','#4c1d95'],
+          red: ['#fef2f2','#fee2e2','#fecaca','#fca5a5','#f87171','#ef4444','#dc2626','#b91c1c','#991b1b','#7f1d1d'],
+          yellow: ['#fffbeb','#fef3c7','#fde68a','#fcd34d','#fbbf24','#f59e0b','#d97706','#b45309','#92400e','#78350f'],
+          teal: ['#f0fdfa','#ccfbf1','#99f6e4','#5eead4','#2dd4bf','#14b8a6','#0d9488','#0f766e','#115e59','#134e4a'],
+        };
+        const p = palettes[accent] || palettes.blue;
+        const root = document.documentElement;
+        root.style.setProperty('--accent-50', p[0]);
+        root.style.setProperty('--accent-100', p[1]);
+        root.style.setProperty('--accent-200', p[2]);
+        root.style.setProperty('--accent-300', p[3]);
+        root.style.setProperty('--accent-400', p[4]);
+        root.style.setProperty('--accent-500', p[5]);
+        root.style.setProperty('--accent-600', p[6]);
+        root.style.setProperty('--accent-700', p[7]);
+        root.style.setProperty('--accent-800', p[8]);
+        root.style.setProperty('--accent-900', p[9]);
+      };
+      applyAccent();
+      const interval = setInterval(applyAccent, 1000);
+      return () => clearInterval(interval);
+    } catch (_) {}
+  }, []);
+
   // Load frontend version from public/version.json if available
   useEffect(() => {
     const loadFrontendVersion = async () => {

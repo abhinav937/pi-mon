@@ -5,7 +5,8 @@ import toast from 'react-hot-toast';
 const SettingsPanel = ({ isDarkMode, setIsDarkMode, onClose, unifiedClient }) => {
   const [settings, setSettings] = useState({
     refreshInterval: 5000,
-    theme: isDarkMode ? 'dark' : 'light'
+    theme: isDarkMode ? 'dark' : 'light',
+    accentColor: 'blue'
   });
 
   const [activeTab, setActiveTab] = useState('general');
@@ -41,7 +42,8 @@ const SettingsPanel = ({ isDarkMode, setIsDarkMode, onClose, unifiedClient }) =>
           const saved = savedRaw ? JSON.parse(savedRaw) : {};
           localStorage.setItem('pi-monitor-settings', JSON.stringify({
             theme: saved.theme ?? (isDarkMode ? 'dark' : 'light'),
-            refreshInterval: backendInterval
+            refreshInterval: backendInterval,
+            accentColor: saved.accentColor ?? 'blue'
           }));
         } catch (_) {}
       }
@@ -62,6 +64,12 @@ const SettingsPanel = ({ isDarkMode, setIsDarkMode, onClose, unifiedClient }) =>
       // Save settings to localStorage
       localStorage.setItem('pi-monitor-settings', JSON.stringify(settings));
       
+      // Apply accent color immediately
+      try {
+        const event = new Event('storage');
+        window.dispatchEvent(event);
+      } catch (_) {}
+
       // Send refresh interval to backend
       if (unifiedClient && settings.refreshInterval) {
         const intervalSeconds = settings.refreshInterval / 1000; // Convert from milliseconds to seconds
@@ -91,7 +99,8 @@ const SettingsPanel = ({ isDarkMode, setIsDarkMode, onClose, unifiedClient }) =>
     if (window.confirm('Are you sure you want to reset all settings to default values?')) {
       const defaultSettings = {
         refreshInterval: 5000,
-        theme: 'auto'
+        theme: 'auto',
+        accentColor: 'blue'
       };
       setSettings(defaultSettings);
       toast.success('Settings reset to default');
@@ -126,9 +135,7 @@ const SettingsPanel = ({ isDarkMode, setIsDarkMode, onClose, unifiedClient }) =>
       </div>
 
       <div>
-        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-          Theme
-        </label>
+        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Theme</label>
         <select
           value={settings.theme}
           onChange={(e) => handleSettingChange('theme', e.target.value)}
@@ -138,9 +145,31 @@ const SettingsPanel = ({ isDarkMode, setIsDarkMode, onClose, unifiedClient }) =>
           <option value="light">Light</option>
           <option value="dark">Dark</option>
         </select>
-        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-          Current theme: {isDarkMode ? 'Dark' : 'Light'}
-        </p>
+        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Current theme: {isDarkMode ? 'Dark' : 'Light'}</p>
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Accent Color</label>
+        <div className="grid grid-cols-6 gap-2">
+          {[
+            { id: 'blue', color: '#2563eb' },
+            { id: 'green', color: '#16a34a' },
+            { id: 'purple', color: '#7c3aed' },
+            { id: 'red', color: '#dc2626' },
+            { id: 'yellow', color: '#ca8a04' },
+            { id: 'teal', color: '#0d9488' },
+          ].map(opt => (
+            <button
+              key={opt.id}
+              type="button"
+              aria-label={`Accent ${opt.id}`}
+              className={`w-8 h-8 rounded-full border-2 ${settings.accentColor === opt.id ? 'border-gray-900 dark:border-white' : 'border-gray-300 dark:border-gray-600'}`}
+              style={{ backgroundColor: opt.color }}
+              onClick={() => handleSettingChange('accentColor', opt.id)}
+            />
+          ))}
+        </div>
+        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Applies to primary buttons, highlights and badges.</p>
       </div>
     </div>
   );
@@ -198,7 +227,8 @@ const SettingsPanel = ({ isDarkMode, setIsDarkMode, onClose, unifiedClient }) =>
               toast.error('Export failed');
             }
           }}
-          className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-md transition-colors duration-200"
+          className="px-3 py-2 text-white text-sm font-medium rounded-md transition-colors duration-200"
+          style={{ backgroundColor: 'var(--accent-600)' }}
         >
           Export
         </button>
@@ -312,7 +342,8 @@ const SettingsPanel = ({ isDarkMode, setIsDarkMode, onClose, unifiedClient }) =>
           )}
           <button
             onClick={handleSave}
-            className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors duration-200 flex items-center space-x-2"
+            className="px-4 py-2 text-sm font-medium text-white rounded-md transition-colors duration-200 flex items-center space-x-2"
+            style={{ backgroundColor: 'var(--accent-600)' }}
           >
             <Save className="h-4 w-4" />
             <span>Save Settings</span>

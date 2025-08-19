@@ -78,11 +78,20 @@
   }
 
   .status-badge-info {
-    @apply status-badge bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200;
+    @apply status-badge;
+    background-color: var(--accent-100);
+    color: var(--accent-800-text, #1e40af);
   }
 
   .button-primary {
-    @apply bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-md transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed min-h-[44px] min-w-[44px];
+    @apply text-white font-medium py-2 px-4 rounded-md transition-colors duration-200 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed min-h-[44px] min-w-[44px];
+    background-color: var(--accent-600);
+  }
+  .button-primary:hover {
+    background-color: var(--accent-700);
+  }
+  .button-primary:focus-visible {
+    box-shadow: 0 0 0 2px var(--accent-500);
   }
 
   .button-secondary {
@@ -167,7 +176,11 @@
   }
 
   .mobile-button-primary {
-    @apply mobile-button bg-blue-600 hover:bg-blue-700 text-white;
+    @apply mobile-button text-white;
+    background-color: var(--accent-600);
+  }
+  .mobile-button-primary:hover {
+    background-color: var(--accent-700);
   }
 
   .mobile-button-secondary {
@@ -177,8 +190,14 @@
 
 @layer utilities {
   /* Custom utilities */
+  .accent-text { color: var(--accent-600); }
+  .dark .accent-text { color: var(--accent-400); }
+  .accent-border { border-color: var(--accent-500) !important; }
+  .accent-soft { background-color: var(--accent-50); color: var(--accent-700); border-color: var(--accent-200); }
+  .dark .accent-soft { background-color: var(--accent-900); color: var(--accent-300); border-color: var(--accent-800); }
   .text-gradient {
-    @apply bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent;
+    @apply bg-clip-text text-transparent;
+    background-image: linear-gradient(90deg, var(--accent-600), #a78bfa);
   }
 
   .glassmorphism {
@@ -250,6 +269,18 @@
   --color-success: #10b981;
   --color-warning: #f59e0b;
   --color-error: #ef4444;
+  /* Accent palette defaults (blue) */
+  --accent-50: #eff6ff;
+  --accent-100: #dbeafe;
+  --accent-200: #bfdbfe;
+  --accent-300: #93c5fd;
+  --accent-400: #60a5fa;
+  --accent-500: #3b82f6;
+  --accent-600: #2563eb;
+  --accent-700: #1d4ed8;
+  --accent-800: #1e40af;
+  --accent-900: #1e3a8a;
+  --accent-foreground: #ffffff;
 }
 
 /* Scrollbar styling */

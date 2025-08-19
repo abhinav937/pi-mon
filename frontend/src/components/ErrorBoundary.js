@@ -75,7 +75,8 @@ class ErrorBoundary extends React.Component {
             <div className="flex space-x-3">
               <button
                 onClick={this.handleRetry}
-                className="flex-1 flex items-center justify-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-md transition-colors duration-200"
+                className="flex-1 flex items-center justify-center px-4 py-2 text-white text-sm font-medium rounded-md transition-colors duration-200"
+                style={{ backgroundColor: 'var(--accent-600)' }}
               >
                 <RefreshCw className="h-4 w-4 mr-2" />
                 Retry

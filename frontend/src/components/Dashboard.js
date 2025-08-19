@@ -132,8 +132,8 @@ const Dashboard = ({ unifiedClient }) => {
         <div className="metric-card p-4 sm:p-6">
           <div className="flex items-center justify-between mb-3 sm:mb-4">
             <div className="flex items-center space-x-2 sm:space-x-3">
-              <div className="p-1.5 sm:p-2 bg-blue-100 dark:bg-blue-900 rounded-lg">
-                <Cpu className="h-4 w-4 sm:h-6 sm:w-6 text-blue-600 dark:text-blue-400" />
+              <div className="p-1.5 sm:p-2 accent-soft rounded-lg">
+                <Cpu className="h-4 w-4 sm:h-6 sm:w-6 accent-text" />
               </div>
               <div>
                 <p className="metric-label text-xs sm:text-sm">CPU Usage</p>
@@ -283,7 +283,7 @@ const Dashboard = ({ unifiedClient }) => {
             </div>
             <div>
               <span className="text-gray-500 dark:text-gray-400">↓ RX:</span>
-              <span className="ml-1 font-medium text-blue-600 dark:text-blue-400">
+              <span className="ml-1 font-medium accent-text">
                 {currentData.network?.bytes_recv_rate ? formatNetworkRate(currentData.network.bytes_recv_rate) : formatBytes(currentData.network?.bytes_recv || 0)}
               </span>
             </div>
@@ -307,7 +307,7 @@ const Dashboard = ({ unifiedClient }) => {
           
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
             <div className="text-center p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
-              <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">
+              <div className="text-2xl font-bold accent-text">
                 {metricsHistory.collection_status?.active ? (
                   <div className="w-3 h-3 sm:w-4 sm:h-4 rounded-full bg-green-500" />
                 ) : (

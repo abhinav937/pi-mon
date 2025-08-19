@@ -750,7 +750,7 @@ const ResourceChart = ({ unifiedClient }) => {
   }, [chartData, timeRange, lastUpdateTime]);
 
   const metrics = [
-    { id: 'cpu', name: 'CPU Usage', icon: TrendingUp, color: 'text-blue-600' },
+    { id: 'cpu', name: 'CPU Usage', icon: TrendingUp, color: 'accent-text' },
     { id: 'memory', name: 'Memory Usage', icon: TrendingUp, color: 'text-purple-600' },
     { id: 'temperature', name: 'Temperature', icon: TrendingUp, color: 'text-red-600' },
     { id: 'voltage', name: 'Core Voltage', icon: Bolt, color: 'text-green-600' },
@@ -793,7 +793,7 @@ const ResourceChart = ({ unifiedClient }) => {
               onClick={() => setSelectedMetric(metric.id)}
               className={`flex items-center space-x-2 px-3 sm:px-4 py-2 border-b-2 transition-all duration-200 ${
                 selectedMetric === metric.id
-                  ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+                  ? 'accent-border accent-text'
                   : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
               }`}
             >
@@ -829,7 +829,8 @@ const ResourceChart = ({ unifiedClient }) => {
               setIsLoadingHistorical(true);
               setTimeout(() => { fetchHistoricalData(); }, 100);
             }}
-            className="px-3 py-1 text-sm bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-all duration-200 flex items-center space-x-1 shadow-md"
+            className="px-3 py-1 text-sm text-white rounded-md transition-all duration-200 flex items-center space-x-1 shadow-md"
+            style={{ backgroundColor: 'var(--accent-600)' }}
             title="Refresh historical data"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -983,14 +984,14 @@ const ResourceChart = ({ unifiedClient }) => {
 
       {/* Real-time Status Indicator */}
       {lastUpdateTime && (
-        <div className="flex items-center justify-between p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+        <div className="flex items-center justify-between p-3 accent-soft border rounded-lg">
           <div className="flex items-center space-x-2">
             <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-            <span className="text-sm font-medium text-blue-700 dark:text-blue-300">
+            <span className="text-sm font-medium accent-text">
               Real-time monitoring active
             </span>
           </div>
-          <div className="text-xs text-blue-600 dark:text-blue-400">
+          <div className="text-xs accent-text">
             Last update: {formatRelativeTime(lastUpdateTime.getTime() / 1000)}
           </div>
         </div>

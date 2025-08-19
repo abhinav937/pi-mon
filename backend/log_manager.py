@@ -20,28 +20,73 @@ class LogManager:
         """Return a list of available log files"""
         results = []
         
+        # Curated list of important logs to surface
+        important_exact_names = {
+            'pi_monitor.log',
+            'syslog',
+            'auth.log',
+            'kern.log',
+            'daemon.log',
+            'messages',
+            'boot.log',
+            'dmesg',
+        }
+        important_prefixes = (
+            'syslog',  # capture syslog without rotations
+        )
+        
+        def is_important_log(filename: str) -> bool:
+            # Exclude rotated and compressed logs to keep the list clean
+            if filename.endswith('.gz'):
+                return False
+            # Exclude numeric rotations like syslog.1, auth.log.1, etc.
+            parts = filename.rsplit('.', 1)
+            if len(parts) == 2 and parts[1].isdigit():
+                return False
+            # Match curated exact names
+            if filename in important_exact_names:
+                return True
+            # Match curated prefixes (e.g., syslog)
+            if any(filename.startswith(prefix) for prefix in important_prefixes):
+                return True
+            return False
+        
         for base in ['/var/log', './logs', 'logs']:
             try:
                 if os.path.isdir(base):
                     for name in os.listdir(base):
-                        # Include common logs
-                        if any(name.startswith(prefix) for prefix in ('syslog', 'auth', 'kern', 'daemon')) or name.endswith('.log'):
-                            full = os.path.join(base, name)
-                            try:
-                                size_bytes = os.path.getsize(full)
-                            except Exception:
-                                size_bytes = 0
-                            results.append({'name': name, 'path': base, 'size': size_bytes})
+                        if not is_important_log(name):
+                            continue
+                        full = os.path.join(base, name)
+                        try:
+                            size_bytes = os.path.getsize(full)
+                        except Exception:
+                            size_bytes = 0
+                        results.append({'name': name, 'path': base, 'size': size_bytes})
             except Exception:
                 continue
         
-        # Include backend log if present
+        # Include backend log if present (ensures it appears even if not under the scanned dirs)
         if os.path.exists('pi_monitor.log'):
             try:
                 size_bytes = os.path.getsize('pi_monitor.log')
             except Exception:
                 size_bytes = 0
             results.append({'name': 'pi_monitor.log', 'path': '.', 'size': size_bytes})
+        
+        # Deduplicate by name (prefer shorter path like current dir)
+        deduped = {}
+        for entry in results:
+            name = entry.get('name')
+            if name not in deduped:
+                deduped[name] = entry
+        results = list(deduped.values())
+        
+        # Sort by priority
+        priority = {name: idx for idx, name in enumerate([
+            'pi_monitor.log', 'syslog', 'auth.log', 'kern.log', 'daemon.log', 'messages', 'boot.log', 'dmesg'
+        ])}
+        results.sort(key=lambda r: priority.get(r.get('name'), 999))
         
         return results
     

@@ -373,7 +373,9 @@ class PiMonitorHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self._set_common_headers()
         
-        log_name = self.path.split('/')[-1]
+        # Ensure we extract the log filename from the URL path without query params
+        parsed_url = urlparse(self.path)
+        log_name = parsed_url.path.split('/')[-1]
         lines = int(query_params.get('lines', ['100'])[0])
         response = self.server_instance.log_manager.read_log(log_name, lines)
         self.wfile.write(json.dumps(response).encode())

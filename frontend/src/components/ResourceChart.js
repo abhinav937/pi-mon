@@ -397,14 +397,16 @@ const ResourceChart = ({ unifiedClient }) => {
             legend: {
               position: 'top',
               labels: {
-                color: isDarkMode ? '#e5e7eb' : '#374151',
+                color: isDarkMode ? '#ffffff' : '#111827',
                 font: {
-                  size: 12,
-                  weight: '500',
+                  size: 13,
+                  weight: '600',
                 },
                 usePointStyle: true,
                 pointStyle: 'circle',
                 padding: 20,
+                boxWidth: 14,
+                boxHeight: 14,
               },
             },
             title: {
@@ -606,14 +608,16 @@ const ResourceChart = ({ unifiedClient }) => {
           legend: {
             position: 'top',
             labels: {
-              color: isDarkMode ? '#e5e7eb' : '#374151',
+              color: isDarkMode ? '#ffffff' : '#111827',
               font: {
-                size: 12,
-                weight: '500',
+                size: 13,
+                weight: '600',
               },
               usePointStyle: true,
               pointStyle: 'circle',
               padding: 20,
+              boxWidth: 14,
+              boxHeight: 14,
             },
           },
           title: {

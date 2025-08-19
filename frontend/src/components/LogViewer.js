@@ -7,7 +7,7 @@ import LoadingSpinner from './LoadingSpinner';
 
 const LogViewer = ({ unifiedClient }) => {
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedLog, setSelectedLog] = useState('system');
+  const [selectedLog, setSelectedLog] = useState('');
   const [logLevel, setLogLevel] = useState('all');
   const [maxLines, setMaxLines] = useState(100);
   const [autoRefresh, setAutoRefresh] = useState(true);
@@ -24,6 +24,30 @@ const LogViewer = ({ unifiedClient }) => {
       refetchInterval: 30000, // Refetch every 30 seconds
     }
   );
+
+  // Choose a sensible default log when the list loads or changes
+  useEffect(() => {
+    if (!availableLogs || availableLogs.length === 0) return;
+    // If current selection is still valid, keep it
+    if (selectedLog && availableLogs.some(l => l.name === selectedLog)) return;
+    const priority = [
+      'pi_monitor.log',
+      'syslog',
+      'journal',
+      'auth.log',
+      'kern.log',
+      'daemon.log',
+      'messages',
+      'boot.log',
+      'dmesg'
+    ];
+    const score = (name) => {
+      const idx = priority.indexOf(name);
+      return idx === -1 ? 999 : idx;
+    };
+    const sorted = [...availableLogs].sort((a, b) => score(a.name) - score(b.name));
+    setSelectedLog(sorted[0]?.name || availableLogs[0]?.name || '');
+  }, [availableLogs, selectedLog]);
 
   // Query for log content
   const { data: logData, isLoading, error, refetch } = useQuery(
@@ -261,7 +285,7 @@ const LogViewer = ({ unifiedClient }) => {
       <div className="metric-card">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-            {selectedLog} Log
+            {selectedLog ? `${selectedLog} Log` : 'Logs'}
           </h3>
           <div className="text-sm text-gray-500 dark:text-gray-400">
             {filteredLogs.length} entries

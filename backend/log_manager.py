@@ -7,6 +7,7 @@ Handles log file operations like reading, downloading, and clearing
 import os
 import subprocess
 import logging
+import shutil
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +75,10 @@ class LogManager:
                 size_bytes = 0
             results.append({'name': 'pi_monitor.log', 'path': '.', 'size': size_bytes})
         
+        # Include systemd journal as a pseudo-log if journalctl is available
+        if shutil.which('journalctl') is not None:
+            results.append({'name': 'journal', 'path': '[system]', 'size': 0})
+        
         # Deduplicate by name (prefer shorter path like current dir)
         deduped = {}
         for entry in results:
@@ -93,6 +98,12 @@ class LogManager:
     def read_log(self, log_name, lines=100):
         """Return last N lines of a specific log file"""
         try:
+            # Handle pseudo logs
+            if log_name == 'journal':
+                return self._read_journal(lines)
+            if log_name == 'dmesg' and not self._find_log_file('dmesg'):
+                return self._read_dmesg(lines)
+            
             log_file = self._find_log_file(log_name) or ('pi_monitor.log' if log_name == 'pi_monitor.log' and os.path.exists('pi_monitor.log') else None)
             
             if not log_file:
@@ -139,9 +150,16 @@ class LogManager:
     def download_log(self, request_handler, log_name):
         """Download a log file"""
         try:
+            # Handle pseudo logs
+            if log_name == 'journal' and shutil.which('journalctl') is not None:
+                self._stream_command_output(request_handler, ['journalctl', '-o', 'short-iso'], f'{log_name}.log')
+                return
+            if log_name == 'dmesg' and shutil.which('dmesg') is not None and not self._find_log_file('dmesg'):
+                self._stream_command_output(request_handler, ['dmesg'], f'{log_name}.log')
+                return
+
             # Find the log file
             log_file = self._find_log_file(log_name)
-            
             if not log_file:
                 request_handler._send_not_found(f"Log file {log_name} not found")
                 return
@@ -156,6 +174,8 @@ class LogManager:
     def clear_log(self, log_name):
         """Clear a log file"""
         try:
+            if log_name in ('journal', 'dmesg'):
+                return {'error': f"Cannot clear {log_name}. Use system tools to rotate or clear it."}
             # Find the log file
             log_file = self._find_log_file(log_name)
             
@@ -205,10 +225,24 @@ class LogManager:
                     break
                 request_handler.wfile.write(chunk)
     
+    def _stream_command_output(self, request_handler, command, filename):
+        """Stream command output as a downloadable file"""
+        request_handler.send_response(200)
+        request_handler.send_header('Content-type', 'text/plain')
+        request_handler.send_header('Content-Disposition', f'attachment; filename="{filename}"')
+        request_handler._set_common_headers()
+        try:
+            with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=False) as proc:
+                for chunk in iter(lambda: proc.stdout.read(8192), b''):
+                    request_handler.wfile.write(chunk)
+        except Exception as e:
+            logger.error(f"Streaming command failed: {e}")
+    
     def _tail_file(self, filepath, num_lines):
         """Get last N lines of a file efficiently"""
         try:
-            result = subprocess.run(['sudo', 'tail', '-n', str(num_lines), filepath], 
+            # Use tail without sudo to avoid privilege issues in non-interactive services
+            result = subprocess.run(['tail', '-n', str(num_lines), filepath], 
                                   capture_output=True, text=True, timeout=5)
             if result.returncode == 0:
                 return result.stdout
@@ -218,3 +252,53 @@ class LogManager:
         except Exception as e:
             logger.error(f"Error tailing file {filepath}: {str(e)}")
             return ''
+
+    def _read_journal(self, num_lines):
+        """Read last N lines from systemd journal if available"""
+        if shutil.which('journalctl') is None:
+            return {'error': 'journalctl not available'}
+        try:
+            result = subprocess.run(['journalctl', '-n', str(num_lines), '--no-pager', '-o', 'short-iso'],
+                                    capture_output=True, text=True, timeout=8)
+            content = result.stdout if result.returncode == 0 else ''
+        except Exception as e:
+            logger.error(f"Failed to read journal: {e}")
+            content = ''
+        return self._format_plain_text_entries('journal', content)
+
+    def _read_dmesg(self, num_lines):
+        """Read last N lines from dmesg output if file not present"""
+        if shutil.which('dmesg') is None:
+            return {'error': 'dmesg not available'}
+        try:
+            result = subprocess.run(['dmesg'], capture_output=True, text=True, timeout=5)
+            output = result.stdout if result.returncode == 0 else ''
+            # Take last N lines ourselves
+            content = '\n'.join(output.splitlines()[-num_lines:])
+        except Exception as e:
+            logger.error(f"Failed to read dmesg: {e}")
+            content = ''
+        return self._format_plain_text_entries('dmesg', content)
+
+    def _format_plain_text_entries(self, log_name, content):
+        entries = []
+        error_count = 0
+        warn_count = 0
+        for line in content.splitlines():
+            level = 'info'
+            low = line.lower()
+            if 'error' in low or ' err ' in low:
+                level = 'error'
+                error_count += 1
+            elif 'warn' in low:
+                level = 'warning'
+                warn_count += 1
+            entries.append({'level': level, 'message': line})
+        return {
+            'name': log_name,
+            'entries': entries,
+            'totalEntries': len(entries),
+            'errorCount': error_count,
+            'warningCount': warn_count,
+            'size': 0
+        }

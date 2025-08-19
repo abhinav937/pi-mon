@@ -590,10 +590,22 @@ const ResourceChart = ({ unifiedClient, isDarkMode }) => {
       dynamicYStep = 20;
     } else if (isCpuMetric) {
       const validCpuData = (chartData.cpu?.data || []).filter(val => val !== null && val !== undefined && !isNaN(val));
-      const maxCpu = validCpuData.length > 0 ? Math.max(...validCpuData) : null;
-      if (maxCpu != null && isFinite(maxCpu) && maxCpu <= 1.5) {
-        dynamicYMax = 1.5;
+      const maxCpu = validCpuData.length > 0 ? Math.max(...validCpuData) : 0;
+      const tenPercentHeadroom = maxCpu * 1.1;
+      const cappedMax = Math.min(100, tenPercentHeadroom);
+      const roundUp = (value, step) => Math.ceil(value / step) * step;
+      if (cappedMax <= 2) {
+        dynamicYMax = roundUp(cappedMax, 0.1);
         dynamicYStep = 0.1;
+      } else if (cappedMax <= 10) {
+        dynamicYMax = roundUp(cappedMax, 1);
+        dynamicYStep = 1;
+      } else if (cappedMax <= 50) {
+        dynamicYMax = roundUp(cappedMax, 5);
+        dynamicYStep = 5;
+      } else {
+        dynamicYMax = roundUp(cappedMax, 10);
+        dynamicYStep = 10;
       }
     }
     return {

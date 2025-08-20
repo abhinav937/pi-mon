@@ -971,8 +971,8 @@ configure_nginx() {
     tmp_conf="$(mktemp)"
 
     # Remove any certbot-managed site file for the same domain to avoid conflicts
-    if [ -n "$DOMAIN" ] && [ -e "$NGINX_SITES_ENABLED/$DOMAIN" ]; then run_cmd rm -f "$NGINX_SITES_ENABLED/$DOMAIN"; fi
-    if [ -n "$DOMAIN" ] && [ -e "$NGINX_SITES_AVAILABLE/$DOMAIN" ]; then run_cmd rm -f "$NGINX_SITES_AVAILABLE/$DOMAIN"; fi
+    # Note: Do not remove existing site files here; it breaks checksum diffing and
+    # forces unnecessary updates each run. We manage the target file directly below.
 
     # When SSL is enabled, ignore the static template and generate appropriate config
     if [ -f "$site_conf_src" ] && [ "$ENABLE_SSL" != true ]; then

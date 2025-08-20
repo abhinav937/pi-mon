@@ -1148,21 +1148,44 @@ install_cloudflared() {
     fi
     log info "Installing cloudflared"
     if command -v apt-get >/dev/null 2>&1; then
-        # Try official repo installer first
+        # Add Cloudflare repo (new method)
+        CODENAME="$(. /etc/os-release 2>/dev/null && echo "$VERSION_CODENAME")"
+        [ -n "$CODENAME" ] || CODENAME="$(lsb_release -cs 2>/dev/null || echo bullseye)"
+        if [ ! -f /usr/share/keyrings/cloudflare-main.gpg ]; then
+            if [ "$SILENT_OUTPUT" = true ]; then
+                run_cmd "curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | gpg --dearmor | tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null" || true
+            else
+                run_cmd curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg \| gpg --dearmor \| tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null || true
+            fi
+        fi
+        echo "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared ${CODENAME} main" | tee /etc/apt/sources.list.d/cloudflared.list >/dev/null
         if [ "$SILENT_OUTPUT" = true ]; then
-            run_cmd "curl -fsSL https://pkg.cloudflare.com/install.sh | bash - >> \"$LOG_FILE\" 2>&1" || true
+            run_cmd "apt-get update -y -qq >> \"$LOG_FILE\" 2>&1"
             run_cmd "apt-get install -y -qq cloudflared >> \"$LOG_FILE\" 2>&1" || true
         else
-            run_cmd curl -fsSL https://pkg.cloudflare.com/install.sh \| bash - || true
-            run_cmd apt-get install -y cloudflared || true
-        fi
-        if ! command -v cloudflared >/dev/null 2>&1; then
-            # Fallback to Debian package if repo failed
             run_cmd apt-get update -y
             run_cmd apt-get install -y cloudflared || true
         fi
-    else
-        log warn "apt-get not found; please install cloudflared manually for this OS"
+    fi
+    # Fallback: download static binary from GitHub releases
+    if ! command -v cloudflared >/dev/null 2>&1; then
+        ARCH="$(dpkg --print-architecture 2>/dev/null || uname -m)"
+        case "$ARCH" in
+            arm64|aarch64) BIN_URL="https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm64" ;;
+            armhf|armv7l|arm) BIN_URL="https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm" ;;
+            amd64|x86_64) BIN_URL="https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64" ;;
+            i386|i686) BIN_URL="https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-386" ;;
+            *) BIN_URL="" ;;
+        esac
+        if [ -n "$BIN_URL" ]; then
+            log info "Downloading cloudflared binary ($ARCH)"
+            if [ "$SILENT_OUTPUT" = true ]; then
+                run_cmd "curl -fsSL -o /usr/local/bin/cloudflared \"$BIN_URL\" >> \"$LOG_FILE\" 2>&1" || true
+            else
+                run_cmd curl -fsSL -o /usr/local/bin/cloudflared "$BIN_URL" || true
+            fi
+            run_cmd chmod +x /usr/local/bin/cloudflared || true
+        fi
     fi
     if ! command -v cloudflared >/dev/null 2>&1; then
         log error "cloudflared installation failed"; exit 2

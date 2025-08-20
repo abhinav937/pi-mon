@@ -1345,7 +1345,7 @@ Wants=network-online.target
 
 [Service]
 User=root
-ExecStart=/usr/bin/cloudflared --no-autoupdate tunnel run --token ${CF_TOKEN}
+ExecStart=/usr/bin/env cloudflared --no-autoupdate tunnel run --token ${CF_TOKEN}
 Restart=always
 RestartSec=5
 
@@ -1396,7 +1396,7 @@ Wants=network-online.target
 
 [Service]
 User=root
-ExecStart=/usr/bin/cloudflared --no-autoupdate tunnel --config ${CRED_DIR}/config.yml run
+ExecStart=/usr/bin/env cloudflared --no-autoupdate tunnel --config ${CRED_DIR}/config.yml run
 Restart=always
 RestartSec=5
 

@@ -43,6 +43,7 @@ FORCE_FRONTEND=false
 FORCE_BACKEND=false
 SILENT_OUTPUT=true
 SHOW_CONFIG=false
+NEED_FRONTEND_BUILD=false
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -264,6 +265,12 @@ fi
 
 FRONTEND_BUILT=false
 [ -f "$WEB_ROOT/index.html" ] && FRONTEND_BUILT=true
+
+# Determine if frontend needs building
+NEED_FRONTEND_BUILD=false
+if [ "$FRONTEND_BUILT" = false ] || [ "$FORCE_FRONTEND" = true ]; then
+    NEED_FRONTEND_BUILD=true
+fi
 
 BACKEND_ACCESSIBLE=false
 if curl -fsS "http://127.0.0.1:${BACKEND_PORT}/health" >/dev/null 2>&1; then BACKEND_ACCESSIBLE=true; fi

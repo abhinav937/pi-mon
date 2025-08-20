@@ -1048,8 +1048,97 @@ configure_nginx() {
     # Note: Do not remove existing site files here; it breaks checksum diffing and
     # forces unnecessary updates each run. We manage the target file directly below.
 
-    # When SSL is enabled (legacy) or Cloudflare is on, prefer simple HTTP config locally
-    if [ -f "$site_conf_src" ] && { [ "$ENABLE_SSL" != true ] || [ "$ENABLE_CLOUDFLARE" = true ]; }; then
+    # Detect existing Let's Encrypt cert for potential dual (HTTP+HTTPS) mode
+    local has_le_cert="false"
+    if [ -n "$DOMAIN" ] && [ -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" ] && [ -f "/etc/letsencrypt/live/${DOMAIN}/privkey.pem" ]; then
+        has_le_cert="true"
+    fi
+
+    # If Cloudflare Tunnel is enabled but a valid LE cert exists, expose both HTTP (for tunnel) and HTTPS (direct)
+    if [ "$ENABLE_CLOUDFLARE" = true ] && [ "$has_le_cert" = true ]; then
+        local LE_CERT="/etc/letsencrypt/live/${DOMAIN}/fullchain.pem"
+        local LE_KEY="/etc/letsencrypt/live/${DOMAIN}/privkey.pem"
+        cat > "$tmp_conf" <<EOF
+server {
+  listen ${NGINX_PORT};
+  server_name ${DOMAIN} ${STATIC_IP} localhost _;
+
+  root ${WEB_ROOT};
+  index index.html;
+
+  location / {
+    try_files $uri /index.html;
+  }
+
+  location /api/ {
+    proxy_pass http://127.0.0.1:${BACKEND_PORT}/api/;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+  }
+
+  location /health {
+    proxy_pass http://127.0.0.1:${BACKEND_PORT}/health;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+  }
+}
+
+server {
+  listen 443 ssl http2;
+  server_name ${DOMAIN} ${STATIC_IP} localhost _;
+
+  ssl_certificate ${LE_CERT};
+  ssl_certificate_key ${LE_KEY};
+
+  ssl_protocols TLSv1.2 TLSv1.3;
+  ssl_ciphers ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-AES128-SHA256:ECDHE-RSA-AES256-SHA384;
+  ssl_prefer_server_ciphers off;
+  ssl_session_cache shared:SSL:10m;
+  ssl_session_timeout 10m;
+
+  root ${WEB_ROOT};
+  index index.html;
+
+  add_header X-Frame-Options DENY;
+  add_header X-Content-Type-Options nosniff;
+  add_header X-XSS-Protection "1; mode=block";
+  add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+
+  location / {
+    try_files $uri /index.html;
+  }
+
+  location /api/ {
+    proxy_pass http://127.0.0.1:${BACKEND_PORT}/api/;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+  }
+
+  location /health {
+    proxy_pass http://127.0.0.1:${BACKEND_PORT}/health;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+  }
+}
+EOF
+    # Otherwise, when SSL is disabled or Cloudflare is enabled without LE, prefer simple HTTP config
+    elif [ -f "$site_conf_src" ] && { [ "$ENABLE_SSL" != true ] || [ "$ENABLE_CLOUDFLARE" = true ]; }; then
         cp "$site_conf_src" "$tmp_conf"
         sed -i -E "s/server_name[[:space:]].*;/server_name ${DOMAIN} ${STATIC_IP} localhost _; /" "$tmp_conf" || true
 		sed -i -E "s@root[[:space:]].*;@root ${WEB_ROOT};@" "$tmp_conf"

@@ -339,6 +339,8 @@ function App() {
                   onClick={toggleMobileMenu}
                   className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-200"
                   title="Toggle menu"
+                  aria-label="Toggle menu"
+                  aria-expanded={isMobileMenuOpen}
                 >
                   {isMobileMenuOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
                 </button>
@@ -349,20 +351,24 @@ function App() {
 
         {/* Mobile Menu Overlay */}
         {isMobileMenuOpen && (
-          <div className="md:hidden fixed inset-0 z-50 bg-black bg-opacity-50">
-            <div className="fixed inset-y-0 right-0 max-w-xs w-full bg-white dark:bg-gray-800 shadow-xl">
+          <div className="md:hidden fixed inset-0 z-50 bg-black bg-opacity-50" onClick={toggleMobileMenu} role="dialog" aria-modal="true" aria-label="Mobile menu">
+            <div
+              className="fixed inset-y-0 right-0 max-w-xs w-full bg-white dark:bg-gray-800 shadow-xl flex flex-col"
+              onClick={(e) => e.stopPropagation()}
+            >
               <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
                 <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Menu</h2>
                 <button
                   onClick={toggleMobileMenu}
                   className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 rounded-md"
+                  aria-label="Close menu"
                 >
                   <X className="h-6 w-6" />
                 </button>
               </div>
               
               {/* Mobile Navigation */}
-              <nav className="p-4 space-y-2">
+              <nav className="p-4 space-y-2 flex-1 overflow-y-auto">
                 {TABS.map((tab) => (
                   <button
                     key={tab.id}

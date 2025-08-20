@@ -526,10 +526,18 @@ configure_cloudflare_tunnel() {
         log error "Cloudflare mode requires a valid domain"; exit 2
     fi
 
+    log info "=== CLOUDFLARE TUNNEL SETUP ==="
+    log info "Step 1: Installing cloudflared..."
     install_cloudflared
 
     if [ -n "$CF_TOKEN" ]; then
-        log info "Configuring cloudflared service (token-based)"
+        log info "Step 2: Configuring cloudflared service (token-based)"
+        log info "  - Domain: $DOMAIN"
+        log info "  - Tunnel Name: $CF_TUNNEL_NAME"
+        log info "  - Token: ${CF_TOKEN:0:8}...${CF_TOKEN: -4}"
+        
+        # Enhanced service configuration with better logging
+        log info "Step 3: Creating systemd service configuration..."
         cat > /etc/systemd/system/cloudflared.service <<EOF
 [Unit]
 Description=Cloudflare Tunnel
@@ -541,19 +549,91 @@ User=root
 ExecStart=/usr/bin/env cloudflared --no-autoupdate tunnel run --token ${CF_TOKEN}
 Restart=always
 RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cloudflared
+
+# Environment variables for better debugging
+Environment=CLOUDFLARE_TUNNEL_DOMAIN=${DOMAIN}
+Environment=CLOUDFLARE_TUNNEL_NAME=${CF_TUNNEL_NAME}
 
 [Install]
 WantedBy=multi-user.target
 EOF
+        
+        log info "Step 4: Reloading systemd and enabling service..."
         run_cmd systemctl daemon-reload
         run_cmd systemctl enable cloudflared
-        run_cmd systemctl restart cloudflared
-        sleep 2
         
-        if ! systemctl is-active --quiet cloudflared; then
-            log error "cloudflared service failed to start. Check journalctl -u cloudflared"; exit 2
+        # Stop existing service if running
+        if systemctl is-active --quiet cloudflared; then
+            log info "Step 5: Stopping existing cloudflared service..."
+            run_cmd systemctl stop cloudflared
+            sleep 3
+        else
+            log info "Step 5: No existing service to stop"
         fi
-        log info "cloudflared is running via token"
+        
+        # Start fresh service
+        log info "Step 6: Starting cloudflared service..."
+        run_cmd systemctl start cloudflared
+        sleep 5
+        
+        # Verify service is running
+        log info "Step 7: Verifying service status..."
+        if ! systemctl is-active --quiet cloudflared; then
+            log error "cloudflared service failed to start. Check journalctl -u cloudflared"
+            log error "Service status:"
+            systemctl status cloudflared --no-pager -l || true
+            exit 2
+        fi
+        
+        log info "✓ cloudflared service started successfully"
+        
+        # Wait for tunnel to establish connection
+        log info "Step 8: Waiting for tunnel to establish connection to Cloudflare..."
+        log info "  This may take a few minutes as the tunnel connects to Cloudflare's edge network"
+        
+        local tunnel_ready=false
+        local attempts=0
+        local max_attempts=30
+        
+        while [ "$tunnel_ready" = false ] && [ $attempts -lt $max_attempts ]; do
+            attempts=$((attempts + 1))
+            log info "  Connection attempt $attempts/$max_attempts..."
+            
+            # Check if tunnel is responding locally
+            if curl -fsS --max-time 5 "http://localhost/health" >/dev/null 2>&1; then
+                log info "  ✓ Local tunnel endpoint responding"
+                
+                # Check DNS routing
+                log info "  Checking DNS routing to Cloudflare edge..."
+                local dns_check
+                dns_check=$(dig +short "$DOMAIN" 2>/dev/null | head -1 || echo "")
+                
+                if echo "$dns_check" | grep -q "104.21\|104.16\|104.32\|104.48\|104.64\|104.80\|104.96"; then
+                    log info "  ✓ DNS routing to Cloudflare edge detected"
+                    log info "  ✓ Current DNS: $dns_check"
+                    tunnel_ready=true
+                    break
+                else
+                    log info "  Waiting for DNS routing to update... (current: $dns_check)"
+                    log info "  This means Cloudflare is still updating their routing tables"
+                    sleep 10
+                fi
+            else
+                log info "  Waiting for tunnel to start locally..."
+                sleep 5
+            fi
+        done
+        
+        if [ "$tunnel_ready" = true ]; then
+            log info "✓ Cloudflare tunnel fully connected to edge network"
+        else
+            log warn "Tunnel may still be connecting - will verify in final check"
+        fi
+        
+        log info "=== TUNNEL SETUP COMPLETE ==="
         return 0
     fi
 
@@ -597,43 +677,124 @@ verify_stack() {
     fi
     
     if [ "$ENABLE_CLOUDFLARE" = true ]; then
-        log info "Cloudflare tunnel configured"
+        log info "=== CLOUDFLARE TUNNEL VERIFICATION ==="
+        
+        # Step 1: Check tunnel service status
+        log info "Step 1: Checking cloudflared service status..."
         if systemctl is-active --quiet cloudflared; then
-            log info "cloudflared service: active"
+            log info "✓ cloudflared service: active"
             
-            # Check tunnel connectivity and DNS
+            # Step 2: Check tunnel connectivity and DNS
             local host="${CF_HOSTNAME:-$DOMAIN}"
-            log info "Checking tunnel status for $host"
+            log info "Step 2: Checking tunnel status for $host"
             
-            # Check if tunnel is serving traffic
-            if curl -fsS --max-time 8 "https://$host/health" >/dev/null 2>&1; then
-                log info "Tunnel health check passed: https://$host/health"
+            # Get DNS records first to see current routing
+            log info "Step 3: Checking DNS routing configuration..."
+            local dns_records
+            dns_records=$(dig +short "$host" 2>/dev/null | tr '\n' ' ' || echo "DNS lookup failed")
+            log info "  Current DNS A records: $dns_records"
+            
+            # Check if DNS points to Cloudflare edge IPs
+            if echo "$dns_records" | grep -q "104.21\|104.16\|104.32\|104.48\|104.64\|104.80\|104.96"; then
+                log info "✓ DNS routing to Cloudflare edge detected"
                 
-                # Get DNS records to verify tunnel routing
-                local dns_records
-                dns_records=$(dig +short "$host" 2>/dev/null | tr '\n' ' ' || echo "DNS lookup failed")
-                log info "DNS A records: $dns_records"
-                
-                # Check if we're getting Cloudflare edge IPs
-                if echo "$dns_records" | grep -q "104.21\|104.16\|104.32\|104.48\|104.64\|104.80\|104.96"; then
-                    log info "Domain serving OK: https://$host/health"
-                    log info "Cloudflare edge detected"
+                # Step 4: Check if tunnel is serving HTTPS traffic
+                log info "Step 4: Testing HTTPS tunnel connectivity..."
+                if curl -fsS --max-time 8 "https://$host/health" >/dev/null 2>&1; then
+                    log info "✓ Tunnel HTTPS health check passed"
                     
-                    # Check for CF-Ray header
-                    if curl -fsS --max-time 8 -I "https://$host/health" 2>/dev/null | grep -q "CF-Ray"; then
-                        log info "Cloudflare CF-Ray present"
+                    # Step 5: Check for Cloudflare headers
+                    log info "Step 5: Verifying Cloudflare headers..."
+                    local cf_headers
+                    cf_headers=$(curl -fsS --max-time 8 -I "https://$host/health" 2>/dev/null || echo "")
+                    
+                    if echo "$cf_headers" | grep -q "CF-Ray"; then
+                        log info "✓ Cloudflare CF-Ray header present"
                     else
-                        log warn "CF-Ray header not detected"
+                        log warn "⚠ CF-Ray header missing - tunnel may not be fully connected"
                     fi
+                    
+                    if echo "$cf_headers" | grep -q "Server: cloudflare"; then
+                        log info "✓ Cloudflare server header present"
+                    else
+                        log warn "⚠ Cloudflare server header missing"
+                    fi
+                    
+                    log info "✓ Domain serving OK: https://$host/health"
+                    log info "✓ Cloudflare tunnel fully operational"
+                    
                 else
-                    log warn "DNS not pointing to Cloudflare edge IPs: $dns_records"
+                    log error "✗ Tunnel HTTPS health check failed - tunnel not serving traffic"
+                    log info "Attempting tunnel restart to fix issue..."
+                    run_cmd systemctl restart cloudflared
+                    sleep 5
+                    
+                    # Retry health check
+                    if curl -fsS --max-time 8 "https://$host/health" >/dev/null 2>&1; then
+                        log info "✓ Tunnel restored after restart"
+                    else
+                        log error "✗ Tunnel still not working after restart"
+                    fi
                 fi
+                
             else
-                log warn "Tunnel health check failed: https://$host/health"
+                log warn "⚠ DNS not pointing to Cloudflare edge IPs: $dns_records"
+                log warn "This means the tunnel is not properly connected to Cloudflare"
+                
+                # Check if tunnel is at least running locally
+                log info "Step 4: Checking local tunnel endpoint..."
+                if curl -fsS --max-time 8 "http://localhost/health" >/dev/null 2>&1; then
+                    log info "✓ Local tunnel endpoint working"
+                    log warn "⚠ But DNS routing is incorrect - tunnel needs to reconnect to Cloudflare"
+                else
+                    log error "✗ Local tunnel endpoint also failing"
+                fi
+                
+                # Attempt tunnel restart
+                log info "Step 5: Attempting tunnel restart to fix DNS routing..."
+                run_cmd systemctl restart cloudflared
+                sleep 10
+                
+                # Check DNS again
+                log info "Step 6: Re-checking DNS routing after restart..."
+                local new_dns_records
+                new_dns_records=$(dig +short "$host" 2>/dev/null | tr '\n' ' ' || echo "DNS lookup failed")
+                log info "  DNS after restart: $new_dns_records"
+                
+                if echo "$new_dns_records" | grep -q "104.21\|104.16\|104.32\|104.48\|104.64\|104.80\|104.96"; then
+                    log info "✓ DNS routing restored to Cloudflare edge"
+                else
+                    log error "✗ DNS routing still incorrect after restart"
+                fi
             fi
+            
         else
-            log error "cloudflared service: inactive"
+            log error "✗ cloudflared service: inactive"
+            log info "Starting cloudflared service..."
+            run_cmd systemctl start cloudflared
+            sleep 5
+            
+            if systemctl is-active --quiet cloudflared; then
+                log info "✓ cloudflared service started"
+            else
+                log error "✗ Failed to start cloudflared service"
+            fi
         fi
+        
+        # Final verification
+        log info "=== FINAL TUNNEL VERIFICATION ==="
+        if curl -fsS --max-time 8 "https://$host/health" >/dev/null 2>&1; then
+            log info "✓ Cloudflare tunnel fully operational"
+            log info "✓ Domain accessible via HTTPS"
+            log info "✓ Traffic routing through Cloudflare edge"
+            log info "✓ Dashboard should show active tunnel (not --)"
+        else
+            log error "✗ Cloudflare tunnel verification failed"
+            log error "Check tunnel configuration and Cloudflare dashboard"
+            log error "Dashboard may still show -- until tunnel fully connects"
+        fi
+        
+        log info "=== VERIFICATION COMPLETE ==="
     fi
 }
 

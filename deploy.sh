@@ -184,7 +184,9 @@ log() {
     # Concise colored header; message in white for contrast
     printf "%b[%s] %-5s%b %b%s%b\n" "$color" "$ts" "$tag" "$reset" "$text" "$*" "$reset"
     # Also append full message to log file
-    echo "[$ts] $tag $*" >> "$LOG_FILE" 2>/dev/null || true
+    if [ -n "${LOG_FILE:-}" ]; then
+        echo "[$ts] $tag $*" >> "$LOG_FILE" 2>/dev/null || true
+    fi
 }
 
 # Shorten long hashes for cleaner console output (keeps logs readable)

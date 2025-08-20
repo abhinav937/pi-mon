@@ -179,9 +179,9 @@
     "backend_port": "5001"
   },
   "cloudflare": {
-    "enable": false,
+    "enable": true,
     "hostname": "pi.cabhinav.com",
     "tunnel_name": "pi-monitor",
-    "token": ""
+    "token": "YOUR_CLOUDFLARE_TUNNEL_TOKEN_HERE"
   }
 }

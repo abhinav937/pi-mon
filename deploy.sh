@@ -493,25 +493,45 @@ install_cloudflared() {
     
     log info "Installing cloudflared"
     if command -v apt-get >/dev/null 2>&1; then
-        CODENAME="$(. /etc/os-release 2>/dev/null && echo "$VERSION_CODENAME")"
-        [ -n "$CODENAME" ] || CODENAME="$(lsb_release -cs 2>/dev/null || echo bullseye)"
-        
-        if [ ! -f /usr/share/keyrings/cloudflare-main.gpg ]; then
+        # Check if Cloudflare repository is already configured
+        if [ -f /usr/share/keyrings/cloudflare-main.gpg ] && [ -f /etc/apt/sources.list.d/cloudflared.list ]; then
+            log info "Cloudflare repository already configured, updating package lists..."
             if [ "$SILENT_OUTPUT" = true ]; then
-                run_cmd "curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | gpg --dearmor | tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null" || true
+                run_cmd "apt-get update -y -qq >> \"$LOG_FILE\" 2>&1"
+                run_cmd "apt-get install -y -qq cloudflared >> \"$LOG_FILE\" 2>&1" || true
             else
-                run_cmd curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg \| gpg --dearmor \| tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null || true
+                run_cmd apt-get update -y
+                run_cmd apt-get install -y cloudflared || true
             fi
-        fi
-        
-        echo "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared ${CODENAME} main" | tee /etc/apt/sources.list.d/cloudflared.list >/dev/null
-        
-        if [ "$SILENT_OUTPUT" = true ]; then
-            run_cmd "apt-get update -y -qq >> \"$LOG_FILE\" 2>&1"
-            run_cmd "apt-get install -y -qq cloudflared >> \"$LOG_FILE\" 2>&1" || true
         else
-            run_cmd apt-get update -y
-            run_cmd apt-get install -y cloudflared || true
+            # Create keyrings directory with proper permissions
+            if [ ! -d /usr/share/keyrings ]; then
+                run_cmd mkdir -p --mode=0755 /usr/share/keyrings
+            fi
+            
+            # Add Cloudflare GPG key
+            if [ ! -f /usr/share/keyrings/cloudflare-main.gpg ]; then
+                log info "Adding Cloudflare GPG key..."
+                if [ "$SILENT_OUTPUT" = true ]; then
+                    run_cmd "curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null" || true
+                else
+                    run_cmd curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg \| tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null || true
+                fi
+            fi
+            
+            # Add Cloudflare repository (using 'any' instead of specific codename for better compatibility)
+            log info "Adding Cloudflare repository..."
+            echo "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared any main" | tee /etc/apt/sources.list.d/cloudflared.list >/dev/null
+            
+            # Update package lists and install cloudflared
+            log info "Installing cloudflared package..."
+            if [ "$SILENT_OUTPUT" = true ]; then
+                run_cmd "apt-get update -y -qq >> \"$LOG_FILE\" 2>&1"
+                run_cmd "apt-get install -y -qq cloudflared >> \"$LOG_FILE\" 2>&1" || true
+            else
+                run_cmd apt-get update -y
+                run_cmd apt-get install -y cloudflared || true
+            fi
         fi
     fi
     

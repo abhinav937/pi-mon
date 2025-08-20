@@ -182,6 +182,6 @@
     "enable": true,
     "hostname": "pi.cabhinav.com",
     "tunnel_name": "pi-monitor",
-    "token": "YOUR_CLOUDFLARE_TUNNEL_TOKEN_HERE"
+    "token": "eyJhIjoiODM2NWU4YjQ5NDFmOWZiOWI2MDAxMTNkYmQ1ZDY5YmEiLCJ0IjoiNGM4ZGExYmEtYzAwZC00ODJkLThkODEtMmNmNDAzOWM3NGJkIiwicyI6Ik1UUmhORGRqWkdNdE1ERTNaQzAwTURWbUxXRXpNVGN0WkRVek1UQXhNemcwTm1WbSJ9"
   }
 }

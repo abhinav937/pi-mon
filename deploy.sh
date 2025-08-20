@@ -252,7 +252,20 @@ parse_args "$@"
 [ -n "$STATE_DIR" ] || STATE_DIR="$PI_MON_DIR/.deploy_state"
 
 LOG_FILE="$STATE_DIR/deploy.log"
-touch "$LOG_FILE" 2>/dev/null || true
+[ -f "$LOG_FILE" ] || touch "$LOG_FILE" 2>/dev/null || true
+
+# Auto-detect existing Nginx SSL/port to keep idempotence when no flags are passed
+SITE_NAME="pi-monitor"
+SITE_CONF_DST="$NGINX_SITES_AVAILABLE/$SITE_NAME"
+if [ -f "$SITE_CONF_DST" ]; then
+    if grep -qE 'listen[^;]*443.*ssl|ssl_certificate' "$SITE_CONF_DST"; then
+        # If an SSL site is already configured, stick with SSL unless explicitly overridden
+        if [ "$ENABLE_SSL" != true ]; then ENABLE_SSL=true; fi
+        if [ "$NGINX_PORT" = "80" ]; then NGINX_PORT="443"; fi
+    fi
+fi
+# If port 443 is selected, prefer SSL
+if [ "$NGINX_PORT" = "443" ] && [ "$ENABLE_SSL" != true ]; then ENABLE_SSL=true; fi
 
 # Minimal announcer (always prints)
 announce() {
@@ -413,7 +426,8 @@ generate_checksum() {
 generate_nginx_checksum() {
     local config_file="$1"
     if [ -f "$config_file" ]; then
-        sha256sum "$config_file" | awk '{print $1}'
+        # Include SSL enablement in hash to avoid mismatches when toggling
+        ( echo "ENABLE_SSL=$ENABLE_SSL"; cat "$config_file" ) | sha256sum | awk '{print $1}'
     else
         echo ""
     fi
@@ -539,7 +553,7 @@ if [ -d "$PI_MON_DIR/frontend" ]; then
         "node_modules build")
 fi
 
-CURRENT_FRONTEND_ENV_SIG=$(printf "%s|%s|%s" "$PRODUCTION_URL" "$BACKEND_PORT" "$NGINX_PORT" | sha256sum | awk '{print $1}')
+CURRENT_FRONTEND_ENV_SIG=$(printf "%s|%s|%s|%s" "$PRODUCTION_URL" "$BACKEND_PORT" "$NGINX_PORT" "$ENABLE_SSL" | sha256sum | awk '{print $1}')
 
 CURRENT_BACKEND_CHECKSUM=""
 if [ -d "$PI_MON_DIR/backend" ]; then

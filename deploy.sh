@@ -874,13 +874,13 @@ server {
   server_name ${DOMAIN};
   
 $(if [ "$FORCE_HTTPS_REDIRECT" = true ]; then
-echo "  return 301 https://\$server_name\$request_uri;"
+echo "  return 301 https://\$host\$request_uri;"
 else
 echo "  location /.well-known/acme-challenge/ { 
     root ${WEB_ROOT}; 
   }
   location / {
-    return 301 https://\$server_name\$request_uri;
+    return 301 https://\$host\$request_uri;
   }"
 fi)
 }

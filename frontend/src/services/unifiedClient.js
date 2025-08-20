@@ -8,158 +8,75 @@ const CONNECTION_STATES = {
   ERROR: 'error'
 };
 
-// Toggle debug logs: enabled in development, or when localStorage flag is set
 const DEBUG_ENABLED = process.env.NODE_ENV !== 'production' || (typeof window !== 'undefined' && localStorage.getItem('pi-monitor-debug') === '1');
 
-// Debug logging function
 const logDebug = (message, data = null, type = 'info') => {
   if (!DEBUG_ENABLED && type !== 'error') return;
   const timestamp = new Date().toISOString();
-  const logEntry = {
-    timestamp,
-    type,
-    message,
-    data
-  };
-  
-  if (DEBUG_ENABLED || type === 'error') {
-    // eslint-disable-next-line no-console
-    console.log(`[UnifiedClient Debug] ${message}`, logEntry);
-  }
-  
-  // Also log to localStorage for persistence across page reloads
+  const logEntry = { timestamp, type, message, data };
+  try { if (DEBUG_ENABLED || type === 'error') console.log(`[UnifiedClient Debug] ${message}`, logEntry); } catch (_) {}
   try {
     if (!DEBUG_ENABLED && type !== 'error') return;
     const existingLogs = JSON.parse(localStorage.getItem('pi-monitor-debug-logs') || '[]');
     existingLogs.push(logEntry);
-    // Keep only last 100 logs
-    if (existingLogs.length > 100) {
-      existingLogs.splice(0, existingLogs.length - 100);
-    }
+    if (existingLogs.length > 100) existingLogs.splice(0, existingLogs.length - 100);
     localStorage.setItem('pi-monitor-debug-logs', JSON.stringify(existingLogs));
-  } catch (error) {
-    console.warn('Failed to save debug log to localStorage:', error);
-  }
+  } catch (_) {}
 };
 
 class UnifiedClient {
   constructor(options = {}) {
     logDebug('Initializing UnifiedClient', { options });
-    
-    // Resolve API base URL. Prefer explicit env, else use Nginx proxy (port 80) in production
+
+    // Always prefer same-origin to avoid mixed content when served over HTTPS through Nginx
+    const sameOrigin = `${window.location.protocol}//${window.location.host}`; // includes port if present
     const envUrl = process.env.REACT_APP_SERVER_URL || process.env.REACT_APP_API_BASE_URL;
-    const inferredUrl = (() => {
-      const host = window.location.hostname;
-      const isHttps = window.location.protocol === 'https:';
-      // If running under CRA dev server (localhost:3000), default backend 5001
-      if (host === 'localhost' || host === '127.0.0.1') {
-        return `http://${host}:5001`;
-      }
-      // In production, use Nginx proxy on port 80 (no port number needed)
-      if (host !== 'localhost' && host !== '127.0.0.1') {
-        return `${isHttps ? 'https' : 'http'}://${host}`;
-      }
-      // Fallback to same-origin
-      return `${isHttps ? 'https' : 'http'}://${host}`;
-    })();
-    const domainUrl = envUrl || inferredUrl;
-    this.serverUrl = options.serverUrl || domainUrl;
+    const serverBase = options.serverUrl || envUrl || sameOrigin;
+
+    this.serverUrl = serverBase.replace(/\/$/, '');
     this.onConnectionChange = options.onConnectionChange || (() => {});
     this.onDataUpdate = options.onDataUpdate || (() => {});
     this.onError = options.onError || (() => {});
     this.connectionState = CONNECTION_STATES.DISCONNECTED;
     this.apiKey = localStorage.getItem('pi-monitor-api-key');
-    // Support multiple listeners and cache the latest stats
     this.dataListeners = new Set();
     this.latestStats = null;
-    
+
     logDebug('Client configuration', {
       serverUrl: this.serverUrl,
       hasApiKey: !!this.apiKey,
-      domainUrl,
-      hostname: window.location.hostname
+      hostname: window.location.hostname,
+      protocol: window.location.protocol
     });
-    
+
     this.httpClient = axios.create({
-      baseURL: this.serverUrl.replace(/\/$/, ''),
+      baseURL: this.serverUrl,
       timeout: 10000,
-      // Ensure we bypass any intermediary caches for dynamic data
       headers: {
         'Cache-Control': 'no-cache, no-store, max-age=0, must-revalidate',
-        'Pragma': 'no-cache',
-        'Expires': '0'
+        Pragma: 'no-cache',
+        Expires: '0'
       }
     });
-    
-    // Add request interceptor to include auth token and log requests
+
     this.httpClient.interceptors.request.use(
       (config) => {
-        logDebug('HTTP Request', {
-          method: config.method?.toUpperCase(),
-          url: config.url,
-          baseURL: config.baseURL,
-          fullURL: `${config.baseURL}${config.url}`,
-          headers: config.headers,
-          data: config.data,
-          params: config.params
-        });
-        
-        if (this.apiKey) {
-          config.headers.Authorization = `Bearer ${this.apiKey}`;
-          logDebug('Added api key to request', { hasApiKey: !!this.apiKey });
-        }
+        if (this.apiKey) config.headers.Authorization = `Bearer ${this.apiKey}`;
         return config;
       },
-      (error) => {
-        logDebug('Request interceptor error', { error: error.message }, 'error');
-        return Promise.reject(error);
-      }
+      (error) => Promise.reject(error)
     );
-    
-    // Add response interceptor to handle auth errors and log responses
+
     this.httpClient.interceptors.response.use(
-      (response) => {
-        logDebug('HTTP Response Success', {
-          status: response.status,
-          statusText: response.statusText,
-          url: response.config.url,
-          method: response.config.method?.toUpperCase(),
-          data: response.data,
-          headers: response.headers
-        });
-        return response;
-      },
+      (response) => response,
       async (error) => {
-        logDebug('HTTP Response Error', {
-          message: error.message,
-          status: error.response?.status,
-          statusText: error.response?.statusText,
-          url: error.config?.url,
-          method: error.config?.method?.toUpperCase(),
-          responseData: error.response?.data,
-          responseHeaders: error.response?.headers,
-          requestData: error.config?.data,
-          requestHeaders: error.config?.headers
-        }, 'error');
-        
         if (error.response?.status === 401) {
-          logDebug('Received 401 Unauthorized, attempting re-authentication');
-          // Token expired or invalid, try to re-authenticate
           try {
             await this.authenticate();
-            // Retry the original request
             const originalRequest = error.config;
-            if (this.apiKey) {
-              originalRequest.headers.Authorization = `Bearer ${this.apiKey}`;
-            }
-            logDebug('Retrying original request after re-authentication', {
-              url: originalRequest.url,
-              method: originalRequest.method
-            });
+            if (this.apiKey) originalRequest.headers.Authorization = `Bearer ${this.apiKey}`;
             return this.httpClient(originalRequest);
           } catch (authError) {
-            logDebug('Re-authentication failed', { error: authError.message }, 'error');
-            // Re-authentication failed
             this.setConnectionState(CONNECTION_STATES.ERROR);
             this.onError(authError);
           }
@@ -167,10 +84,10 @@ class UnifiedClient {
         return Promise.reject(error);
       }
     );
-    
+
     this.backendInfo = null;
     this.backendHeaders = {};
-    // Frontend polling interval (ms), default 5000, can be overridden by saved settings
+
     try {
       const savedSettingsRaw = localStorage.getItem('pi-monitor-settings');
       const savedSettings = savedSettingsRaw ? JSON.parse(savedSettingsRaw) : null;
@@ -188,24 +105,10 @@ class UnifiedClient {
         await this.authenticate();
       }
       const health = await this.checkHealth();
-      // Read version headers if available
-      try {
-        if (health && health.__headers) {
-          this.backendHeaders = health.__headers;
-        }
-      } catch (_) {}
-      // Fetch detailed version info (non-fatal)
-      try {
-        this.backendInfo = await this.getVersion();
-      } catch (e) {
-        logDebug('Version endpoint not available, will rely on headers', {}, 'error');
-      }
+      try { if (health && health.__headers) this.backendHeaders = health.__headers; } catch (_) {}
+      try { this.backendInfo = await this.getVersion(); } catch (_) {}
       this.setConnectionState(CONNECTION_STATES.CONNECTED);
-      // Seed with an initial stats fetch so consumers have data immediately
-      try {
-        const initialStats = await this.getSystemStats();
-        this.emitDataUpdate({ type: 'initial_stats', data: initialStats });
-      } catch (_) {}
+      try { const initialStats = await this.getSystemStats(); this.emitDataUpdate({ type: 'initial_stats', data: initialStats }); } catch (_) {}
       this.startPolling();
     } catch (error) {
       console.error('Failed to initialize connection:', error);
@@ -217,13 +120,11 @@ class UnifiedClient {
   async authenticate() {
     try {
       const response = await this.httpClient.post('/api/auth/token', {
-        api_key: this.apiKey || 'pi-monitor-api-key-2024'  // Use stored key or default
+        api_key: this.apiKey || 'pi-monitor-api-key-2024'
       });
-      
-      if (response.data.success) {
-        // Store the API key if not already stored
+      if (response.data?.success) {
         if (!this.apiKey) {
-          this.apiKey = 'pi-monitor-api-key-2024';  // Default key
+          this.apiKey = 'pi-monitor-api-key-2024';
           localStorage.setItem('pi-monitor-api-key', this.apiKey);
         }
       } else {
@@ -241,14 +142,9 @@ class UnifiedClient {
     }
   }
 
-  startPolling() {
-    this.schedulePolling();
-  }
-
+  startPolling() { this.schedulePolling(); }
   schedulePolling() {
-    if (this.pollingInterval) {
-      clearInterval(this.pollingInterval);
-    }
+    if (this.pollingInterval) clearInterval(this.pollingInterval);
     const intervalMs = Math.max(1000, Number(this.frontendPollMs) || 5000);
     this.pollingInterval = setInterval(async () => {
       try {
@@ -256,469 +152,57 @@ class UnifiedClient {
           const stats = await this.getSystemStats();
           this.emitDataUpdate({ type: 'periodic_update', data: stats });
         }
-      } catch (error) {
-        console.error('Polling error:', error);
-      }
+      } catch (_) {}
     }, intervalMs);
   }
 
   setFrontendPollingInterval(intervalMs) {
-    try {
-      const parsed = Math.max(1000, Number(intervalMs) || 5000);
-      this.frontendPollMs = parsed;
-      this.schedulePolling();
-      logDebug('Frontend polling interval updated', { intervalMs: parsed });
-      return true;
-    } catch (e) {
-      logDebug('Failed to update frontend polling interval', { error: e?.message }, 'error');
-      return false;
-    }
+    try { this.frontendPollMs = Math.max(1000, Number(intervalMs) || 5000); this.schedulePolling(); return true; } catch { return false; }
   }
 
-  async getSystemStats() {
-    try {
-      const response = await this.httpClient.get('/api/system', { params: { _ts: Date.now() } });
-      return response.data;
-    } catch (error) {
-      throw error;
-    }
-  }
-
-  async getSystemInfo() {
-    try {
-      const response = await this.httpClient.get('/api/system/info');
-      return response.data;
-    } catch (error) {
-      throw error;
-    }
-  }
-
-  async getEnhancedSystemStats() {
-    try {
-      const response = await this.httpClient.get('/api/system/enhanced', { params: { _ts: Date.now() } });
-      return response.data;
-    } catch (error) {
-      throw error;
-    }
-  }
-
-  async checkHealth() {
-    try {
-      const response = await this.httpClient.get('/health');
-      // Attach headers for version visibility to the return object
-      const data = response.data || {};
-      data.__headers = response.headers || {};
-      return data;
-    } catch (error) {
-      throw error;
-    }
-  }
-
-  async getVersion() {
-    try {
-      const response = await this.httpClient.get('/api/version');
-      // Save headers as well for convenience
-      this.backendHeaders = response.headers || {};
-      return response.data;
-    } catch (error) {
-      throw error;
-    }
-  }
-
-  getBackendInfo() {
-    return {
-      info: this.backendInfo,
-      headers: this.backendHeaders
-    };
-  }
-
-  async getServices() {
-    try {
-      const response = await this.httpClient.get('/api/services');
-      return response.data;
-    } catch (error) {
-      throw error;
-    }
-  }
-
-  async controlService(serviceName, action) {
-    try {
-      const response = await this.httpClient.post('/api/services', {
-        service_name: serviceName,
-        action: action
-      });
-      return response.data;
-    } catch (error) {
-      throw error;
-    }
-  }
-
-  async getMetricsHistory(minutes = 60) {
-    try {
-      const response = await this.httpClient.get(`/api/metrics/history?minutes=${minutes}`, { params: { _ts: Date.now() } });
-      return response.data;
-    } catch (error) {
-      throw error;
-    }
-  }
-
+  async getSystemStats() { const r = await this.httpClient.get('/api/system', { params: { _ts: Date.now() } }); return r.data; }
+  async getSystemInfo() { const r = await this.httpClient.get('/api/system/info'); return r.data; }
+  async getEnhancedSystemStats() { const r = await this.httpClient.get('/api/system/enhanced', { params: { _ts: Date.now() } }); return r.data; }
+  async checkHealth() { const r = await this.httpClient.get('/health'); const d = r.data || {}; d.__headers = r.headers || {}; return d; }
+  async getVersion() { const r = await this.httpClient.get('/api/version'); this.backendHeaders = r.headers || {}; return r.data; }
+  getBackendInfo() { return { info: this.backendInfo, headers: this.backendHeaders }; }
+  async getServices() { const r = await this.httpClient.get('/api/services'); return r.data; }
+  async controlService(serviceName, action) { const r = await this.httpClient.post('/api/services', { service_name: serviceName, action }); return r.data; }
+  async getMetricsHistory(minutes=60) { const r = await this.httpClient.get(`/api/metrics/history?minutes=${minutes}`, { params: { _ts: Date.now() } }); return r.data; }
   async getMetricsRange({ start, end, limit, offset } = {}) {
-    try {
-      const params = new URLSearchParams();
-      if (start != null) params.set('start', String(start));
-      if (end != null) params.set('end', String(end));
-      if (limit != null) params.set('limit', String(limit));
-      if (offset != null) params.set('offset', String(offset));
-      const qs = params.toString();
-      const url = `/api/metrics/range${qs ? `?${qs}` : ''}`;
-      const response = await this.httpClient.get(url);
-      return response.data;
-    } catch (error) {
-      throw error;
-    }
+    const params = new URLSearchParams();
+    if (start != null) params.set('start', String(start));
+    if (end != null) params.set('end', String(end));
+    if (limit != null) params.set('limit', String(limit));
+    if (offset != null) params.set('offset', String(offset));
+    const qs = params.toString();
+    const url = `/api/metrics/range${qs ? `?${qs}` : ''}`;
+    const r = await this.httpClient.get(url); return r.data;
   }
+  async getDatabaseStats() { const r = await this.httpClient.get('/api/metrics/database'); return r.data; }
+  async exportMetrics() { const r = await this.httpClient.get('/api/metrics/export'); return r.data; }
+  async clearMetrics() { const r = await this.httpClient.post('/api/metrics/clear'); return r.data; }
+  async updateMetricsInterval(intervalSeconds) { const r = await this.httpClient.post('/api/metrics/interval', { interval: intervalSeconds }); return r.data; }
+  async getMetricsInterval() { const r = await this.httpClient.get('/api/metrics/interval'); return r.data; }
+  async updateDataRetention(retentionHours) { const r = await this.httpClient.post('/api/metrics/retention', { retention_hours: retentionHours }); return r.data; }
+  async getDataRetention() { const r = await this.httpClient.get('/api/metrics/retention'); return r.data; }
+  async getNetworkInfo() { const r = await this.httpClient.get('/api/network'); return r.data; }
+  async getNetworkStats() { const r = await this.httpClient.get('/api/network/stats'); return r.data; }
+  async getAvailableLogs() { const r = await this.httpClient.get('/api/logs'); return r.data; }
+  async getLogContent(logName, maxLines=100) { const r = await this.httpClient.get(`/api/logs/${logName}?lines=${maxLines}`); return r.data; }
+  async downloadLog(logName) { const r = await this.httpClient.get(`/api/logs/${logName}/download`, { responseType: 'text' }); return r.data; }
+  async clearLog(logName) { const r = await this.httpClient.post(`/api/logs/${logName}/clear`); return r.data; }
+  async getPowerStatus() { const r = await this.httpClient.get('/api/power'); return r.data; }
+  async executePowerAction(action, delay=0) { const map = { shutdown:'/api/power/shutdown', restart:'/api/power/restart', sleep:'/api/power/sleep' }; const endpoint = map[action]; if (!endpoint) throw new Error(`Unknown power action: ${action}`); const r = await this.httpClient.post(endpoint, { action, delay }); return r.data; }
+  async shutdown() { const r = await this.httpClient.post('/api/power/shutdown'); return r.data; }
+  async restart() { const r = await this.httpClient.post('/api/power/restart'); return r.data; }
+  async sleep() { const r = await this.httpClient.post('/api/power/sleep'); return r.data; }
+  async refresh() { const r = await this.httpClient.get('/api/refresh'); return r.data; }
+  getConnectionState() { return this.connectionState; }
 
-  async getDatabaseStats() {
-    try {
-      const response = await this.httpClient.get('/api/metrics/database');
-      return response.data;
-    } catch (error) {
-      throw error;
-    }
-  }
-
-  async exportMetrics() {
-    try {
-      const response = await this.httpClient.get('/api/metrics/export');
-      return response.data;
-    } catch (error) {
-      throw error;
-    }
-  }
-
-  async clearMetrics() {
-    try {
-      const response = await this.httpClient.post('/api/metrics/clear');
-      return response.data;
-    } catch (error) {
-      throw error;
-    }
-  }
-
-  async updateMetricsInterval(intervalSeconds) {
-    try {
-      const response = await this.httpClient.post('/api/metrics/interval', { interval: intervalSeconds });
-      return response.data;
-    } catch (error) {
-      throw error;
-    }
-  }
-
-  async getMetricsInterval() {
-    try {
-      const response = await this.httpClient.get('/api/metrics/interval');
-      return response.data;
-    } catch (error) {
-      throw error;
-    }
-  }
-
-  async updateDataRetention(retentionHours) {
-    try {
-      const response = await this.httpClient.post('/api/metrics/retention', { retention_hours: retentionHours });
-      return response.data;
-    } catch (error) {
-      throw error;
-    }
-  }
-
-  async getDataRetention() {
-    try {
-      const response = await this.httpClient.get('/api/metrics/retention');
-      return response.data;
-    } catch (error) {
-      throw error;
-    }
-  }
-
-  // Network monitoring methods
-  async getNetworkInfo() {
-    try {
-      const response = await this.httpClient.get('/api/network');
-      return response.data;
-    } catch (error) {
-      throw error;
-    }
-  }
-
-  async getNetworkStats() {
-    try {
-      const response = await this.httpClient.get('/api/network/stats');
-      return response.data;
-    } catch (error) {
-      throw error;
-    }
-  }
-
-  // Log viewing methods
-  async getAvailableLogs() {
-    try {
-      const response = await this.httpClient.get('/api/logs');
-      return response.data;
-    } catch (error) {
-      throw error;
-    }
-  }
-
-  async getLogContent(logName, maxLines = 100) {
-    try {
-      const response = await this.httpClient.get(`/api/logs/${logName}?lines=${maxLines}`);
-      return response.data;
-    } catch (error) {
-      throw error;
-    }
-  }
-
-  async downloadLog(logName) {
-    try {
-      const response = await this.httpClient.get(`/api/logs/${logName}/download`, {
-        responseType: 'text'
-      });
-      return response.data;
-    } catch (error) {
-      throw error;
-    }
-  }
-
-  async clearLog(logName) {
-    try {
-      const response = await this.httpClient.post(`/api/logs/${logName}/clear`);
-      return response.data;
-    } catch (error) {
-      throw error;
-    }
-  }
-
-  // Power management methods
-  async getPowerStatus() {
-    try {
-      logDebug('Getting power status from backend');
-      const response = await this.httpClient.get('/api/power');
-      logDebug('Power status response received', { 
-        status: response.status,
-        data: response.data 
-      });
-      return response.data;
-    } catch (error) {
-      logDebug('Failed to get power status', { 
-        error: error.message,
-        status: error.response?.status,
-        responseData: error.response?.data
-      }, 'error');
-      throw error;
-    }
-  }
-
-  async executePowerAction(action, delay = 0) {
-    try {
-      logDebug('Executing power action', { action, delay });
-      
-      let endpoint = '';
-      let data = { action, delay };
-      
-      switch (action) {
-        case 'shutdown':
-          endpoint = '/api/power/shutdown';
-          break;
-        case 'restart':
-          endpoint = '/api/power/restart';
-          break;
-        case 'sleep':
-          endpoint = '/api/power/sleep';
-          break;
-        default:
-          const error = `Unknown power action: ${action}`;
-          logDebug('Unknown power action requested', { action }, 'error');
-          throw new Error(error);
-      }
-      
-      logDebug('Power action endpoint determined', { 
-        action, 
-        endpoint, 
-        fullUrl: `${this.serverUrl}${endpoint}`,
-        data 
-      });
-      
-      const response = await this.httpClient.post(endpoint, data);
-      logDebug('Power action executed successfully', { 
-        action,
-        response: {
-          status: response.status,
-          data: response.data
-        }
-      });
-      return response.data;
-    } catch (error) {
-      logDebug('Power action execution failed', { 
-        action,
-        delay,
-        error: error.message,
-        errorStatus: error.response?.status,
-        errorResponse: error.response?.data,
-        errorStack: error.stack
-      }, 'error');
-      throw error;
-    }
-  }
-
-  async shutdown() {
-    try {
-      logDebug('Executing shutdown via legacy method');
-      const response = await this.httpClient.post('/api/power/shutdown');
-      logDebug('Shutdown executed successfully via legacy method', { 
-        status: response.status,
-        data: response.data 
-      });
-      return response.data;
-    } catch (error) {
-      logDebug('Shutdown failed via legacy method', { 
-        error: error.message,
-        status: error.response?.status,
-        responseData: error.response?.data
-      }, 'error');
-      throw error;
-    }
-  }
-
-  async restart() {
-    try {
-      logDebug('Executing restart via legacy method');
-      const response = await this.httpClient.post('/api/power/restart');
-      logDebug('Restart executed successfully via legacy method', { 
-        status: response.status,
-        data: response.data 
-      });
-      return response.data;
-    } catch (error) {
-      logDebug('Restart failed via legacy method', { 
-        error: error.message,
-        status: error.response?.status,
-        responseData: error.response?.data
-      }, 'error');
-      throw error;
-    }
-  }
-
-  async sleep() {
-    try {
-      logDebug('Executing sleep via legacy method');
-      const response = await this.httpClient.post('/api/power/sleep');
-      logDebug('Sleep executed successfully via legacy method', { 
-        status: response.status,
-        data: response.data 
-      });
-      return response.data;
-    } catch (error) {
-      logDebug('Sleep failed via legacy method', { 
-        error: error.message,
-        status: error.response?.status,
-        responseData: error.response?.data
-      }, 'error');
-      throw error;
-    }
-  }
-
-  // Utility methods
-  async refresh() {
-    try {
-      const response = await this.httpClient.get('/api/refresh');
-      return response.data;
-    } catch (error) {
-      throw error;
-    }
-  }
-
-  getConnectionState() {
-    return this.connectionState;
-  }
-
-  // Debug utility methods
-  getDebugLogs() {
-    try {
-      const logs = JSON.parse(localStorage.getItem('pi-monitor-debug-logs') || '[]');
-      return logs;
-    } catch (error) {
-      logDebug('Failed to retrieve debug logs', { error: error.message }, 'error');
-      return [];
-    }
-  }
-
-  clearDebugLogs() {
-    try {
-      localStorage.removeItem('pi-monitor-debug-logs');
-      logDebug('Debug logs cleared');
-      return true;
-    } catch (error) {
-      logDebug('Failed to clear debug logs', { error: error.message }, 'error');
-      return false;
-    }
-  }
-
-  getDebugSummary() {
-    const logs = this.getDebugLogs();
-    const summary = {
-      totalLogs: logs.length,
-      errorLogs: logs.filter(log => log.type === 'error').length,
-      infoLogs: logs.filter(log => log.type === 'info').length,
-      recentErrors: logs.filter(log => log.type === 'error').slice(-5),
-      recentRequests: logs.filter(log => log.message.includes('HTTP Request')).slice(-5),
-      recentResponses: logs.filter(log => log.message.includes('HTTP Response')).slice(-5)
-    };
-    return summary;
-  }
-
-  disconnect() {
-    if (this.pollingInterval) {
-      clearInterval(this.pollingInterval);
-    }
-    this.setConnectionState(CONNECTION_STATES.DISCONNECTED);
-  }
-
-  // New: publish-subscribe for data updates so multiple components can listen
-  addDataListener(listener) {
-    if (typeof listener !== 'function') return () => {};
-    this.dataListeners.add(listener);
-    return () => {
-      try {
-        this.dataListeners.delete(listener);
-      } catch (_) {}
-    };
-  }
-
-  emitDataUpdate(payload) {
-    try {
-      // Cache latest stats for fast hydration on mount
-      const data = payload?.data ?? payload;
-      if (data && typeof data === 'object') {
-        this.latestStats = data;
-      }
-    } catch (_) {}
-    // Notify subscribers
-    try {
-      this.dataListeners.forEach((listener) => {
-        try { listener(payload); } catch (e) { /* noop */ }
-      });
-    } catch (_) {}
-    // Back-compat: also call single handler if someone set it
-    if (this.onDataUpdate && typeof this.onDataUpdate === 'function') {
-      try { this.onDataUpdate(payload); } catch (_) {}
-    }
-  }
-
-  // New: expose latest stats snapshot
-  getLatestStats() {
-    return this.latestStats;
-  }
+  addDataListener(listener) { if (typeof listener !== 'function') return () => {}; this.dataListeners.add(listener); return () => { try { this.dataListeners.delete(listener); } catch {} }; }
+  emitDataUpdate(payload) { try { const data = payload?.data ?? payload; if (data && typeof data === 'object') this.latestStats = data; } catch {} this.dataListeners.forEach((l)=>{ try{ l(payload);}catch{} }); if (this.onDataUpdate && typeof this.onDataUpdate === 'function') { try { this.onDataUpdate(payload); } catch {} } }
+  getLatestStats() { return this.latestStats; }
 }
 
 export { UnifiedClient, CONNECTION_STATES }; 

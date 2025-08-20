@@ -856,7 +856,8 @@ configure_nginx() {
     local tmp_conf
     tmp_conf="$(mktemp)"
 
-    if [ -f "$site_conf_src" ]; then
+    # When SSL is enabled, ignore the static template and generate appropriate config
+    if [ -f "$site_conf_src" ] && [ "$ENABLE_SSL" != true ]; then
         cp "$site_conf_src" "$tmp_conf"
         sed -i -E "s/server_name[[:space:]].*;/server_name ${DOMAIN};/" "$tmp_conf" || true
         sed -i -E "s@root[[:space:]].*;@root ${WEB_ROOT};@" "$tmp_conf"
@@ -1015,6 +1016,10 @@ configure_firewall() {
         if ufw status 2>/dev/null | grep -qi active; then
             log info "Configuring UFW to allow HTTP (80/tcp)"
             run_cmd ufw allow 80/tcp || true
+            if [ "$ENABLE_SSL" = true ]; then
+                log info "Configuring UFW to allow HTTPS (443/tcp)"
+                run_cmd ufw allow 443/tcp || true
+            fi
         fi
     fi
     # firewalld (CentOS/RHEL variants)
@@ -1022,6 +1027,10 @@ configure_firewall() {
         if firewall-cmd --state >/dev/null 2>&1; then
             log info "Configuring firewalld to allow HTTP (80/tcp)"
             run_cmd firewall-cmd --permanent --add-service=http || true
+            if [ "$ENABLE_SSL" = true ]; then
+                log info "Configuring firewalld to allow HTTPS (443/tcp)"
+                run_cmd firewall-cmd --permanent --add-service=https || true
+            fi
             run_cmd firewall-cmd --reload || true
         fi
     fi
@@ -1039,6 +1048,7 @@ verify_stack() {
         journalctl -u pi-monitor-backend.service --no-pager -n 20 || true
         exit 1
     fi
+    # Backend health (always http directly on backend port)
     if ! curl -fsS "http://127.0.0.1:${BACKEND_PORT}/health" >/dev/null 2>&1; then
         log error "Backend health check failed"
         if command -v ss >/dev/null 2>&1; then ss -tlnp | grep ":${BACKEND_PORT}" || true; else netstat -tlnp 2>/dev/null | grep ":${BACKEND_PORT}" || true; fi
@@ -1047,11 +1057,27 @@ verify_stack() {
     if ! systemctl is-active --quiet nginx; then
         log error "Nginx is not running"; systemctl status nginx --no-pager -l || true; exit 1
     fi
-    if ! curl -fsS "http://localhost:${NGINX_PORT}/" >/dev/null 2>&1; then
+    # Frontend through nginx (http or https depending on port)
+    if [ "$ENABLE_SSL" = true ]; then
+        ROOT_URL="https://localhost:${NGINX_PORT}/"
+        CURL_FLAGS="-kfsS"   # -k to allow self-signed certs
+    else
+        ROOT_URL="http://localhost:${NGINX_PORT}/"
+        CURL_FLAGS="-fsS"
+    fi
+    if ! curl $CURL_FLAGS "$ROOT_URL" >/dev/null 2>&1; then
         log warn "Frontend root check failed (may be starting). Re-testing Nginx config"
         nginx -t || true
     fi
-    if ! curl -fsS "http://localhost:${NGINX_PORT}/health" >/dev/null 2>&1; then
+    # Proxy health through nginx
+    if [ "$ENABLE_SSL" = true ]; then
+        PROXY_HEALTH_URL="https://localhost:${NGINX_PORT}/health"
+        CURL_FLAGS="-kfsS"
+    else
+        PROXY_HEALTH_URL="http://localhost:${NGINX_PORT}/health"
+        CURL_FLAGS="-fsS"
+    fi
+    if ! curl $CURL_FLAGS "$PROXY_HEALTH_URL" >/dev/null 2>&1; then
         log error "Nginx proxy to /health failed"; exit 1
     fi
 

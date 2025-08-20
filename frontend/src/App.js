@@ -78,9 +78,10 @@ function App({ onLogout, isWebAuthnAuthenticated }) {
   // Initialize unified client with better error handling
   useEffect(() => {
     const client = new UnifiedClient({
-      serverUrl: process.env.REACT_APP_SERVER_URL === 'dynamic' 
-        ? `http://${window.location.hostname}` 
-        : (process.env.REACT_APP_SERVER_URL || `http://${window.location.hostname}`),
+      // Prefer same-origin so protocol/port match the page (avoids mixed content over HTTPS)
+      serverUrl: process.env.REACT_APP_SERVER_URL === 'dynamic'
+        ? `${window.location.protocol}//${window.location.host}`
+        : (process.env.REACT_APP_SERVER_URL || `${window.location.protocol}//${window.location.host}`),
       onConnectionChange: (status) => {
         setConnectionStatus(status);
         if (status === 'connected') {

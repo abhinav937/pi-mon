@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Install jq if not present
 command -v jq >/dev/null || {
-  log info "Installing jq for JSON processing"
+  echo "Installing jq for JSON processing"
   sudo apt update && sudo apt install jq -y
 }
 

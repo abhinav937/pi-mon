@@ -170,6 +170,19 @@ class WebAuthnManager:
         
         return self.db.create_user(username)
     
+    def _base64url_to_base64(self, base64url: str) -> str:
+        """Convert base64url to base64 for decoding"""
+        base64_str = base64url.replace('-', '+').replace('_', '/')
+        # Add padding if needed
+        padding = 4 - (len(base64_str) % 4)
+        if padding != 4:
+            base64_str += '=' * padding
+        return base64_str
+    
+    def _base64_to_base64url(self, data: bytes) -> str:
+        """Convert bytes to base64url encoding"""
+        return base64.b64encode(data).decode('utf-8').replace('+', '-').replace('/', '_').replace('=', '')
+    
     def generate_registration_options(self, username: str) -> Dict[str, Any]:
         """Generate WebAuthn registration options"""
         try:
@@ -183,9 +196,12 @@ class WebAuthnManager:
             exclude_credentials = []
             
             for cred in existing_creds:
+                # Convert stored base64url credential ID back to bytes
+                cred_id_base64 = self._base64url_to_base64(cred['credential_id'])
+                
                 exclude_credentials.append(
                     PublicKeyCredentialDescriptor(
-                        id=base64.b64decode(cred['credential_id']),
+                        id=base64.b64decode(cred_id_base64),
                         transports=[
                             AuthenticatorTransport.USB,
                             AuthenticatorTransport.NFC,
@@ -219,13 +235,13 @@ class WebAuthnManager:
             return {
                 'success': True,
                 'options': {
-                    'challenge': base64.b64encode(options.challenge).decode('utf-8'),
+                    'challenge': self._base64_to_base64url(options.challenge),
                     'rp': {
                         'name': options.rp.name,
                         'id': options.rp.id,
                     },
                     'user': {
-                        'id': base64.b64encode(options.user.id).decode('utf-8'),
+                        'id': self._base64_to_base64url(options.user.id),
                         'name': options.user.name,
                         'displayName': options.user.display_name,
                     },
@@ -236,7 +252,7 @@ class WebAuthnManager:
                     'timeout': options.timeout,
                     'excludeCredentials': [
                         {
-                            'id': base64.b64encode(cred.id).decode('utf-8'),
+                            'id': self._base64_to_base64url(cred.id),
                             'type': 'public-key',
                             'transports': [t.value for t in cred.transports] if cred.transports else []
                         }
@@ -262,8 +278,21 @@ class WebAuthnManager:
             if not expected_challenge:
                 return {'error': 'Challenge not found or expired'}
             
-            # Convert credential data
-            reg_credential = RegistrationCredential.parse_raw(json.dumps(credential))
+            # Convert credential data - handle both old and new webauthn library versions
+            try:
+                # Try new method first (webauthn >= 1.11.0)
+                # Convert base64url to base64 for decoding
+                raw_id_base64 = self._base64url_to_base64(credential['rawId'])
+                
+                reg_credential = RegistrationCredential(
+                    id=credential['id'],
+                    raw_id=base64.b64decode(raw_id_base64),
+                    response=credential['response'],
+                    type=credential['type']
+                )
+            except (TypeError, AttributeError):
+                # Fallback to old method for compatibility
+                reg_credential = RegistrationCredential.parse_raw(json.dumps(credential))
             
             verification = verify_registration_response(
                 credential=reg_credential,
@@ -273,8 +302,8 @@ class WebAuthnManager:
             )
             
             if verification.verified:
-                # Store the credential
-                credential_id = base64.b64encode(verification.credential_id).decode('utf-8')
+                # Store the credential - use base64url encoding for consistency
+                credential_id = self._base64_to_base64url(verification.credential_id)
                 public_key = base64.b64encode(verification.credential_public_key).decode('utf-8')
                 
                 cred_id = self.db.store_credential(
@@ -313,9 +342,12 @@ class WebAuthnManager:
                 if user:
                     user_creds = self.db.get_user_credentials(user['id'])
                     for cred in user_creds:
+                        # Convert stored base64url credential ID back to bytes
+                        cred_id_base64 = self._base64url_to_base64(cred['credential_id'])
+                        
                         allow_credentials.append(
                             PublicKeyCredentialDescriptor(
-                                id=base64.b64decode(cred['credential_id']),
+                                id=base64.b64decode(cred_id_base64),
                                 transports=[
                                     AuthenticatorTransport.USB,
                                     AuthenticatorTransport.NFC,
@@ -332,19 +364,19 @@ class WebAuthnManager:
                 user_verification=UserVerificationRequirement.PREFERRED,
             )
             
-            # Store challenge
-            challenge_key = f"auth_challenge_{base64.b64encode(options.challenge).decode('utf-8')[:16]}"
-            self._store_challenge(challenge_key, options.challenge)
+                            # Store challenge
+                challenge_key = f"auth_challenge_{self._base64_to_base64url(options.challenge)[:16]}"
+                self._store_challenge(challenge_key, options.challenge)
             
             return {
                 'success': True,
                 'options': {
-                    'challenge': base64.b64encode(options.challenge).decode('utf-8'),
+                    'challenge': self._base64_to_base64url(options.challenge),
                     'timeout': options.timeout,
                     'rpId': options.rp_id,
                     'allowCredentials': [
                         {
-                            'id': base64.b64encode(cred.id).decode('utf-8'),
+                            'id': self._base64_to_base64url(cred.id),
                             'type': 'public-key',
                             'transports': [t.value for t in cred.transports] if cred.transports else []
                         }
@@ -367,11 +399,24 @@ class WebAuthnManager:
             if not expected_challenge:
                 return {'error': 'Challenge not found or expired'}
             
-            # Convert credential data
-            auth_credential = AuthenticationCredential.parse_raw(json.dumps(credential))
+            # Convert credential data - handle both old and new webauthn library versions
+            try:
+                # Try new method first (webauthn >= 1.11.0)
+                # Convert base64url to base64 for decoding
+                raw_id_base64 = self._base64url_to_base64(credential['rawId'])
+                
+                auth_credential = AuthenticationCredential(
+                    id=credential['id'],
+                    raw_id=base64.b64decode(raw_id_base64),
+                    response=credential['response'],
+                    type=credential['type']
+                )
+            except (TypeError, AttributeError):
+                # Fallback to old method for compatibility
+                auth_credential = AuthenticationCredential.parse_raw(json.dumps(credential))
             
-            # Get credential from database
-            credential_id = base64.b64encode(auth_credential.raw_id).decode('utf-8')
+            # Get credential from database - convert to base64url for database lookup
+            credential_id = self._base64_to_base64url(auth_credential.raw_id)
             stored_cred = self.db.get_credential_by_id(credential_id)
             
             if not stored_cred:

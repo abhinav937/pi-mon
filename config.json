@@ -182,6 +182,11 @@
     "enable": true,
     "hostname": "pi.cabhinav.com",
     "tunnel_name": "pi-monitor",
-    "token": "eyJhIjoiODM2NWU4YjQ5NDFmOWZiOWI2MDAxMTNkYmQ1ZDY5YmEiLCJ0IjoiNGM4ZGExYmEtYzAwZC00ODJkLThkODEtMmNmNDAzOWM3NGJkIiwicyI6Ik1UUmhORGRqWkdNdE1ERTNaQzAwTURWbUxXRXpNVGN0WkRVek1UQXhNemcwTm1WbSJ9"
+    "token": "eyJhIjoiODM2NWU4YjQ5NDFmOWZiOWI2MDAxMTNkYmQ1ZDY5YmEiLCJ0IjoiNGM4ZGExYmEtYzAwZC00ODJkLThkODEtMmNmNDAzOWM3NGJkIiwicyI6Ik1UUmhORGRqWkdNdE1ERTNaQzAwTURWbUxXRXpNVGN0WkRVek1UQXhNemcwTm1WbSJ9",
+    "use_certificate": false,
+    "cert_path": "",
+    "use_uuid_config": false,
+    "tunnel_uuid": "",
+    "credentials_file": ""
   }
 }

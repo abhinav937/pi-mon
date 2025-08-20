@@ -427,32 +427,22 @@ configure_nginx() {
         run_cmd apt-get install -y nginx
     fi
 
-    # Simple Nginx configuration with HTTPS redirect
+    # Simple Nginx configuration for Cloudflare tunnel (HTTP only)
     cat > "$NGINX_SITES_AVAILABLE/pi-monitor" <<EOF
-# HTTP to HTTPS redirect
+# HTTP server - Cloudflare tunnel handles SSL termination
 server {
     listen 80;
     server_name localhost;
-    return 301 https://\$host\$request_uri;
-}
-
-# HTTPS server (Cloudflare tunnel handles SSL)
-server {
-    listen 443 ssl http2;
-    server_name localhost;
-
-    # SSL configuration (Cloudflare provides certs)
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-AES128-SHA256:ECDHE-RSA-AES256-SHA384;
-    ssl_prefer_server_ciphers off;
 
     root ${WEB_ROOT};
     index index.html;
 
+    # Handle static files
     location / {
         try_files \$uri /index.html;
     }
 
+    # API endpoints - proxy to backend
     location /api/ {
         proxy_pass http://127.0.0.1:${BACKEND_PORT}/api/;
         proxy_http_version 1.1;
@@ -464,6 +454,7 @@ server {
         proxy_set_header Connection "upgrade";
     }
 
+    # Health endpoint
     location /health {
         proxy_pass http://127.0.0.1:${BACKEND_PORT}/health;
         proxy_http_version 1.1;
@@ -472,6 +463,11 @@ server {
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
     }
+
+    # Security headers
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
 }
 EOF
 
@@ -590,13 +586,13 @@ verify_stack() {
         exit 1
     fi
     
-    # Check HTTPS endpoints (with self-signed cert validation disabled)
-    if ! curl -kfsS "https://localhost/" >/dev/null 2>&1; then
-        log warn "Frontend HTTPS root check failed"
+    # Check HTTP endpoints (Cloudflare tunnel handles HTTPS)
+    if ! curl -fsS "http://localhost/" >/dev/null 2>&1; then
+        log warn "Frontend HTTP root check failed"
     fi
     
-    if ! curl -kfsS "https://localhost/health" >/dev/null 2>&1; then
-        log error "Nginx HTTPS proxy to /health failed"
+    if ! curl -fsS "http://localhost/health" >/dev/null 2>&1; then
+        log error "Nginx HTTP proxy to /health failed"
         exit 1
     fi
     

@@ -979,7 +979,10 @@ configure_nginx() {
         cp "$site_conf_src" "$tmp_conf"
         sed -i -E "s/server_name[[:space:]].*;/server_name ${DOMAIN};/" "$tmp_conf" || true
         sed -i -E "s@root[[:space:]].*;@root ${WEB_ROOT};@" "$tmp_conf"
-        sed -i -E "s/(listen[[:space:]]+)[0-9]+;/\1${NGINX_PORT};/" "$tmp_conf" || true
+        # Normalize listen lines to requested port and drop default_server
+        sed -i -E "s/(listen[[:space:]]+)[0-9]+([^;]*);/\1${NGINX_PORT};/" "$tmp_conf" || true
+        sed -i -E "s/(listen[[:space:]]+\[::\]:)[0-9]+([^;]*);/\1${NGINX_PORT};/" "$tmp_conf" || true
+        sed -i -E 's/[[:space:]]default_server\b//g' "$tmp_conf" || true
         sed -i -E "s@proxy_pass[[:space:]]+http://127.0.0.1:[0-9]+/api/@proxy_pass http://127.0.0.1:${BACKEND_PORT}/api/@g" "$tmp_conf" || true
         sed -i -E "s@proxy_pass[[:space:]]+http://127.0.0.1:[0-9]+/health@proxy_pass http://127.0.0.1:${BACKEND_PORT}/health@g" "$tmp_conf" || true
     else
@@ -988,7 +991,7 @@ configure_nginx() {
             cat > "$tmp_conf" <<EOF
 # HTTP to HTTPS redirect
 server {
-  listen 80 default_server;
+  listen 80;
   server_name ${DOMAIN};
   
   # Always allow ACME challenge over HTTP for Let's Encrypt

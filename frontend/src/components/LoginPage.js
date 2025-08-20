@@ -118,7 +118,10 @@ const LoginPage = ({ onAuthSuccess, unifiedClient }) => {
 
   const getSupportText = () => {
     if (!webauthnSupport?.supported) {
-      return 'Passkeys not supported in this browser';
+      if (webauthnSupport?.needsHttps) {
+        return 'HTTPS required for passkeys (except localhost)';
+      }
+      return webauthnSupport?.error || 'Passkeys not supported in this browser';
     }
     if (webauthnSupport.platformAuthenticator) {
       return 'Device biometrics available (Touch ID, Face ID, Windows Hello)';
@@ -164,6 +167,14 @@ const LoginPage = ({ onAuthSuccess, unifiedClient }) => {
               <p className="text-xs text-gray-500 dark:text-gray-400">
                 {getSupportText()}
               </p>
+              {webauthnSupport?.needsHttps && (
+                <div className="mt-2 p-2 bg-blue-50 dark:bg-blue-900/20 rounded text-xs">
+                  <p className="text-blue-700 dark:text-blue-300 font-medium">💡 WebAuthn Solutions:</p>
+                  {webauthnSupport.suggestions?.map((suggestion, i) => (
+                    <p key={i} className="text-blue-600 dark:text-blue-400 ml-2">• {suggestion}</p>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 
@@ -251,10 +262,14 @@ const LoginPage = ({ onAuthSuccess, unifiedClient }) => {
           <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-600">
             <button
               onClick={() => setShowFallback(!showFallback)}
-              className="flex items-center text-sm text-blue-600 hover:text-blue-500"
+              className={`flex items-center text-sm transition-colors ${
+                webauthnSupport?.needsHttps 
+                  ? 'text-green-600 hover:text-green-500 font-medium'
+                  : 'text-blue-600 hover:text-blue-500'
+              }`}
             >
               {showFallback ? <VisibilityOff className="h-4 w-4 mr-1" /> : <Visibility className="h-4 w-4 mr-1" />}
-              {showFallback ? 'Hide' : 'Show'} API Key Login
+              {webauthnSupport?.needsHttps ? '🔑 Use API Key Login' : `${showFallback ? 'Hide' : 'Show'} API Key Login`}
             </button>
 
             {showFallback && (
@@ -277,6 +292,25 @@ const LoginPage = ({ onAuthSuccess, unifiedClient }) => {
             )}
           </div>
         </div>
+
+        {/* Debug Information */}
+        {process.env.NODE_ENV === 'development' && (
+          <div className="bg-gray-100 dark:bg-gray-700 rounded-lg p-4 text-xs">
+            <p className="font-medium text-gray-700 dark:text-gray-300 mb-2">Debug Information:</p>
+            <ul className="space-y-1 text-gray-600 dark:text-gray-400">
+              <li>• Hostname: {window.location.hostname}</li>
+              <li>• Protocol: {window.location.protocol}</li>
+              <li>• Secure Context: {window.isSecureContext ? '✓' : '✗'}</li>
+              <li>• WebAuthn API: {window.PublicKeyCredential ? '✓' : '✗'}</li>
+              {webauthnSupport && (
+                <>
+                  <li>• Platform Auth: {webauthnSupport.platformAuthenticator ? '✓' : '✗'}</li>
+                  <li>• Backend: {authStatus?.webauthn_enabled ? '✓' : '✗'}</li>
+                </>
+              )}
+            </ul>
+          </div>
+        )}
 
         {/* Statistics */}
         {authStatus && (

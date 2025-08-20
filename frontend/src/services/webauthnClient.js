@@ -11,26 +11,57 @@ class WebAuthnClient {
   }
 
   async checkWebAuthnSupport() {
+    // Check secure context
+    const isLocalhost = window.location.hostname === 'localhost' || 
+                       window.location.hostname === '127.0.0.1' ||
+                       window.location.hostname.endsWith('.localhost');
+    
+    if (!window.isSecureContext && !isLocalhost) {
+      return {
+        supported: false,
+        error: 'WebAuthn requires HTTPS (except on localhost)',
+        needsHttps: true,
+        suggestions: [
+          `Try: http://localhost:${window.location.port}`,
+          'Set up SSH tunnel for remote access',
+          'Use API key authentication instead'
+        ]
+      };
+    }
+
+    // Check WebAuthn API availability
     if (!window.PublicKeyCredential) {
       return {
         supported: false,
-        error: 'WebAuthn not supported by this browser'
+        error: 'WebAuthn API not available in this browser. Please use Chrome 67+, Firefox 60+, Safari 14+, or Edge 18+'
       };
     }
 
     try {
+      // Check if WebAuthn is actually functional
       const available = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
+      
+      let conditionalMediation = false;
+      try {
+        conditionalMediation = await PublicKeyCredential.isConditionalMediationAvailable?.() || false;
+      } catch (e) {
+        // Ignore conditional mediation errors
+        console.log('Conditional mediation check failed:', e);
+      }
+
       return {
         supported: true,
         platformAuthenticator: available,
-        conditionalMediation: await PublicKeyCredential.isConditionalMediationAvailable?.() || false
+        conditionalMediation,
+        secureContext: window.isSecureContext,
+        userAgent: navigator.userAgent
       };
     } catch (error) {
+      console.error('WebAuthn support check failed:', error);
       return {
-        supported: true,
-        platformAuthenticator: false,
-        conditionalMediation: false,
-        error: error.message
+        supported: false,
+        error: `WebAuthn check failed: ${error.message}`,
+        details: error
       };
     }
   }

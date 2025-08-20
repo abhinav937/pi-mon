@@ -6,7 +6,8 @@ const SettingsPanel = ({ isDarkMode, setIsDarkMode, onClose, unifiedClient }) =>
   const [settings, setSettings] = useState({
     refreshInterval: 5000,
     theme: isDarkMode ? 'dark' : 'light',
-    accentColor: 'blue'
+    accentColor: 'blue',
+    dataRetentionHours: 24
   });
 
   const [activeTab, setActiveTab] = useState('general');
@@ -36,17 +37,28 @@ const SettingsPanel = ({ isDarkMode, setIsDarkMode, onClose, unifiedClient }) =>
       if (intervalResponse && intervalResponse.current_interval) {
         const backendInterval = intervalResponse.current_interval * 1000; // Convert to milliseconds
         setSettings(prev => ({ ...prev, refreshInterval: backendInterval }));
-        // Update localStorage to match backend (preserve theme)
-        try {
-          const savedRaw = localStorage.getItem('pi-monitor-settings');
-          const saved = savedRaw ? JSON.parse(savedRaw) : {};
-          localStorage.setItem('pi-monitor-settings', JSON.stringify({
-            theme: saved.theme ?? (isDarkMode ? 'dark' : 'light'),
-            refreshInterval: backendInterval,
-            accentColor: saved.accentColor ?? 'blue'
-          }));
-        } catch (_) {}
       }
+
+      // Get current data retention from backend
+      const retentionResponse = await unifiedClient.getDataRetention();
+      if (retentionResponse && retentionResponse.current_retention_hours) {
+        const backendRetention = retentionResponse.current_retention_hours;
+        setSettings(prev => ({ ...prev, dataRetentionHours: backendRetention }));
+      }
+
+      // Update localStorage to match backend (preserve theme)
+      try {
+        const savedRaw = localStorage.getItem('pi-monitor-settings');
+        const saved = savedRaw ? JSON.parse(savedRaw) : {};
+        const backendInterval = intervalResponse?.current_interval ? intervalResponse.current_interval * 1000 : saved.refreshInterval;
+        const backendRetention = retentionResponse?.current_retention_hours || saved.dataRetentionHours || 24;
+        localStorage.setItem('pi-monitor-settings', JSON.stringify({
+          theme: saved.theme ?? (isDarkMode ? 'dark' : 'light'),
+          refreshInterval: backendInterval,
+          accentColor: saved.accentColor ?? 'blue',
+          dataRetentionHours: backendRetention
+        }));
+      } catch (_) {}
     } catch (error) {
       console.warn('Failed to load backend settings:', error);
     }
@@ -70,14 +82,23 @@ const SettingsPanel = ({ isDarkMode, setIsDarkMode, onClose, unifiedClient }) =>
         window.dispatchEvent(event);
       } catch (_) {}
 
-      // Send refresh interval to backend
-      if (unifiedClient && settings.refreshInterval) {
-        const intervalSeconds = settings.refreshInterval / 1000; // Convert from milliseconds to seconds
-        await unifiedClient.updateMetricsInterval(intervalSeconds);
-        // Also update frontend polling interval immediately
-        if (unifiedClient.setFrontendPollingInterval) {
-          unifiedClient.setFrontendPollingInterval(settings.refreshInterval);
+      // Send settings to backend
+      if (unifiedClient) {
+        // Update refresh interval
+        if (settings.refreshInterval) {
+          const intervalSeconds = settings.refreshInterval / 1000; // Convert from milliseconds to seconds
+          await unifiedClient.updateMetricsInterval(intervalSeconds);
+          // Also update frontend polling interval immediately
+          if (unifiedClient.setFrontendPollingInterval) {
+            unifiedClient.setFrontendPollingInterval(settings.refreshInterval);
+          }
         }
+        
+        // Update data retention
+        if (settings.dataRetentionHours) {
+          await unifiedClient.updateDataRetention(settings.dataRetentionHours);
+        }
+        
         toast.success('Settings saved and backend updated successfully');
       } else {
         toast.success('Settings saved successfully');
@@ -100,7 +121,8 @@ const SettingsPanel = ({ isDarkMode, setIsDarkMode, onClose, unifiedClient }) =>
       const defaultSettings = {
         refreshInterval: 5000,
         theme: 'auto',
-        accentColor: 'blue'
+        accentColor: 'blue',
+        dataRetentionHours: 24
       };
       setSettings(defaultSettings);
       toast.success('Settings reset to default');
@@ -183,8 +205,8 @@ const SettingsPanel = ({ isDarkMode, setIsDarkMode, onClose, unifiedClient }) =>
           Data Retention (hours)
         </label>
         <select
-          value={24}
-          onChange={() => {}}
+          value={settings.dataRetentionHours}
+          onChange={(e) => handleSettingChange('dataRetentionHours', Number(e.target.value))}
           className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
         >
           <option value={1}>1 hour</option>

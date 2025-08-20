@@ -296,9 +296,14 @@ class MetricsDatabase:
             logger.error(f"Failed to get latest metrics: {e}")
             return []
     
-    def cleanup_old_data(self, days_to_keep=7):
+    def cleanup_old_data(self, days_to_keep=None):
         """Clean up old metrics data to prevent database bloat"""
         try:
+            # Use stored retention setting if days_to_keep is not provided
+            if days_to_keep is None:
+                retention_hours = self.get_retention_hours()
+                days_to_keep = retention_hours / 24.0
+            
             cutoff_time = time.time() - (days_to_keep * 24 * 60 * 60)
             
             with self._connect() as conn:
@@ -308,7 +313,7 @@ class MetricsDatabase:
                 deleted_count = cursor.rowcount
                 
                 conn.commit()
-                logger.info(f"Cleaned up {deleted_count} old metrics records (keeping last {days_to_keep} days)")
+                logger.info(f"Cleaned up {deleted_count} old metrics records (keeping last {days_to_keep:.1f} days)")
                 return deleted_count
                 
         except Exception as e:
@@ -397,3 +402,22 @@ class MetricsDatabase:
         except Exception as e:
             logger.error(f"Failed to get system info: {e}")
             return None
+    
+    def get_retention_hours(self):
+        """Get data retention setting in hours"""
+        try:
+            retention_str = self.get_system_info('data_retention_hours')
+            if retention_str is not None:
+                return int(retention_str)
+            # Default to 24 hours if not set
+            return 24
+        except (ValueError, TypeError):
+            return 24
+    
+    def set_retention_hours(self, hours):
+        """Set data retention setting in hours"""
+        try:
+            return self.store_system_info('data_retention_hours', str(hours))
+        except Exception as e:
+            logger.error(f"Failed to set retention hours: {e}")
+            return False

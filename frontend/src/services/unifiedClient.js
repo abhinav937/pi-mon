@@ -423,6 +423,24 @@ class UnifiedClient {
     }
   }
 
+  async updateDataRetention(retentionHours) {
+    try {
+      const response = await this.httpClient.post('/api/metrics/retention', { retention_hours: retentionHours });
+      return response.data;
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  async getDataRetention() {
+    try {
+      const response = await this.httpClient.get('/api/metrics/retention');
+      return response.data;
+    } catch (error) {
+      throw error;
+    }
+  }
+
   // Network monitoring methods
   async getNetworkInfo() {
     try {

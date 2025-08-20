@@ -181,6 +181,8 @@ class PiMonitorHandler(BaseHTTPRequestHandler):
             self._handle_metrics_export()
         elif path == '/api/metrics/interval':
             self._handle_metrics_interval(query_params)
+        elif path == '/api/metrics/retention':
+            self._handle_metrics_retention(query_params)
         elif path == '/api/refresh':
             self._handle_refresh()
         elif path == '/api/power':
@@ -212,6 +214,8 @@ class PiMonitorHandler(BaseHTTPRequestHandler):
             self._handle_metrics_clear()
         elif path == '/api/metrics/interval':
             self._handle_metrics_interval(parse_qs(urlparse(self.path).query))
+        elif path == '/api/metrics/retention':
+            self._handle_metrics_retention(parse_qs(urlparse(self.path).query))
         elif path.startswith('/api/service/'):
             self._handle_service_post_endpoints(path)
         else:
@@ -552,6 +556,72 @@ class PiMonitorHandler(BaseHTTPRequestHandler):
             
         except Exception as e:
             self._send_internal_error(f"Failed to handle metrics interval: {str(e)}")
+
+    def _handle_metrics_retention(self, query_params):
+        """Handle metrics retention updates"""
+        if not self._check_auth():
+            self._send_unauthorized()
+            return
+        
+        try:
+            if self.command == 'GET':
+                # Get current retention setting
+                current_retention = self.server_instance.database.get_retention_hours()
+                response = {
+                    "current_retention_hours": current_retention,
+                    "message": f"Current data retention: {current_retention} hours"
+                }
+            elif self.command == 'POST':
+                # Update retention from POST body
+                content_length = int(self.headers.get('Content-Length', 0))
+                if content_length > 0:
+                    post_data = self.rfile.read(content_length)
+                    try:
+                        data = json.loads(post_data.decode('utf-8'))
+                        retention_str = data.get('retention_hours', '24')
+                        retention_hours = int(retention_str)
+                        
+                        # Validate retention range (1 hour to 168 hours = 1 week)
+                        if retention_hours < 1 or retention_hours > 168:
+                            response = {
+                                "success": False,
+                                "message": "Retention must be between 1 and 168 hours (1 week)"
+                            }
+                        else:
+                            success = self.server_instance.database.set_retention_hours(retention_hours)
+                            if success:
+                                response = {
+                                    "success": True,
+                                    "message": f"Data retention updated to {retention_hours} hours",
+                                    "new_retention_hours": retention_hours
+                                }
+                            else:
+                                response = {
+                                    "success": False,
+                                    "message": "Failed to update data retention"
+                                }
+                    except (ValueError, json.JSONDecodeError):
+                        response = {
+                            "success": False,
+                            "message": "Invalid retention value. Must be a valid number."
+                        }
+                else:
+                    response = {
+                        "success": False,
+                        "message": "No data provided in POST request"
+                    }
+            else:
+                response = {
+                    "success": False,
+                    "message": "Method not allowed. Use GET to retrieve or POST to update."
+                }
+            
+            self.send_response(200)
+            self._set_common_headers()
+            self.wfile.write(json.dumps(response).encode())
+            
+        except Exception as e:
+            self._send_internal_error(f"Failed to handle metrics retention: {str(e)}")
 
     def _handle_metrics_clear(self):
         """Clear all metrics from the database"""

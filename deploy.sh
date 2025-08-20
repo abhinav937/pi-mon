@@ -457,12 +457,13 @@ generate_ssl_certificate() {
     
     if [ "$need_generate" = true ]; then
         # Determine subject for certificate
-        local subject
+        local CN_VALUE
         if [ "$DOMAIN" != "_" ]; then
-            subject="/C=$SSL_COUNTRY/ST=$SSL_STATE/L=$SSL_CITY/O=$SSL_ORG/OU=$SSL_OU/CN=$DOMAIN"
+            CN_VALUE="$DOMAIN"
         else
-            subject="/C=$SSL_COUNTRY/ST=$SSL_STATE/L=$SSL_CITY/O=$SSL_ORG/OU=$SSL_OU/CN=$STATIC_IP"
+            CN_VALUE="$STATIC_IP"
         fi
+        local subject="/C=$SSL_COUNTRY/ST=$SSL_STATE/L=$SSL_CITY/O=$SSL_ORG/OU=$SSL_OU/CN=$CN_VALUE"
         
         log info "Generating self-signed SSL certificate for $SSL_CERT_DAYS days"
         log debug "Certificate subject: $subject"
@@ -473,14 +474,14 @@ generate_ssl_certificate() {
                 -keyout \"${SSL_KEY_PATH}.key\" \
                 -out \"${SSL_CERT_PATH}.crt\" \
                 -subj \"$subject\" \
-                -addext \"subjectAltName=DNS:$DOMAIN,DNS:localhost,IP:$STATIC_IP,IP:127.0.0.1\" \
+                -addext \"subjectAltName=DNS:$CN_VALUE,DNS:localhost,IP:$STATIC_IP,IP:127.0.0.1\" \
                 >> \"$LOG_FILE\" 2>&1"
         else
             run_cmd openssl req -x509 -nodes -days "$SSL_CERT_DAYS" -newkey rsa:2048 \
                 -keyout "${SSL_KEY_PATH}.key" \
                 -out "${SSL_CERT_PATH}.crt" \
                 -subj "$subject" \
-                -addext "subjectAltName=DNS:$DOMAIN,DNS:localhost,IP:$STATIC_IP,IP:127.0.0.1"
+                -addext "subjectAltName=DNS:$CN_VALUE,DNS:localhost,IP:$STATIC_IP,IP:127.0.0.1"
         fi
         
         # Set appropriate permissions
@@ -870,17 +871,17 @@ configure_nginx() {
             cat > "$tmp_conf" <<EOF
 # HTTP to HTTPS redirect
 server {
-  listen 80;
+  listen 80 default_server;
   server_name ${DOMAIN};
   
 $(if [ "$FORCE_HTTPS_REDIRECT" = true ]; then
-echo "  return 301 https://\$host\$request_uri;"
+echo "  return 301 https://\$http_host\$request_uri;"
 else
 echo "  location /.well-known/acme-challenge/ { 
     root ${WEB_ROOT}; 
   }
   location / {
-    return 301 https://\$host\$request_uri;
+    return 301 https://\$http_host\$request_uri;
   }"
 fi)
 }
@@ -888,7 +889,7 @@ fi)
 # HTTPS server
 server {
   listen ${NGINX_PORT} ssl http2;
-  server_name ${DOMAIN};
+  server_name ${DOMAIN} 192.168.0.201 localhost _;
   
   ssl_certificate ${SSL_CERT_PATH}.crt;
   ssl_certificate_key ${SSL_KEY_PATH}.key;

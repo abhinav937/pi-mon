@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Install jq if not present
+command -v jq >/dev/null || {
+  log info "Installing jq for JSON processing"
+  sudo apt update && sudo apt install jq -y
+}
+
 # ============================================================================
 # Pi Monitor Deployment (leveled logging, flags, subdomain-aware Nginx)
 # ============================================================================
@@ -14,19 +20,20 @@ set -euo pipefail
 # is needed, avoiding unnecessary rebuilds and restarts.
 
 # Defaults (overridable via flags)
-DOMAIN="_"
+DOMAIN=""
+API_KEY=""
+ENV=""
+PRODUCTION_URL=""
+PUBLIC_PORT=""
+NGINX_PORT=""
+BACKEND_PORT=""
 STATIC_IP=""
 WEB_ROOT="/var/www/pi-monitor"
 NGINX_SITES_AVAILABLE="/etc/nginx/sites-available"
 NGINX_SITES_ENABLED="/etc/nginx/sites-enabled"
-PRODUCTION_URL="http://localhost"
-PI_MON_DIR=""
 VENV_DIR=""
 SERVICE_FILE="/etc/systemd/system/pi-monitor-backend.service"
 STATE_DIR=""
-PUBLIC_PORT="80"
-NGINX_PORT="80"
-BACKEND_PORT="5001"
 SYSTEM_USER=""
 
 # SSL/HTTPS Configuration
@@ -62,12 +69,35 @@ SHOW_CONFIG=false
 TEST_CHECKSUMS=false
 FORCE_HTTPS_REDIRECT=true  # Redirect HTTP to HTTPS when SSL is enabled
 
+domain_updated=false
+api_key_updated=false
+env_updated=false
+production_url_updated=false
+public_port_updated=false
+nginx_port_updated=false
+backend_port_updated=false
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Derive sane defaults based on runtime
 [ -n "$PI_MON_DIR" ] || PI_MON_DIR="$SCRIPT_DIR"
 [ -n "$SYSTEM_USER" ] || SYSTEM_USER="${SUDO_USER:-$(id -un)}"
 [ -n "$PRODUCTION_URL" ] || PRODUCTION_URL="http://localhost"
+
+CONFIG_FILE="$PI_MON_DIR/config.json"
+# Load configurations from JSON if not set
+DOMAIN=${DOMAIN:-$(jq -r '.deployment_defaults.domain // "pi.abhinav.com"' "$CONFIG_FILE")}
+API_KEY=${API_KEY:-$(jq -r '.deployment_defaults.api_key // "pi-monitor-api-key-2024"' "$CONFIG_FILE")}
+ENV=${ENV:-$(jq -r '.deployment_defaults.env // "production"' "$CONFIG_FILE")}
+PRODUCTION_URL=${PRODUCTION_URL:-$(jq -r '.deployment_defaults.production_url // "http://localhost"' "$CONFIG_FILE")}
+PUBLIC_PORT=${PUBLIC_PORT:-$(jq -r '.deployment_defaults.public_port // "80"' "$CONFIG_FILE")}
+NGINX_PORT=${NGINX_PORT:-$(jq -r '.deployment_defaults.nginx_port // "80"' "$CONFIG_FILE")}
+BACKEND_PORT=${BACKEND_PORT:-$(jq -r '.deployment_defaults.backend_port // "5001"' "$CONFIG_FILE")}
+
+# Update json if any flags were used
+if [ "$domain_updated" = true ] || [ "$api_key_updated" = true ] || [ "$env_updated" = true ] || [ "$production_url_updated" = true ] || [ "$public_port_updated" = true ] || [ "$nginx_port_updated" = true ] || [ "$backend_port_updated" = true ]; then
+  update_json
+fi
 
 # Try to populate a sensible default STATIC_IP from config.json (pre-args)
 if [ -z "$STATIC_IP" ] && [ -f "$PI_MON_DIR/config.json" ]; then
@@ -166,6 +196,10 @@ Usage: sudo ./deploy.sh [flags]
 
 Flags:
   --domain VALUE               Subdomain/host (default: ${DOMAIN})
+  --api-key VALUE              Backend API key (default: ${API_KEY})
+  --env VALUE                  Backend environment (default: ${ENV})
+  --production-url VALUE      Production URL (default: ${PRODUCTION_URL})
+  --public-port VALUE          Public port for Nginx (default: ${PUBLIC_PORT})
   --static-ip VALUE            Public IP used in URLs (default: ${STATIC_IP})
   --web-root PATH              Nginx web root (default: ${WEB_ROOT})
   --pi-mon-dir PATH            Project root (default: ${PI_MON_DIR})
@@ -209,16 +243,63 @@ Flags:
 USAGE
 }
 
+function update_json() {
+  local temp_file=$(mktemp)
+  cp "$CONFIG_FILE" "$temp_file"
+
+  if [ "$domain_updated" = true ]; then
+    jq --arg val "$DOMAIN" '.deployment_defaults.domain = $val' "$temp_file" > "$temp_file.tmp"
+    mv "$temp_file.tmp" "$temp_file"
+  fi
+
+  if [ "$api_key_updated" = true ]; then
+    jq --arg val "$API_KEY" '.deployment_defaults.api_key = $val' "$temp_file" > "$temp_file.tmp"
+    mv "$temp_file.tmp" "$temp_file"
+  fi
+
+  if [ "$env_updated" = true ]; then
+    jq --arg val "$ENV" '.deployment_defaults.env = $val' "$temp_file" > "$temp_file.tmp"
+    mv "$temp_file.tmp" "$temp_file"
+  fi
+
+  if [ "$production_url_updated" = true ]; then
+    jq --arg val "$PRODUCTION_URL" '.deployment_defaults.production_url = $val' "$temp_file" > "$temp_file.tmp"
+    mv "$temp_file.tmp" "$temp_file"
+  fi
+
+  if [ "$public_port_updated" = true ]; then
+    jq --arg val "$PUBLIC_PORT" '.deployment_defaults.public_port = $val' "$temp_file" > "$temp_file.tmp"
+    mv "$temp_file.tmp" "$temp_file"
+  fi
+
+  if [ "$nginx_port_updated" = true ]; then
+    jq --arg val "$NGINX_PORT" '.deployment_defaults.nginx_port = $val' "$temp_file" > "$temp_file.tmp"
+    mv "$temp_file.tmp" "$temp_file"
+  fi
+
+  if [ "$backend_port_updated" = true ]; then
+    jq --arg val "$BACKEND_PORT" '.deployment_defaults.backend_port = $val' "$temp_file" > "$temp_file.tmp"
+    mv "$temp_file.tmp" "$temp_file"
+  fi
+
+  mv "$temp_file" "$CONFIG_FILE"
+  log info "Updated config.json with new values"
+}
+
 parse_args() {
     while [ $# -gt 0 ]; do
         case "$1" in
-            --domain) DOMAIN="$2"; shift 2 ;;
+            --domain) DOMAIN="$2"; domain_updated=true; shift 2 ;;
+            --api-key) API_KEY="$2"; api_key_updated=true; shift 2 ;;
+            --env) ENV="$2"; env_updated=true; shift 2 ;;
+            --production-url) PRODUCTION_URL="$2"; production_url_updated=true; shift 2 ;;
+            --public-port) PUBLIC_PORT="$2"; public_port_updated=true; shift 2 ;;
             --static-ip) STATIC_IP="$2"; shift 2 ;;
             --web-root) WEB_ROOT="$2"; shift 2 ;;
             --pi-mon-dir) PI_MON_DIR="$2"; shift 2 ;;
             --venv-dir) VENV_DIR="$2"; shift 2 ;;
-            --backend-port) BACKEND_PORT="$2"; shift 2 ;;
-            --nginx-port) NGINX_PORT="$2"; shift 2 ;;
+            --backend-port) BACKEND_PORT="$2"; backend_port_updated=true; shift 2 ;;
+            --nginx-port) NGINX_PORT="$2"; nginx_port_updated=true; shift 2 ;;
             --user) SYSTEM_USER="$2"; shift 2 ;;
             --log-level) LOG_LEVEL="$2"; shift 2 ;;
             --debug) LOG_LEVEL="debug"; shift 1 ;;
@@ -762,15 +843,13 @@ WantedBy=multi-user.target
 EOF
     fi
 
-    if [ ! -f "$PI_MON_DIR/backend/.env" ]; then
-        log info "Creating backend .env"
-        cat > "$PI_MON_DIR/backend/.env" <<EOF
-PI_MONITOR_API_KEY=pi-monitor-api-key-2024
-PI_MONITOR_ENV=production
-PI_MONITOR_PRODUCTION_URL=${PRODUCTION_URL}
+    log info "Configuring backend .env"
+    cat > "$PI_MON_DIR/backend/.env" <<EOF
+PI_MONITOR_API_KEY=$API_KEY
+PI_MONITOR_ENV=$ENV
+PI_MONITOR_PRODUCTION_URL=$PRODUCTION_URL
 EOF
-        run_cmd chown "$SYSTEM_USER":"$SYSTEM_USER" "$PI_MON_DIR/backend/.env"
-    fi
+    run_cmd chown "$SYSTEM_USER":"$SYSTEM_USER" "$PI_MON_DIR/backend/.env"
 
     run_cmd systemctl daemon-reload
     run_cmd systemctl enable pi-monitor-backend.service

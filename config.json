@@ -168,5 +168,14 @@
       "health": "http://65.36.123.68:5001/health",
       "api_base": "http://65.36.123.68"
     }
+  },
+  "deployment_defaults": {
+    "domain": "pi.abhinav.com",
+    "api_key": "pi-monitor-api-key-2024",
+    "env": "production",
+    "production_url": "http://localhost",
+    "public_port": "80",
+    "nginx_port": "80",
+    "backend_port": "5001"
   }
 }

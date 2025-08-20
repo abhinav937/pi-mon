@@ -1474,10 +1474,19 @@ ensure_venv
 setup_backend_service
 build_frontend
 
-# In Cloudflare mode, serve HTTP locally; otherwise handle legacy HTTPS
+# In Cloudflare mode, serve HTTP locally; otherwise handle HTTPS if certs exist
 if [ "$ENABLE_CLOUDFLARE" != true ]; then
-  CERT_FILE="${SSL_CERT_PATH}.crt"
-  KEY_FILE="${SSL_KEY_PATH}.key"
+  # Prefer existing Let's Encrypt certs for the configured domain
+  if [ -n "$DOMAIN" ] && [ -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" ] && [ -f "/etc/letsencrypt/live/${DOMAIN}/privkey.pem" ]; then
+    ENABLE_SSL=true
+    CERT_FILE="/etc/letsencrypt/live/${DOMAIN}/fullchain.pem"
+    KEY_FILE="/etc/letsencrypt/live/${DOMAIN}/privkey.pem"
+    # Default to 443 when enabling TLS if not explicitly set
+    if [ "$NGINX_PORT" = "80" ]; then NGINX_PORT="443"; fi
+  else
+    CERT_FILE="${SSL_CERT_PATH}.crt"
+    KEY_FILE="${SSL_KEY_PATH}.key"
+  fi
   issue_lets_encrypt_cert
 fi
 

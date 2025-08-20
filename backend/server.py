@@ -215,6 +215,32 @@ class PiMonitorHandler(BaseHTTPRequestHandler):
         else:
             self._handle_404()
     
+    def do_HEAD(self):
+        """Handle HEAD requests (no response body)"""
+        parsed_url = urlparse(self.path)
+        path = parsed_url.path
+
+        # Public endpoints
+        if path == '/health' or path == '/':
+            self.send_response(200)
+            self._set_common_headers()
+            return
+
+        # Protected API endpoints: authorize but do not send a body
+        if path.startswith('/api/'):
+            if not self._check_auth():
+                self.send_response(401)
+                self._set_common_headers()
+                return
+            self.send_response(200)
+            self._set_common_headers()
+            return
+
+        # Not found
+        self.send_response(404)
+        self._set_common_headers()
+        return
+
     def do_POST(self):
         """Handle POST requests"""
         parsed_url = urlparse(self.path)

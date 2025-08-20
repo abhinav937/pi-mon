@@ -212,7 +212,6 @@ Desktop.ini
 
 # Local configuration overrides
 .env.override
-config.local.json
 settings.local.py
 
 # Test files

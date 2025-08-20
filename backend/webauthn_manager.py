@@ -12,6 +12,7 @@ import logging
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timedelta
 import jwt
+from urllib.parse import urlparse
 
 try:
     from webauthn import generate_registration_options, verify_registration_response
@@ -30,6 +31,7 @@ except ImportError:
     WEBAUTHN_AVAILABLE = False
 
 from auth_database import AuthDatabase
+from config import config
 
 logger = logging.getLogger(__name__)
 
@@ -56,16 +58,38 @@ class WebAuthnManager:
         rp_id = os.environ.get('WEBAUTHN_RP_ID')
         if rp_id:
             return rp_id
-        
-        # Try to get from current hostname/IP
+
+        # Try to get from JSON config (preferred)
+        try:
+            # Prefer explicit domain
+            cfg_domain = config.get('deployment_defaults.domain')
+            if isinstance(cfg_domain, str) and cfg_domain.strip():
+                return cfg_domain.strip()
+
+            # Fallback to URLs in production config
+            prod_backend = config.get('urls.production.backend')
+            if isinstance(prod_backend, str) and prod_backend:
+                parsed = urlparse(prod_backend)
+                if parsed.hostname:
+                    return parsed.hostname
+
+            prod_api_base = config.get('urls.production.api_base')
+            if isinstance(prod_api_base, str) and prod_api_base:
+                parsed = urlparse(prod_api_base)
+                if parsed.hostname:
+                    return parsed.hostname
+        except Exception:
+            pass
+
+        # Try to get from current hostname/IP as a last resort
         try:
             import socket
             hostname = socket.getfqdn()
             if hostname and not hostname.startswith('localhost'):
                 return hostname
-        except:
+        except Exception:
             pass
-        
+
         return 'localhost'
     
     def _get_origin(self) -> str:
@@ -73,12 +97,23 @@ class WebAuthnManager:
         origin = os.environ.get('WEBAUTHN_ORIGIN')
         if origin:
             return origin
-        
+
+        # Try to get origin from JSON config (preferred)
+        try:
+            prod_api_base = config.get('urls.production.api_base')
+            if isinstance(prod_api_base, str) and prod_api_base.strip():
+                return prod_api_base.strip()
+
+            prod_url = config.get('deployment_defaults.production_url')
+            if isinstance(prod_url, str) and prod_url.strip():
+                return prod_url.strip()
+        except Exception:
+            pass
+
         # Default based on RP ID
         if self.rp_id == 'localhost':
             return 'http://localhost'
-        else:
-            return f'https://{self.rp_id}'
+        return f'https://{self.rp_id}'
     
     def _get_jwt_secret(self) -> str:
         """Get JWT signing secret"""

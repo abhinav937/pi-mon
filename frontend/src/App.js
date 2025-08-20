@@ -2,12 +2,13 @@
 import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { QueryClient, QueryClientProvider } from 'react-query';
 import { Toaster } from 'react-hot-toast';
-import { ErrorOutline as AlertCircle, Wifi, WifiOff, LightMode as Sun, DarkMode as Moon, Settings, Refresh as RefreshCw, Menu, Close as X, Dashboard as LayoutDashboard, BarChart, Bolt as Zap, Build as Wrench, Public as Globe, Article as FileText } from '@mui/icons-material';
+import { ErrorOutline as AlertCircle, Wifi, WifiOff, LightMode as Sun, DarkMode as Moon, Settings, Refresh as RefreshCw, Menu, Close as X, Dashboard as LayoutDashboard, BarChart, Bolt as Zap, Build as Wrench, Public as Globe, Article as FileText, Logout } from '@mui/icons-material';
 
 import { UnifiedClient } from './services/unifiedClient';
 import ErrorBoundary from './components/ErrorBoundary';
 import LoadingSpinner from './components/LoadingSpinner';
 import ConnectionStatus from './components/ConnectionStatus';
+import AuthGuard from './components/AuthGuard';
 
 // Tailwind CSS imports
 import './index.css';
@@ -59,7 +60,7 @@ const TABS = [
   { id: 'settings', name: 'Settings', icon: Settings, description: 'Configuration and preferences' },
 ];
 
-function App() {
+function App({ onLogout, isWebAuthnAuthenticated }) {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [connectionStatus, setConnectionStatus] = useState('connecting');
@@ -268,9 +269,10 @@ function App() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <div className={`min-h-screen transition-colors duration-200 ${
-        isDarkMode ? 'dark bg-gray-900' : 'bg-gray-50'
-      }`}>
+      <AuthGuard unifiedClient={unifiedClient}>
+        <div className={`min-h-screen transition-colors duration-200 ${
+          isDarkMode ? 'dark bg-gray-900' : 'bg-gray-50'
+        }`}>
         {/* Header */}
         <header className="bg-white dark:bg-gray-800 shadow-sm border-b border-gray-200 dark:border-gray-700">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -320,6 +322,17 @@ function App() {
                 >
                   {isDarkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
                 </button>
+
+                {/* Logout Button */}
+                {onLogout && (
+                  <button
+                    onClick={onLogout}
+                    className="p-2 text-gray-500 hover:text-red-500 dark:text-gray-400 dark:hover:text-red-400 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-200"
+                    title="Logout"
+                  >
+                    <Logout className="h-4 w-4" />
+                  </button>
+                )}
 
                 
               </div>
@@ -514,7 +527,8 @@ function App() {
             },
           }}
         />
-      </div>
+        </div>
+      </AuthGuard>
     </QueryClientProvider>
   );
 }

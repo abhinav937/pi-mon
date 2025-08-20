@@ -2,3 +2,8 @@
 psutil>=5.9.0
 requests>=2.31.0,<3
 urllib3>=2.0.7,<3
+
+# WebAuthn and Authentication dependencies
+webauthn>=1.11.0
+cbor2>=5.4.6
+pyjwt>=2.8.0

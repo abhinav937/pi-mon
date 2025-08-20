@@ -22,6 +22,14 @@ from power_manager import PowerManager
 from log_manager import LogManager
 from utils import rate_limit, monitor_performance
 
+# WebAuthn imports
+try:
+    from webauthn_manager import WebAuthnManager
+    WEBAUTHN_ENABLED = True
+except ImportError:
+    WEBAUTHN_ENABLED = False
+    WebAuthnManager = None
+
 class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
     daemon_threads = True
 
@@ -39,6 +47,17 @@ class PiMonitorServer:
         self.power_manager = PowerManager()
         self.log_manager = LogManager()
         self.auth_manager = AuthManager()
+        
+        # Initialize WebAuthn manager if available
+        if WEBAUTHN_ENABLED:
+            try:
+                self.webauthn_manager = WebAuthnManager()
+                print("🔐 WebAuthn authentication enabled")
+            except Exception as e:
+                print(f"⚠️  WebAuthn initialization failed: {e}")
+                self.webauthn_manager = None
+        else:
+            self.webauthn_manager = None
         
         # Start background services
         self._start_background_services()
@@ -151,6 +170,10 @@ class PiMonitorHandler(BaseHTTPRequestHandler):
             self._handle_health_check()
         elif path == '/api/version':
             self._handle_version()
+        elif path == '/api/auth/user':
+            self._handle_get_user_info()
+        elif path == '/api/auth/status':
+            self._handle_auth_status()
         elif path == '/api/system':
             self._handle_system_stats(query_params)
         elif path == '/api/system/enhanced':
@@ -200,6 +223,16 @@ class PiMonitorHandler(BaseHTTPRequestHandler):
         # Route to appropriate handler
         if path == '/api/auth/token':
             self._handle_auth()
+        elif path == '/api/auth/webauthn/register/begin':
+            self._handle_webauthn_register_begin()
+        elif path == '/api/auth/webauthn/register/complete':
+            self._handle_webauthn_register_complete()
+        elif path == '/api/auth/webauthn/authenticate/begin':
+            self._handle_webauthn_authenticate_begin()
+        elif path == '/api/auth/webauthn/authenticate/complete':
+            self._handle_webauthn_authenticate_complete()
+        elif path == '/api/auth/logout':
+            self._handle_logout()
         elif path == '/api/services':
             self._handle_services_post()
         elif path == '/api/power':
@@ -776,7 +809,12 @@ class PiMonitorHandler(BaseHTTPRequestHandler):
         self.wfile.write(json.dumps(response).encode())
     
     def _check_auth(self):
-        """Check authentication"""
+        """Check authentication - supports both API key and WebAuthn JWT"""
+        # First try WebAuthn JWT authentication
+        if self._check_webauthn_auth():
+            return True
+        
+        # Fall back to legacy API key authentication
         return self.server_instance.auth_manager.check_auth(self)
     
     def _set_common_headers(self):
@@ -816,3 +854,252 @@ class PiMonitorHandler(BaseHTTPRequestHandler):
         self._set_common_headers()
         response = {"error": message}
         self.wfile.write(json.dumps(response).encode())
+    
+    # WebAuthn Authentication Handlers
+    def _handle_webauthn_register_begin(self):
+        """Handle WebAuthn registration initiation"""
+        if not self.server_instance.webauthn_manager:
+            self.send_response(503)
+            self._set_common_headers()
+            response = {"error": "WebAuthn not available"}
+            self.wfile.write(json.dumps(response).encode())
+            return
+        
+        try:
+            content_length = int(self.headers.get('Content-Length', 0))
+            if content_length > 0:
+                post_data = self.rfile.read(content_length)
+                request_data = json.loads(post_data.decode('utf-8'))
+                username = request_data.get('username', 'admin')
+                
+                result = self.server_instance.webauthn_manager.generate_registration_options(username)
+                
+                if 'error' in result:
+                    self.send_response(400)
+                else:
+                    self.send_response(200)
+                
+                self._set_common_headers()
+                self.wfile.write(json.dumps(result).encode())
+            else:
+                self.send_response(400)
+                self._set_common_headers()
+                response = {"error": "Missing request body"}
+                self.wfile.write(json.dumps(response).encode())
+                
+        except Exception as e:
+            self._send_internal_error(f"Registration initiation failed: {str(e)}")
+    
+    def _handle_webauthn_register_complete(self):
+        """Handle WebAuthn registration completion"""
+        if not self.server_instance.webauthn_manager:
+            self.send_response(503)
+            self._set_common_headers()
+            response = {"error": "WebAuthn not available"}
+            self.wfile.write(json.dumps(response).encode())
+            return
+        
+        try:
+            content_length = int(self.headers.get('Content-Length', 0))
+            if content_length > 0:
+                post_data = self.rfile.read(content_length)
+                request_data = json.loads(post_data.decode('utf-8'))
+                
+                user_id = request_data.get('user_id')
+                credential = request_data.get('credential')
+                device_name = request_data.get('device_name', 'Unknown Device')
+                
+                if not user_id or not credential:
+                    self.send_response(400)
+                    self._set_common_headers()
+                    response = {"error": "Missing user_id or credential"}
+                    self.wfile.write(json.dumps(response).encode())
+                    return
+                
+                result = self.server_instance.webauthn_manager.verify_registration(
+                    user_id, credential, device_name
+                )
+                
+                if 'error' in result:
+                    self.send_response(400)
+                else:
+                    self.send_response(200)
+                
+                self._set_common_headers()
+                self.wfile.write(json.dumps(result).encode())
+            else:
+                self.send_response(400)
+                self._set_common_headers()
+                response = {"error": "Missing request body"}
+                self.wfile.write(json.dumps(response).encode())
+                
+        except Exception as e:
+            self._send_internal_error(f"Registration completion failed: {str(e)}")
+    
+    def _handle_webauthn_authenticate_begin(self):
+        """Handle WebAuthn authentication initiation"""
+        if not self.server_instance.webauthn_manager:
+            self.send_response(503)
+            self._set_common_headers()
+            response = {"error": "WebAuthn not available"}
+            self.wfile.write(json.dumps(response).encode())
+            return
+        
+        try:
+            content_length = int(self.headers.get('Content-Length', 0))
+            username = None
+            
+            if content_length > 0:
+                post_data = self.rfile.read(content_length)
+                request_data = json.loads(post_data.decode('utf-8'))
+                username = request_data.get('username')
+            
+            result = self.server_instance.webauthn_manager.generate_authentication_options(username)
+            
+            if 'error' in result:
+                self.send_response(400)
+            else:
+                self.send_response(200)
+            
+            self._set_common_headers()
+            self.wfile.write(json.dumps(result).encode())
+                
+        except Exception as e:
+            self._send_internal_error(f"Authentication initiation failed: {str(e)}")
+    
+    def _handle_webauthn_authenticate_complete(self):
+        """Handle WebAuthn authentication completion"""
+        if not self.server_instance.webauthn_manager:
+            self.send_response(503)
+            self._set_common_headers()
+            response = {"error": "WebAuthn not available"}
+            self.wfile.write(json.dumps(response).encode())
+            return
+        
+        try:
+            content_length = int(self.headers.get('Content-Length', 0))
+            if content_length > 0:
+                post_data = self.rfile.read(content_length)
+                request_data = json.loads(post_data.decode('utf-8'))
+                
+                credential = request_data.get('credential')
+                challenge_key = request_data.get('challenge_key')
+                
+                if not credential or not challenge_key:
+                    self.send_response(400)
+                    self._set_common_headers()
+                    response = {"error": "Missing credential or challenge_key"}
+                    self.wfile.write(json.dumps(response).encode())
+                    return
+                
+                # Get request info for session tracking
+                request_info = {
+                    'user_agent': self.headers.get('User-Agent'),
+                    'ip_address': self.client_address[0]
+                }
+                
+                result = self.server_instance.webauthn_manager.verify_authentication(
+                    credential, challenge_key, request_info
+                )
+                
+                if 'error' in result:
+                    self.send_response(400)
+                else:
+                    self.send_response(200)
+                
+                self._set_common_headers()
+                self.wfile.write(json.dumps(result).encode())
+            else:
+                self.send_response(400)
+                self._set_common_headers()
+                response = {"error": "Missing request body"}
+                self.wfile.write(json.dumps(response).encode())
+                
+        except Exception as e:
+            self._send_internal_error(f"Authentication completion failed: {str(e)}")
+    
+    def _handle_logout(self):
+        """Handle logout request"""
+        if not self.server_instance.webauthn_manager:
+            self.send_response(503)
+            self._set_common_headers()
+            response = {"error": "WebAuthn not available"}
+            self.wfile.write(json.dumps(response).encode())
+            return
+        
+        try:
+            # Get token from Authorization header
+            auth_header = self.headers.get('Authorization', '')
+            if not auth_header.startswith('Bearer '):
+                self.send_response(400)
+                self._set_common_headers()
+                response = {"error": "Missing or invalid token"}
+                self.wfile.write(json.dumps(response).encode())
+                return
+            
+            token = auth_header.split(' ')[1]
+            result = self.server_instance.webauthn_manager.logout(token)
+            
+            self.send_response(200)
+            self._set_common_headers()
+            self.wfile.write(json.dumps(result).encode())
+                
+        except Exception as e:
+            self._send_internal_error(f"Logout failed: {str(e)}")
+    
+    def _handle_get_user_info(self):
+        """Handle get user info request"""
+        if not self.server_instance.webauthn_manager:
+            self.send_response(503)
+            self._set_common_headers()
+            response = {"error": "WebAuthn not available"}
+            self.wfile.write(json.dumps(response).encode())
+            return
+        
+        try:
+            # Get token from Authorization header
+            auth_header = self.headers.get('Authorization', '')
+            if not auth_header.startswith('Bearer '):
+                self._send_unauthorized()
+                return
+            
+            token = auth_header.split(' ')[1]
+            user_info = self.server_instance.webauthn_manager.get_user_info(token)
+            
+            if user_info:
+                self.send_response(200)
+                self._set_common_headers()
+                response = {'success': True, 'user': user_info}
+                self.wfile.write(json.dumps(response).encode())
+            else:
+                self._send_unauthorized()
+                
+        except Exception as e:
+            self._send_internal_error(f"Get user info failed: {str(e)}")
+    
+    def _handle_auth_status(self):
+        """Handle authentication status check"""
+        self.send_response(200)
+        self._set_common_headers()
+        
+        status = {
+            'webauthn_enabled': self.server_instance.webauthn_manager is not None,
+            'api_key_auth': True,  # Legacy API key auth still available
+        }
+        
+        if self.server_instance.webauthn_manager:
+            status.update(self.server_instance.webauthn_manager.get_stats())
+        
+        self.wfile.write(json.dumps(status).encode())
+    
+    def _check_webauthn_auth(self):
+        """Check WebAuthn JWT authentication"""
+        if not self.server_instance.webauthn_manager:
+            return False
+        
+        auth_header = self.headers.get('Authorization', '')
+        if not auth_header.startswith('Bearer '):
+            return False
+        
+        token = auth_header.split(' ')[1]
+        return self.server_instance.webauthn_manager.verify_jwt_token(token) is not None

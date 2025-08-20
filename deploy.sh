@@ -1374,13 +1374,15 @@ EOF
     # Derive tunnel ID from filename
     CF_TUNNEL_ID="$(basename "$TUN_JSON" .json)"
     mkdir -p "$CRED_DIR"
-    cat > "$CRED_DIR/config.yml" <<EOF
+         cat > "$CRED_DIR/config.yml" <<EOF
 tunnel: ${CF_TUNNEL_ID}
 credentials-file: ${TUN_JSON}
+# Prevent fallback to origin IP - domain only works when tunnel is active
 ingress:
   - hostname: ${DOMAIN}
     service: http://localhost:${NGINX_PORT}
   - service: http_status:404
+# Additional security: no catch-all or fallback routes
 EOF
     log info "Starting cloudflared (credentials mode)"
     # Use cloudflared's helper to install service if available; else drop a unit
@@ -1413,47 +1415,21 @@ EOF
     fi
 }
 
-# Auto-restart tunnel if it's down and verify connectivity
+# Simple tunnel health check (no retry/restart)
 ensure_tunnel_health() {
     if [ "$ENABLE_CLOUDFLARE" != true ]; then return 0; fi
     
     local host="${CF_HOSTNAME:-$DOMAIN}"
-    local max_retries=3
-    local retry_count=0
     
-    while [ $retry_count -lt $max_retries ]; do
-        # Check if tunnel is serving traffic
-        if curl -fsS --max-time 8 "https://$host/health" >/dev/null 2>&1; then
-            log info "Tunnel health check passed: https://$host/health"
-            return 0
-        fi
-        
-        retry_count=$((retry_count + 1))
-        log warn "Tunnel health check failed (attempt $retry_count/$max_retries)"
-        
-        if [ $retry_count -lt $max_retries ]; then
-            log info "Restarting cloudflared tunnel to restore connectivity"
-            run_cmd systemctl stop cloudflared
-            sleep 3
-            run_cmd systemctl start cloudflared
-            sleep 5
-            
-            # Wait for tunnel to stabilize
-            local wait_count=0
-            while [ $wait_count -lt 30 ]; do
-                if curl -fsS --max-time 5 "https://$host/health" >/dev/null 2>&1; then
-                    log info "Tunnel restored after restart"
-                    return 0
-                fi
-                sleep 2
-                wait_count=$((wait_count + 2))
-            done
-        fi
-    done
-    
-    log error "Tunnel health check failed after $max_retries attempts"
-    log error "Manual intervention required. Check: journalctl -u cloudflared -n 50"
-    return 1
+    # Check if tunnel is serving traffic
+    if curl -fsS --max-time 8 "https://$host/health" >/dev/null 2>&1; then
+        log info "Tunnel health check passed: https://$host/health"
+        return 0
+    else
+        log warn "Tunnel health check failed: https://$host/health"
+        log info "Check tunnel status manually: journalctl -u cloudflared -n 50"
+        return 1
+    fi
 }
 
 issue_lets_encrypt_cert() {

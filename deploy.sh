@@ -41,6 +41,11 @@ SSL_CITY="City"
 SSL_ORG="Pi Monitor"
 SSL_OU="IT Department"
 
+# Let's Encrypt
+ENABLE_LETSENCRYPT=false
+LE_EMAIL=""
+LE_STAGING=false
+
 # Behavior flags
 LOG_LEVEL="info"   # debug|info|warn|error
 NO_COLOR=false
@@ -193,6 +198,9 @@ Flags:
   --ssl-ou VALUE               Certificate organizational unit (default: ${SSL_OU})
   --force-ssl-regen            Force SSL certificate regeneration
   --no-https-redirect          Disable automatic HTTP to HTTPS redirect
+  --enable-lets-encrypt        Obtain a trusted HTTPS certificate via Let's Encrypt
+  --le-email EMAIL             Email for Let's Encrypt registration/expiry notices
+  --le-staging                 Use Let's Encrypt staging (for testing / rate-limit safe)
   --silent-output              Suppress noisy command outputs (default)
   --verbose-output             Show full outputs of package managers/builds
   --show-config                Print resolved configuration and exit
@@ -239,6 +247,9 @@ parse_args() {
             --ssl-ou) SSL_OU="$2"; shift 2 ;;
             --force-ssl-regen) FORCE_SSL_REGENERATE=true; shift 1 ;;
             --no-https-redirect) FORCE_HTTPS_REDIRECT=false; shift 1 ;;
+            --enable-lets-encrypt|--enable-letsencrypt) ENABLE_LETSENCRYPT=true; shift 1 ;;
+            --le-email) LE_EMAIL="$2"; shift 2 ;;
+            --le-staging) LE_STAGING=true; shift 1 ;;
             -h|--help) usage; exit 0 ;;
             *) log error "Unknown flag: $1"; usage; exit 2 ;;
         esac
@@ -895,22 +906,20 @@ server {
   listen 80 default_server;
   server_name ${DOMAIN};
   
-$(if [ "$FORCE_HTTPS_REDIRECT" = true ]; then
-echo "  return 301 https://\$http_host\$request_uri;"
-else
-echo "  location /.well-known/acme-challenge/ { 
-    root ${WEB_ROOT}; 
+  # Always allow ACME challenge over HTTP for Let's Encrypt
+  location /.well-known/acme-challenge/ {
+    root ${WEB_ROOT};
   }
+  # Redirect all other HTTP traffic to HTTPS
   location / {
     return 301 https://\$http_host\$request_uri;
-  }"
-fi)
+  }
 }
 
 # HTTPS server
 server {
   listen ${NGINX_PORT} ssl http2;
-  server_name ${DOMAIN} 192.168.0.201 localhost _;
+  server_name ${DOMAIN} ${STATIC_IP} localhost _;
   
   ssl_certificate ${SSL_CERT_PATH}.crt;
   ssl_certificate_key ${SSL_KEY_PATH}.key;
@@ -1058,6 +1067,45 @@ configure_firewall() {
     fi
 }
 
+issue_lets_encrypt_cert() {
+    if [ "$ENABLE_LETSENCRYPT" != true ]; then return 0; fi
+    if [ "$ENABLE_SSL" != true ]; then ENABLE_SSL=true; fi
+    if [ -z "$DOMAIN" ] || [ "$DOMAIN" = "_" ]; then
+        log error "Let's Encrypt requires a real domain (set --domain)."; exit 2
+    fi
+    if [ -z "$LE_EMAIL" ]; then
+        log error "Provide contact email for Let's Encrypt using --le-email."; exit 2
+    fi
+
+    log info "Installing certbot"
+    if ! command -v certbot >/dev/null 2>&1; then
+        run_cmd apt-get update -y
+        run_cmd apt-get install -y certbot python3-certbot-nginx
+    fi
+
+    # Ensure temporary HTTP config exists so ACME can validate
+    if ! systemctl is-active --quiet nginx; then
+        run_cmd systemctl start nginx || true
+    fi
+
+    local staging_flag=""
+    if [ "$LE_STAGING" = true ]; then staging_flag="--staging"; fi
+
+    log info "Requesting Let's Encrypt certificate for $DOMAIN"
+    run_cmd certbot --nginx -d "$DOMAIN" --email "$LE_EMAIL" --agree-tos --redirect $staging_flag --non-interactive || true
+
+    # Paths where certbot stores certs
+    CERT_FILE="/etc/letsencrypt/live/${DOMAIN}/fullchain.pem"
+    KEY_FILE="/etc/letsencrypt/live/${DOMAIN}/privkey.pem"
+
+    if [ ! -f "$CERT_FILE" ] || [ ! -f "$KEY_FILE" ]; then
+        log error "Let's Encrypt certificate not found at $CERT_FILE. Falling back to self-signed."
+        ENABLE_LETSENCRYPT=false
+    else
+        log info "Let's Encrypt certificate issued successfully"
+    fi
+}
+
 # ----------------------------------------------------------------------------
 # Verification
 # ----------------------------------------------------------------------------
@@ -1142,7 +1190,15 @@ fi
 ensure_venv
 setup_backend_service
 build_frontend
-generate_ssl_certificate
+
+# Determine certificate file paths for nginx
+CERT_FILE="${SSL_CERT_PATH}.crt"
+KEY_FILE="${SSL_KEY_PATH}.key"
+
+# If Let's Encrypt requested, attempt issuance and override paths
+issue_lets_encrypt_cert
+
+# Now write nginx config using CERT_FILE/KEY_FILE
 configure_nginx
 configure_firewall
 verify_stack

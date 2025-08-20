@@ -1140,6 +1140,122 @@ configure_firewall() {
     fi
 }
 
+install_cloudflared() {
+    if [ "$ENABLE_CLOUDFLARE" != true ]; then return 0; fi
+    if command -v cloudflared >/dev/null 2>&1; then
+        log info "cloudflared present"
+        return 0
+    fi
+    log info "Installing cloudflared"
+    if command -v apt-get >/dev/null 2>&1; then
+        # Try official repo installer first
+        if [ "$SILENT_OUTPUT" = true ]; then
+            run_cmd "curl -fsSL https://pkg.cloudflare.com/install.sh | bash - >> \"$LOG_FILE\" 2>&1" || true
+            run_cmd "apt-get install -y -qq cloudflared >> \"$LOG_FILE\" 2>&1" || true
+        else
+            run_cmd curl -fsSL https://pkg.cloudflare.com/install.sh \| bash - || true
+            run_cmd apt-get install -y cloudflared || true
+        fi
+        if ! command -v cloudflared >/dev/null 2>&1; then
+            # Fallback to Debian package if repo failed
+            run_cmd apt-get update -y
+            run_cmd apt-get install -y cloudflared || true
+        fi
+    else
+        log warn "apt-get not found; please install cloudflared manually for this OS"
+    fi
+    if ! command -v cloudflared >/dev/null 2>&1; then
+        log error "cloudflared installation failed"; exit 2
+    fi
+}
+
+configure_cloudflare_tunnel() {
+    if [ "$ENABLE_CLOUDFLARE" != true ]; then return 0; fi
+    if [ -z "$DOMAIN" ] || [ "$DOMAIN" = "_" ]; then
+        log error "Cloudflare mode requires --domain <hostname> (e.g., pi.cabhinav.com)"; exit 2
+    fi
+
+    install_cloudflared
+
+    # Prefer connector token if provided; fully non-interactive
+    if [ -n "$CF_TOKEN" ]; then
+        log info "Configuring cloudflared service (token-based)"
+        cat > /etc/systemd/system/cloudflared.service <<EOF
+[Unit]
+Description=Cloudflare Tunnel
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=root
+ExecStart=/usr/bin/cloudflared --no-autoupdate tunnel run --token ${CF_TOKEN}
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+        run_cmd systemctl daemon-reload
+        run_cmd systemctl enable cloudflared
+        run_cmd systemctl restart cloudflared
+        sleep 2
+        if ! systemctl is-active --quiet cloudflared; then
+            log error "cloudflared service failed to start (token mode). Check journalctl -u cloudflared"; exit 2
+        fi
+        log info "cloudflared is running via token"
+        return 0
+    fi
+
+    # If no token, attempt to use existing credentials (assumes prior 'cloudflared tunnel login' done once)
+    log info "Checking for existing cloudflared credentials"
+    CRED_DIR="/root/.cloudflared"
+    [ -d "$CRED_DIR" ] || CRED_DIR="/home/${SYSTEM_USER}/.cloudflared"
+    TUN_JSON="$(ls -1 ${CRED_DIR}/*.json 2>/dev/null | head -n1 || true)"
+    if [ -z "$TUN_JSON" ]; then
+        log error "No cloudflared credentials found and no --cf-token provided. Create a tunnel in Cloudflare (Dashboard → Zero Trust → Tunnels), copy the Connector Token, and rerun with --cf-token <TOKEN>."; exit 2
+    fi
+    # Derive tunnel ID from filename
+    CF_TUNNEL_ID="$(basename "$TUN_JSON" .json)"
+    mkdir -p "$CRED_DIR"
+    cat > "$CRED_DIR/config.yml" <<EOF
+tunnel: ${CF_TUNNEL_ID}
+credentials-file: ${TUN_JSON}
+ingress:
+  - hostname: ${DOMAIN}
+    service: http://localhost:${NGINX_PORT}
+  - service: http_status:404
+EOF
+    log info "Starting cloudflared (credentials mode)"
+    # Use cloudflared's helper to install service if available; else drop a unit
+    if cloudflared --version >/dev/null 2>&1; then
+        run_cmd cloudflared service install || true
+    fi
+    if ! systemctl is-enabled --quiet cloudflared 2>/dev/null; then
+        cat > /etc/systemd/system/cloudflared.service <<EOF
+[Unit]
+Description=Cloudflare Tunnel
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=root
+ExecStart=/usr/bin/cloudflared --no-autoupdate tunnel --config ${CRED_DIR}/config.yml run
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+        run_cmd systemctl daemon-reload
+        run_cmd systemctl enable cloudflared
+    fi
+    run_cmd systemctl restart cloudflared
+    sleep 2
+    if ! systemctl is-active --quiet cloudflared; then
+        log error "cloudflared service failed to start (credentials mode). Check journalctl -u cloudflared"; exit 2
+    fi
+}
+
 issue_lets_encrypt_cert() {
     # Disabled in Cloudflare-only mode
     if [ "$ENABLE_CLOUDFLARE" = true ]; then return 0; fi
@@ -1251,6 +1367,7 @@ if [ "$ENABLE_CLOUDFLARE" != true ]; then
 fi
 
 configure_nginx
+configure_cloudflare_tunnel
 configure_firewall
 verify_stack
 

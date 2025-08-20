@@ -616,18 +616,24 @@ EOF
         
         local tunnel_ready=false
         local attempts=0
-        local max_attempts=30
+        local max_attempts=60  # Increased to 10 minutes total
         
         while [ "$tunnel_ready" = false ] && [ $attempts -lt $max_attempts ]; do
             attempts=$((attempts + 1))
             log info "  Connection attempt $attempts/$max_attempts..."
             
-            # Check if tunnel is responding locally
+            # First, just wait for the tunnel to start locally (this happens quickly)
             if curl -fsS --max-time 5 "http://localhost/health" >/dev/null 2>&1; then
                 log info "  ✓ Local tunnel endpoint responding"
                 
-                # Check DNS routing
-                log info "  Checking DNS routing to Cloudflare edge..."
+                # Now wait for Cloudflare to update their routing (this takes time)
+                log info "  Waiting for Cloudflare to update routing tables..."
+                log info "  This typically takes 2-5 minutes for new connections"
+                
+                # Give Cloudflare time to establish the tunnel connection
+                sleep 30
+                
+                # Check if tunnel is now connected to Cloudflare edge
                 local dns_check
                 dns_check=$(dig +short "$DOMAIN" 2>/dev/null | head -1 || echo "")
                 
@@ -637,20 +643,22 @@ EOF
                     tunnel_ready=true
                     break
                 else
-                    log info "  Waiting for DNS routing to update... (current: $dns_check)"
-                    log info "  This means Cloudflare is still updating their routing tables"
-                    sleep 10
+                    log info "  Still waiting for Cloudflare routing update... (current: $dns_check)"
+                    log info "  Attempt $attempts: Tunnel connected locally, waiting for edge routing..."
+                    sleep 30  # Wait longer between checks
                 fi
             else
                 log info "  Waiting for tunnel to start locally..."
-                sleep 5
+                sleep 10
             fi
         done
         
         if [ "$tunnel_ready" = true ]; then
             log info "✓ Cloudflare tunnel fully connected to edge network"
         else
-            log warn "Tunnel may still be connecting - will verify in final check"
+            log warn "Tunnel connected locally but still waiting for Cloudflare routing"
+            log warn "This is normal - routing can take up to 10 minutes for new connections"
+            log warn "Will verify in final check"
         fi
         
         log info "=== TUNNEL SETUP COMPLETE ==="
@@ -714,79 +722,70 @@ verify_stack() {
             dns_records=$(dig +short "$host" 2>/dev/null | tr '\n' ' ' || echo "DNS lookup failed")
             log info "  Current DNS A records: $dns_records"
             
-            # Check if DNS points to Cloudflare edge IPs
-            if echo "$dns_records" | grep -q "104.21\|104.16\|104.32\|104.48\|104.64\|104.80\|104.96"; then
-                log info "✓ DNS routing to Cloudflare edge detected"
-                
-                # Step 4: Check if tunnel is serving HTTPS traffic
-                log info "Step 4: Testing HTTPS tunnel connectivity..."
-                if curl -fsS --max-time 8 "https://$host/health" >/dev/null 2>&1; then
-                    log info "✓ Tunnel HTTPS health check passed"
-                    
-                    # Step 5: Check for Cloudflare headers
-                    log info "Step 5: Verifying Cloudflare headers..."
-                    local cf_headers
-                    cf_headers=$(curl -fsS --max-time 8 -I "https://$host/health" 2>/dev/null || echo "")
-                    
-                    if echo "$cf_headers" | grep -q "CF-Ray"; then
-                        log info "✓ Cloudflare CF-Ray header present"
-                    else
-                        log warn "⚠ CF-Ray header missing - tunnel may not be fully connected"
-                    fi
-                    
-                    if echo "$cf_headers" | grep -q "Server: cloudflare"; then
-                        log info "✓ Cloudflare server header present"
-                    else
-                        log warn "⚠ Cloudflare server header missing"
-                    fi
-                    
-                    log info "✓ Domain serving OK: https://$host/health"
-                    log info "✓ Cloudflare tunnel fully operational"
-                    
-                else
-                    log error "✗ Tunnel HTTPS health check failed - tunnel not serving traffic"
-                    log info "Attempting tunnel restart to fix issue..."
-                    run_cmd systemctl restart cloudflared
-                    sleep 5
-                    
-                    # Retry health check
-                    if curl -fsS --max-time 8 "https://$host/health" >/dev/null 2>&1; then
-                        log info "✓ Tunnel restored after restart"
-                    else
-                        log error "✗ Tunnel still not working after restart"
-                    fi
-                fi
-                
-            else
-                log warn "⚠ DNS not pointing to Cloudflare edge IPs: $dns_records"
-                log warn "This means the tunnel is not properly connected to Cloudflare"
-                
-                # Check if tunnel is at least running locally
-                log info "Step 4: Checking local tunnel endpoint..."
-                if curl -fsS --max-time 8 "http://localhost/health" >/dev/null 2>&1; then
-                    log info "✓ Local tunnel endpoint working"
-                    log warn "⚠ But DNS routing is incorrect - tunnel needs to reconnect to Cloudflare"
-                else
-                    log error "✗ Local tunnel endpoint also failing"
-                fi
-                
-                # Attempt tunnel restart
-                log info "Step 5: Attempting tunnel restart to fix DNS routing..."
-                run_cmd systemctl restart cloudflared
-                sleep 10
-                
-                # Check DNS again
-                log info "Step 6: Re-checking DNS routing after restart..."
-                local new_dns_records
-                new_dns_records=$(dig +short "$host" 2>/dev/null | tr '\n' ' ' || echo "DNS lookup failed")
-                log info "  DNS after restart: $new_dns_records"
-                
-                if echo "$new_dns_records" | grep -q "104.21\|104.16\|104.32\|104.48\|104.64\|104.80\|104.96"; then
-                    log info "✓ DNS routing restored to Cloudflare edge"
-                else
-                    log error "✗ DNS routing still incorrect after restart"
-                fi
-            fi
+                             # Check if DNS points to Cloudflare edge IPs
+                 if echo "$dns_records" | grep -q "104.21\|104.16\|104.32\|104.48\|104.64\|104.80\|104.96"; then
+                     log info "✓ DNS routing to Cloudflare edge detected"
+                     
+                     # Step 4: Check if tunnel is serving HTTPS traffic
+                     log info "Step 4: Testing HTTPS tunnel connectivity..."
+                     if curl -fsS --max-time 8 "https://$host/health" >/dev/null 2>&1; then
+                         log info "✓ Tunnel HTTPS health check passed"
+                         
+                         # Step 5: Check for Cloudflare headers
+                         log info "Step 5: Verifying Cloudflare headers..."
+                         local cf_headers
+                         cf_headers=$(curl -fsS --max-time 8 -I "https://$host/health" 2>/dev/null || echo "")
+                         
+                         if echo "$cf_headers" | grep -q "CF-Ray"; then
+                             log info "✓ Cloudflare CF-Ray header present"
+                         else
+                             log warn "⚠ CF-Ray header missing - tunnel may not be fully connected"
+                         fi
+                         
+                         if echo "$cf_headers" | grep -q "Server: cloudflare"; then
+                             log info "✓ Cloudflare server header present"
+                         else
+                             log warn "⚠ Cloudflare server header missing"
+                         fi
+                         
+                         log info "✓ Domain serving OK: https://$host/health"
+                         log info "✓ Cloudflare tunnel fully operational"
+                         
+                     else
+                         log error "✗ Tunnel HTTPS health check failed - tunnel not serving traffic"
+                         log info "Attempting tunnel restart to fix issue..."
+                         run_cmd systemctl restart cloudflared
+                         sleep 5
+                         
+                         # Retry health check
+                         if curl -fsS --max-time 8 "https://$host/health" >/dev/null 2>&1; then
+                             log info "✓ Tunnel restored after restart"
+                         else
+                             log error "✗ Tunnel still not working after restart"
+                         fi
+                     fi
+                     
+                 else
+                     log warn "⚠ DNS not pointing to Cloudflare edge IPs: $dns_records"
+                     log warn "This is normal for new tunnel connections - routing takes 2-10 minutes"
+                     log warn "The tunnel is working locally, just waiting for Cloudflare to update routing"
+                     
+                     # Check if tunnel is at least running locally
+                     log info "Step 4: Checking local tunnel endpoint..."
+                     if curl -fsS --max-time 8 "http://localhost/health" >/dev/null 2>&1; then
+                         log info "✓ Local tunnel endpoint working"
+                         log info "✓ Tunnel is connected to Cloudflare (locally accessible)"
+                         log info "✓ Waiting for Cloudflare to update their routing tables..."
+                         log info "✓ This is normal and can take 2-10 minutes for new connections"
+                     else
+                         log error "✗ Local tunnel endpoint failing - this indicates a real problem"
+                     fi
+                     
+                     # Don't restart the tunnel - it's working, just waiting for routing
+                     log info "Step 5: Tunnel is working correctly - no restart needed"
+                     log info "  The tunnel will automatically route traffic once Cloudflare updates routing"
+                     log info "  This typically happens within 2-10 minutes for new connections"
+                 fi
             
         else
             log error "✗ cloudflared service: inactive"

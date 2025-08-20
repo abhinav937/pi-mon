@@ -85,6 +85,10 @@ production_url_updated=false
 public_port_updated=false
 nginx_port_updated=false
 backend_port_updated=false
+enable_cloudflare_updated=false
+cf_hostname_updated=false
+cf_tunnel_name_updated=false
+cf_token_updated=false
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -102,6 +106,19 @@ PRODUCTION_URL=${PRODUCTION_URL:-$(jq -r '.deployment_defaults.production_url //
 PUBLIC_PORT=${PUBLIC_PORT:-$(jq -r '.deployment_defaults.public_port // "80"' "$CONFIG_FILE")}
 NGINX_PORT=${NGINX_PORT:-$(jq -r '.deployment_defaults.nginx_port // "80"' "$CONFIG_FILE")}
 BACKEND_PORT=${BACKEND_PORT:-$(jq -r '.deployment_defaults.backend_port // "5001"' "$CONFIG_FILE")}
+
+# Load Cloudflare settings from config.json if present
+if [ -f "$CONFIG_FILE" ]; then
+    ENABLE_CLOUDFLARE=$(jq -r '.cloudflare.enable // false' "$CONFIG_FILE")
+    CF_HOSTNAME=$(jq -r '.cloudflare.hostname // ""' "$CONFIG_FILE")
+    CF_TUNNEL_NAME=$(jq -r '.cloudflare.tunnel_name // "pi-monitor"' "$CONFIG_FILE")
+    CF_TOKEN=$(jq -r '.cloudflare.token // ""' "$CONFIG_FILE")
+fi
+
+# If CF hostname exists, prefer it as DOMAIN
+if [ -n "$CF_HOSTNAME" ]; then
+    DOMAIN="$CF_HOSTNAME"
+fi
 
 # Update json if any flags were used
 if [ "$domain_updated" = true ] || [ "$api_key_updated" = true ] || [ "$env_updated" = true ] || [ "$production_url_updated" = true ] || [ "$public_port_updated" = true ] || [ "$nginx_port_updated" = true ] || [ "$backend_port_updated" = true ]; then
@@ -231,6 +248,7 @@ Flags:
   
   Cloudflare Tunnel (HTTPS without port-forwarding):
   --enable-cloudflare          Enable Cloudflare Tunnel and configure HTTPS via Cloudflare
+  --disable-cloudflare         Disable Cloudflare Tunnel
   --cf-hostname VALUE          Hostname to expose (e.g., pi.cabhinav.com)
   --cf-tunnel-name VALUE       Tunnel name (default: ${CF_TUNNEL_NAME})
   --cf-token VALUE             Optional connector token (if using token-based auth)
@@ -282,6 +300,27 @@ function update_json() {
     mv "$temp_file.tmp" "$temp_file"
   fi
 
+  # Ensure .cloudflare object exists
+  if jq -e '.cloudflare' "$temp_file" >/dev/null 2>&1; then :; else
+    jq '. + {cloudflare:{}}' "$temp_file" > "$temp_file.tmp" && mv "$temp_file.tmp" "$temp_file"
+  fi
+  if [ "$enable_cloudflare_updated" = true ]; then
+    jq --argjson val $( [ "$ENABLE_CLOUDFLARE" = true ] && echo true || echo false ) '.cloudflare.enable = $val' "$temp_file" > "$temp_file.tmp"
+    mv "$temp_file.tmp" "$temp_file"
+  fi
+  if [ "$cf_hostname_updated" = true ]; then
+    jq --arg val "$CF_HOSTNAME" '.cloudflare.hostname = $val' "$temp_file" > "$temp_file.tmp"
+    mv "$temp_file.tmp" "$temp_file"
+  fi
+  if [ "$cf_tunnel_name_updated" = true ]; then
+    jq --arg val "$CF_TUNNEL_NAME" '.cloudflare.tunnel_name = $val' "$temp_file" > "$temp_file.tmp"
+    mv "$temp_file.tmp" "$temp_file"
+  fi
+  if [ "$cf_token_updated" = true ]; then
+    jq --arg val "$CF_TOKEN" '.cloudflare.token = $val' "$temp_file" > "$temp_file.tmp"
+    mv "$temp_file.tmp" "$temp_file"
+  fi
+
   mv "$temp_file" "$CONFIG_FILE"
   log info "Updated config.json with new values"
 }
@@ -317,10 +356,11 @@ parse_args() {
             --verbose-output) SILENT_OUTPUT=false; shift 1 ;;
             --show-config) SHOW_CONFIG=true; shift 1 ;;
             --test-checksums) TEST_CHECKSUMS=true; shift 1 ;;
-            --enable-cloudflare) ENABLE_CLOUDFLARE=true; shift 1 ;;
-            --cf-hostname) CF_HOSTNAME="$2"; shift 2 ;;
-            --cf-tunnel-name) CF_TUNNEL_NAME="$2"; shift 2 ;;
-            --cf-token) CF_TOKEN="$2"; shift 2 ;;
+            --enable-cloudflare) ENABLE_CLOUDFLARE=true; enable_cloudflare_updated=true; shift 1 ;;
+            --disable-cloudflare) ENABLE_CLOUDFLARE=false; enable_cloudflare_updated=true; shift 1 ;;
+            --cf-hostname) CF_HOSTNAME="$2"; cf_hostname_updated=true; DOMAIN="$2"; shift 2 ;;
+            --cf-tunnel-name) CF_TUNNEL_NAME="$2"; cf_tunnel_name_updated=true; shift 2 ;;
+            --cf-token) CF_TOKEN="$2"; cf_token_updated=true; shift 2 ;;
             --no-https-redirect) FORCE_HTTPS_REDIRECT=false; shift 1 ;;
             -h|--help) usage; exit 0 ;;
             *) log error "Unknown flag: $1"; usage; exit 2 ;;
@@ -330,6 +370,11 @@ parse_args() {
 }
 
 parse_args "$@"
+
+# Update json if any flags were used
+if [ "$domain_updated" = true ] || [ "$api_key_updated" = true ] || [ "$env_updated" = true ] || [ "$production_url_updated" = true ] || [ "$public_port_updated" = true ] || [ "$nginx_port_updated" = true ] || [ "$backend_port_updated" = true ] || [ "$enable_cloudflare_updated" = true ] || [ "$cf_hostname_updated" = true ] || [ "$cf_tunnel_name_updated" = true ] || [ "$cf_token_updated" = true ]; then
+  update_json
+fi
 
 [ -n "$VENV_DIR" ] || VENV_DIR="$PI_MON_DIR/.venv"
 [ -n "$STATE_DIR" ] || STATE_DIR="$PI_MON_DIR/.deploy_state"
@@ -410,6 +455,9 @@ force_backend:     $FORCE_BACKEND
 use_setup_script:  $USE_SETUP_SCRIPT
 enable_ssl:        $ENABLE_SSL
 enable_cloudflare: $ENABLE_CLOUDFLARE
+cf_hostname:       ${CF_HOSTNAME:-}
+cf_tunnel_name:    ${CF_TUNNEL_NAME:-}
+cf_token:          $( [ -n "$CF_TOKEN" ] && echo "***${CF_TOKEN: -5}" || echo "" )
 ssl_cert_path:     $SSL_CERT_PATH
 ssl_key_path:      $SSL_KEY_PATH
 ssl_cert_days:     $SSL_CERT_DAYS
@@ -497,6 +545,47 @@ generate_checksum() {
     find_cmd="$find_cmd -type f $file_patterns -print0 | sort -z | xargs -0 sha256sum | sha256sum | awk '{print \$1}'"
     
     eval "$find_cmd"
+}
+
+# ----------------------------------------------------------------------------
+# Cloudflare status and domain reachability
+# ----------------------------------------------------------------------------
+cloudflare_status() {
+    if [ "$ENABLE_CLOUDFLARE" != true ]; then return 0; fi
+    local host="${CF_HOSTNAME:-$DOMAIN}"
+    announce "cloudflare: checking status for $host"
+    if systemctl is-active --quiet cloudflared; then
+        log info "cloudflared service: active"
+    else
+        log error "cloudflared service: inactive"
+        systemctl status cloudflared --no-pager -l | tail -n 20 || true
+    fi
+
+    # DNS
+    local a_records="$(getent ahostsv4 "$host" 2>/dev/null | awk '{print $1}' | sort -u | tr '\n' ' ' || true)"
+    [ -n "$a_records" ] && log info "DNS A records: $a_records"
+
+    # Check reachability
+    local ok=false
+    if curl -fsS --max-time 8 "https://$host/health" >/dev/null 2>&1; then ok=true; fi
+    if [ "$ok" = true ]; then
+        log info "Domain serving OK: https://$host/health"
+        local headers
+        headers="$(curl -fsSI --max-time 5 "https://$host/" 2>/dev/null || true)"
+        echo "$headers" | grep -iq '^server: *cloudflare' && log info "Cloudflare edge detected"
+        echo "$headers" | grep -iq '^cf-ray:' && log info "Cloudflare CF-Ray present"
+    else
+        log warn "Domain not reachable (yet): https://$host/health"
+    fi
+
+    mkdir -p "$STATE_DIR"
+    {
+        echo "cloudflared_active=$(systemctl is-active cloudflared 2>/dev/null || echo unknown)"
+        echo "hostname=$host"
+        echo "dns_a=[$a_records]"
+        echo "reachable=$ok"
+        echo "checked_at=$(date -Iseconds)"
+    } > "$STATE_DIR/cloudflare_status.txt" 2>/dev/null || true
 }
 
 # ----------------------------------------------------------------------------
@@ -1358,6 +1447,9 @@ verify_stack() {
             fi
         fi
     done
+    if [ "$ENABLE_CLOUDFLARE" = true ]; then
+        cloudflare_status
+    fi
 }
 
 # ----------------------------------------------------------------------------

@@ -177,5 +177,11 @@
     "public_port": "80",
     "nginx_port": "80",
     "backend_port": "5001"
+  },
+  "cloudflare": {
+    "enable": false,
+    "hostname": "pi.cabhinav.com",
+    "tunnel_name": "pi-monitor",
+    "token": ""
   }
 }

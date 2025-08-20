@@ -170,7 +170,7 @@
     }
   },
   "deployment_defaults": {
-    "domain": "pi.abhinav.com",
+    "domain": "pi.cabhinav.com",
     "api_key": "pi-monitor-api-key-2024",
     "env": "production",
     "production_url": "http://localhost",

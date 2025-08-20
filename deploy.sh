@@ -87,7 +87,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 CONFIG_FILE="$PI_MON_DIR/config.json"
 # Load configurations from JSON if not set
-DOMAIN=${DOMAIN:-$(jq -r '.deployment_defaults.domain // "pi.abhinav.com"' "$CONFIG_FILE")}
+DOMAIN=${DOMAIN:-$(jq -r '.deployment_defaults.domain // "pi.cabhinav.com"' "$CONFIG_FILE")}
 API_KEY=${API_KEY:-$(jq -r '.deployment_defaults.api_key // "pi-monitor-api-key-2024"' "$CONFIG_FILE")}
 ENV=${ENV:-$(jq -r '.deployment_defaults.env // "production"' "$CONFIG_FILE")}
 PRODUCTION_URL=${PRODUCTION_URL:-$(jq -r '.deployment_defaults.production_url // "http://localhost"' "$CONFIG_FILE")}

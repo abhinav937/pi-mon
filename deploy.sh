@@ -267,6 +267,7 @@ LOG_FILE="$STATE_DIR/deploy.log"
 
 # Auto-detect existing Nginx SSL/port to keep idempotence when no flags are passed
 SITE_NAME="pi-monitor"
+if [ -n "$DOMAIN" ] && [ "$DOMAIN" != "_" ]; then SITE_NAME="$DOMAIN"; fi
 SITE_CONF_DST="$NGINX_SITES_AVAILABLE/$SITE_NAME"
 if [ -f "$SITE_CONF_DST" ]; then
     if grep -qE 'listen[^;]*443.*ssl|ssl_certificate' "$SITE_CONF_DST"; then
@@ -386,7 +387,7 @@ if [ -f "$SERVICE_FILE" ]; then
 fi
 
 NGINX_CONFIGURED=false
-if [ -f "$NGINX_SITES_AVAILABLE/$DOMAIN" ] && [ -L "$NGINX_SITES_ENABLED/$DOMAIN" ]; then
+if [ -f "$NGINX_SITES_AVAILABLE/$SITE_NAME" ] && [ -L "$NGINX_SITES_ENABLED/$SITE_NAME" ]; then
     NGINX_CONFIGURED=true
 fi
 
@@ -884,10 +885,14 @@ configure_nginx() {
     fi
 
     local site_conf_src="$PI_MON_DIR/nginx/pi-monitor.conf"
-    local site_name="pi-monitor"
+    local site_name="$SITE_NAME"
     local site_conf_dst="$NGINX_SITES_AVAILABLE/$site_name"
     local tmp_conf
     tmp_conf="$(mktemp)"
+
+    # Remove any certbot-managed site file for the same domain to avoid conflicts
+    if [ -n "$DOMAIN" ] && [ -e "$NGINX_SITES_ENABLED/$DOMAIN" ]; then run_cmd rm -f "$NGINX_SITES_ENABLED/$DOMAIN"; fi
+    if [ -n "$DOMAIN" ] && [ -e "$NGINX_SITES_AVAILABLE/$DOMAIN" ]; then run_cmd rm -f "$NGINX_SITES_AVAILABLE/$DOMAIN"; fi
 
     # When SSL is enabled, ignore the static template and generate appropriate config
     if [ -f "$site_conf_src" ] && [ "$ENABLE_SSL" != true ]; then
@@ -921,8 +926,8 @@ server {
   listen ${NGINX_PORT} ssl http2;
   server_name ${DOMAIN} ${STATIC_IP} localhost _;
   
-  ssl_certificate ${SSL_CERT_PATH}.crt;
-  ssl_certificate_key ${SSL_KEY_PATH}.key;
+  ssl_certificate ${CERT_FILE};
+  ssl_certificate_key ${KEY_FILE};
   
   # SSL configuration
   ssl_protocols TLSv1.2 TLSv1.3;
@@ -1091,8 +1096,9 @@ issue_lets_encrypt_cert() {
     local staging_flag=""
     if [ "$LE_STAGING" = true ]; then staging_flag="--staging"; fi
 
-    log info "Requesting Let's Encrypt certificate for $DOMAIN"
-    run_cmd certbot --nginx -d "$DOMAIN" --email "$LE_EMAIL" --agree-tos --redirect $staging_flag --non-interactive || true
+    log info "Requesting Let's Encrypt certificate for $DOMAIN (certonly)"
+    # Use certonly so certbot does not write its own site file; we'll manage nginx ourselves
+    run_cmd certbot certonly --nginx -d "$DOMAIN" --email "$LE_EMAIL" --agree-tos $staging_flag --non-interactive || true
 
     # Paths where certbot stores certs
     CERT_FILE="/etc/letsencrypt/live/${DOMAIN}/fullchain.pem"

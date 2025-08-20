@@ -478,6 +478,13 @@ generate_ssl_certificate() {
             CN_VALUE="$STATIC_IP"
         fi
         local subject="/C=$SSL_COUNTRY/ST=$SSL_STATE/L=$SSL_CITY/O=$SSL_ORG/OU=$SSL_OU/CN=$CN_VALUE"
+
+        # Build SAN list: include domain (if any), public IP, LAN IP, localhost and 127.0.0.1
+        local LAN_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+        local SAN_LIST="DNS:localhost,IP:127.0.0.1"
+        if [ -n "$CN_VALUE" ] && [ "$CN_VALUE" != "_" ]; then SAN_LIST="DNS:$CN_VALUE,$SAN_LIST"; fi
+        if [ -n "$STATIC_IP" ]; then SAN_LIST="IP:$STATIC_IP,$SAN_LIST"; fi
+        if [ -n "$LAN_IP" ]; then SAN_LIST="IP:$LAN_IP,$SAN_LIST"; fi
         
         log info "Generating self-signed SSL certificate for $SSL_CERT_DAYS days"
         log debug "Certificate subject: $subject"
@@ -488,14 +495,14 @@ generate_ssl_certificate() {
                 -keyout \"${SSL_KEY_PATH}.key\" \
                 -out \"${SSL_CERT_PATH}.crt\" \
                 -subj \"$subject\" \
-                -addext \"subjectAltName=DNS:$CN_VALUE,DNS:localhost,IP:$STATIC_IP,IP:127.0.0.1\" \
+                -addext \"subjectAltName=$SAN_LIST\" \
                 >> \"$LOG_FILE\" 2>&1"
         else
             run_cmd openssl req -x509 -nodes -days "$SSL_CERT_DAYS" -newkey rsa:2048 \
                 -keyout "${SSL_KEY_PATH}.key" \
                 -out "${SSL_CERT_PATH}.crt" \
                 -subj "$subject" \
-                -addext "subjectAltName=DNS:$CN_VALUE,DNS:localhost,IP:$STATIC_IP,IP:127.0.0.1"
+                -addext "subjectAltName=$SAN_LIST"
         fi
         
         # Set appropriate permissions

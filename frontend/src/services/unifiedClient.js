@@ -27,7 +27,7 @@ const logDebug = (message, data = null, type = 'info') => {
 class UnifiedClient {
   constructor(options = {}) {
     logDebug('Initializing UnifiedClient', { options });
-
+    
     // Always prefer same-origin to avoid mixed content when served over HTTPS through Nginx
     const sameOrigin = `${window.location.protocol}//${window.location.host}`; // includes port if present
     const envUrl = process.env.REACT_APP_SERVER_URL || process.env.REACT_APP_API_BASE_URL;
@@ -41,14 +41,14 @@ class UnifiedClient {
     this.apiKey = localStorage.getItem('pi-monitor-api-key');
     this.dataListeners = new Set();
     this.latestStats = null;
-
+    
     logDebug('Client configuration', {
       serverUrl: this.serverUrl,
       hasApiKey: !!this.apiKey,
       hostname: window.location.hostname,
       protocol: window.location.protocol
     });
-
+    
     this.httpClient = axios.create({
       baseURL: this.serverUrl,
       timeout: 10000,
@@ -58,7 +58,7 @@ class UnifiedClient {
         Expires: '0'
       }
     });
-
+    
     this.httpClient.interceptors.request.use(
       (config) => {
         if (this.apiKey) config.headers.Authorization = `Bearer ${this.apiKey}`;
@@ -66,7 +66,7 @@ class UnifiedClient {
       },
       (error) => Promise.reject(error)
     );
-
+    
     this.httpClient.interceptors.response.use(
       (response) => response,
       async (error) => {
@@ -84,7 +84,7 @@ class UnifiedClient {
         return Promise.reject(error);
       }
     );
-
+    
     this.backendInfo = null;
     this.backendHeaders = {};
 
@@ -170,13 +170,13 @@ class UnifiedClient {
   async controlService(serviceName, action) { const r = await this.httpClient.post('/api/services', { service_name: serviceName, action }); return r.data; }
   async getMetricsHistory(minutes=60) { const r = await this.httpClient.get(`/api/metrics/history?minutes=${minutes}`, { params: { _ts: Date.now() } }); return r.data; }
   async getMetricsRange({ start, end, limit, offset } = {}) {
-    const params = new URLSearchParams();
-    if (start != null) params.set('start', String(start));
-    if (end != null) params.set('end', String(end));
-    if (limit != null) params.set('limit', String(limit));
-    if (offset != null) params.set('offset', String(offset));
-    const qs = params.toString();
-    const url = `/api/metrics/range${qs ? `?${qs}` : ''}`;
+      const params = new URLSearchParams();
+      if (start != null) params.set('start', String(start));
+      if (end != null) params.set('end', String(end));
+      if (limit != null) params.set('limit', String(limit));
+      if (offset != null) params.set('offset', String(offset));
+      const qs = params.toString();
+      const url = `/api/metrics/range${qs ? `?${qs}` : ''}`;
     const r = await this.httpClient.get(url); return r.data;
   }
   async getDatabaseStats() { const r = await this.httpClient.get('/api/metrics/database'); return r.data; }

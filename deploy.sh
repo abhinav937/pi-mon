@@ -404,6 +404,11 @@ if [ "$PRODUCTION_URL" = "http://localhost" ] || [ -z "$PRODUCTION_URL" ]; then
     fi
 fi
 
+# Ensure https scheme when SSL is enabled even if config.json provided http
+if [ "$ENABLE_SSL" = true ]; then
+    PRODUCTION_URL="$(echo "$PRODUCTION_URL" | sed -E 's#^http://#https://#')"
+fi
+
 # Show resolved configuration and exit early if requested
 if [ "$SHOW_CONFIG" = true ]; then
     cat <<CFG

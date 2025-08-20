@@ -163,17 +163,17 @@
       "frontend": "http://localhost:3000"
     },
     "production": {
-      "backend": "http://65.36.123.68:5001",
-      "frontend": "http://65.36.123.68",
-      "health": "http://65.36.123.68:5001/health",
-      "api_base": "http://65.36.123.68"
+      "backend": "https://pi.cabhinav.com",
+      "frontend": "https://pi.cabhinav.com",
+      "health": "https://pi.cabhinav.com/health",
+      "api_base": "https://pi.cabhinav.com"
     }
   },
   "deployment_defaults": {
     "domain": "pi.cabhinav.com",
     "api_key": "pi-monitor-api-key-2024",
     "env": "production",
-    "production_url": "http://localhost",
+    "production_url": "https://pi.cabhinav.com",
     "public_port": "80",
     "nginx_port": "80",
     "backend_port": "5001"

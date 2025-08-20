@@ -29,6 +29,18 @@ NGINX_PORT="80"
 BACKEND_PORT="5001"
 SYSTEM_USER=""
 
+# SSL/HTTPS Configuration
+ENABLE_SSL=false
+SSL_CERT_PATH="/etc/ssl/certs/pi-monitor"
+SSL_KEY_PATH="/etc/ssl/private/pi-monitor"
+SSL_CERT_DAYS="365"
+FORCE_SSL_REGENERATE=false
+SSL_COUNTRY="US"
+SSL_STATE="State"
+SSL_CITY="City"
+SSL_ORG="Pi Monitor"
+SSL_OU="IT Department"
+
 # Behavior flags
 LOG_LEVEL="info"   # debug|info|warn|error
 NO_COLOR=false
@@ -43,6 +55,7 @@ USE_SETUP_SCRIPT=false
 SILENT_OUTPUT=true   # suppress noisy command outputs by default
 SHOW_CONFIG=false
 TEST_CHECKSUMS=false
+FORCE_HTTPS_REDIRECT=true  # Redirect HTTP to HTTPS when SSL is enabled
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -167,6 +180,19 @@ Flags:
   --force-frontend             Force frontend rebuild
   --force-backend              Force backend restart
   --use-setup-script           Run scripts/setup_venv_systemd.sh as a bootstrap (optional)
+  
+  SSL/HTTPS Options:
+  --enable-ssl                 Enable HTTPS with self-signed certificates
+  --ssl-cert-path PATH         SSL certificate file path (default: ${SSL_CERT_PATH})
+  --ssl-key-path PATH          SSL private key file path (default: ${SSL_KEY_PATH})
+  --ssl-cert-days N            Certificate validity in days (default: ${SSL_CERT_DAYS})
+  --ssl-country VALUE          Certificate country code (default: ${SSL_COUNTRY})
+  --ssl-state VALUE            Certificate state/province (default: ${SSL_STATE})
+  --ssl-city VALUE             Certificate city (default: ${SSL_CITY})
+  --ssl-org VALUE              Certificate organization (default: ${SSL_ORG})
+  --ssl-ou VALUE               Certificate organizational unit (default: ${SSL_OU})
+  --force-ssl-regen            Force SSL certificate regeneration
+  --no-https-redirect          Disable automatic HTTP to HTTPS redirect
   --silent-output              Suppress noisy command outputs (default)
   --verbose-output             Show full outputs of package managers/builds
   --show-config                Print resolved configuration and exit
@@ -179,7 +205,7 @@ parse_args() {
     while [ $# -gt 0 ]; do
         case "$1" in
             --domain) DOMAIN="$2"; shift 2 ;;
-            --static-ip) STATIC_IP="$2"; PRODUCTION_URL="http://$2"; shift 2 ;;
+            --static-ip) STATIC_IP="$2"; shift 2 ;;
             --web-root) WEB_ROOT="$2"; shift 2 ;;
             --pi-mon-dir) PI_MON_DIR="$2"; shift 2 ;;
             --venv-dir) VENV_DIR="$2"; shift 2 ;;
@@ -202,6 +228,17 @@ parse_args() {
             --verbose-output) SILENT_OUTPUT=false; shift 1 ;;
             --show-config) SHOW_CONFIG=true; shift 1 ;;
             --test-checksums) TEST_CHECKSUMS=true; shift 1 ;;
+            --enable-ssl) ENABLE_SSL=true; NGINX_PORT="443"; shift 1 ;;
+            --ssl-cert-path) SSL_CERT_PATH="$2"; shift 2 ;;
+            --ssl-key-path) SSL_KEY_PATH="$2"; shift 2 ;;
+            --ssl-cert-days) SSL_CERT_DAYS="$2"; shift 2 ;;
+            --ssl-country) SSL_COUNTRY="$2"; shift 2 ;;
+            --ssl-state) SSL_STATE="$2"; shift 2 ;;
+            --ssl-city) SSL_CITY="$2"; shift 2 ;;
+            --ssl-org) SSL_ORG="$2"; shift 2 ;;
+            --ssl-ou) SSL_OU="$2"; shift 2 ;;
+            --force-ssl-regen) FORCE_SSL_REGENERATE=true; shift 1 ;;
+            --no-https-redirect) FORCE_HTTPS_REDIRECT=false; shift 1 ;;
             -h|--help) usage; exit 0 ;;
             *) log error "Unknown flag: $1"; usage; exit 2 ;;
         esac
@@ -235,9 +272,29 @@ fi
 if [ -z "$STATIC_IP" ]; then
     STATIC_IP="127.0.0.1"
 fi
-# Align production URL with resolved STATIC_IP if not explicitly set
+# Align production URL with resolved STATIC_IP and SSL settings
+if [ "$ENABLE_SSL" = true ]; then
+    PROTOCOL="https"
+    if [ "$NGINX_PORT" = "443" ]; then
+        PORT_SUFFIX=""
+    else
+        PORT_SUFFIX=":$NGINX_PORT"
+    fi
+else
+    PROTOCOL="http"
+    if [ "$NGINX_PORT" = "80" ]; then
+        PORT_SUFFIX=""
+    else
+        PORT_SUFFIX=":$NGINX_PORT"
+    fi
+fi
+
 if [ "$PRODUCTION_URL" = "http://localhost" ] || [ -z "$PRODUCTION_URL" ]; then
-    PRODUCTION_URL="http://$STATIC_IP"
+    if [ "$DOMAIN" != "_" ]; then
+        PRODUCTION_URL="${PROTOCOL}://${DOMAIN}${PORT_SUFFIX}"
+    else
+        PRODUCTION_URL="${PROTOCOL}://${STATIC_IP}${PORT_SUFFIX}"
+    fi
 fi
 
 # Show resolved configuration and exit early if requested
@@ -260,6 +317,11 @@ skip_nginx:        $SKIP_NGINX
 force_frontend:    $FORCE_FRONTEND
 force_backend:     $FORCE_BACKEND
 use_setup_script:  $USE_SETUP_SCRIPT
+enable_ssl:        $ENABLE_SSL
+ssl_cert_path:     $SSL_CERT_PATH
+ssl_key_path:      $SSL_KEY_PATH
+ssl_cert_days:     $SSL_CERT_DAYS
+force_https_redirect: $FORCE_HTTPS_REDIRECT
 silent_output:     $SILENT_OUTPUT
 CFG
     exit 0
@@ -354,6 +416,87 @@ generate_nginx_checksum() {
         sha256sum "$config_file" | awk '{print $1}'
     else
         echo ""
+    fi
+}
+
+# ----------------------------------------------------------------------------
+# SSL Certificate Generation
+# ----------------------------------------------------------------------------
+generate_ssl_certificate() {
+    if [ "$ENABLE_SSL" != true ]; then return 0; fi
+    
+    log info "Setting up SSL certificates"
+    
+    # Create directories if they don't exist
+    local cert_dir=$(dirname "$SSL_CERT_PATH")
+    local key_dir=$(dirname "$SSL_KEY_PATH")
+    
+    run_cmd mkdir -p "$cert_dir" "$key_dir"
+    run_cmd chmod 755 "$cert_dir"
+    run_cmd chmod 700 "$key_dir"
+    
+    # Check if certificates exist and are valid
+    local need_generate=false
+    if [ "$FORCE_SSL_REGENERATE" = true ]; then
+        log info "Force regenerating SSL certificates"
+        need_generate=true
+    elif [ ! -f "${SSL_CERT_PATH}.crt" ] || [ ! -f "${SSL_KEY_PATH}.key" ]; then
+        log info "SSL certificates not found, generating new ones"
+        need_generate=true
+    else
+        # Check if certificate is expired or expires soon (within 30 days)
+        local expires_in_days
+        expires_in_days=$(openssl x509 -in "${SSL_CERT_PATH}.crt" -noout -checkend 2592000 2>/dev/null && echo "30+" || echo "0")
+        if [ "$expires_in_days" = "0" ]; then
+            log info "SSL certificate expired or expires within 30 days, regenerating"
+            need_generate=true
+        else
+            log info "SSL certificates are valid and not expiring soon"
+        fi
+    fi
+    
+    if [ "$need_generate" = true ]; then
+        # Determine subject for certificate
+        local subject
+        if [ "$DOMAIN" != "_" ]; then
+            subject="/C=$SSL_COUNTRY/ST=$SSL_STATE/L=$SSL_CITY/O=$SSL_ORG/OU=$SSL_OU/CN=$DOMAIN"
+        else
+            subject="/C=$SSL_COUNTRY/ST=$SSL_STATE/L=$SSL_CITY/O=$SSL_ORG/OU=$SSL_OU/CN=$STATIC_IP"
+        fi
+        
+        log info "Generating self-signed SSL certificate for $SSL_CERT_DAYS days"
+        log debug "Certificate subject: $subject"
+        
+        # Generate private key and certificate
+        if [ "$SILENT_OUTPUT" = true ]; then
+            run_cmd "openssl req -x509 -nodes -days $SSL_CERT_DAYS -newkey rsa:2048 \
+                -keyout \"${SSL_KEY_PATH}.key\" \
+                -out \"${SSL_CERT_PATH}.crt\" \
+                -subj \"$subject\" \
+                -addext \"subjectAltName=DNS:$DOMAIN,DNS:localhost,IP:$STATIC_IP,IP:127.0.0.1\" \
+                >> \"$LOG_FILE\" 2>&1"
+        else
+            run_cmd openssl req -x509 -nodes -days "$SSL_CERT_DAYS" -newkey rsa:2048 \
+                -keyout "${SSL_KEY_PATH}.key" \
+                -out "${SSL_CERT_PATH}.crt" \
+                -subj "$subject" \
+                -addext "subjectAltName=DNS:$DOMAIN,DNS:localhost,IP:$STATIC_IP,IP:127.0.0.1"
+        fi
+        
+        # Set appropriate permissions
+        run_cmd chmod 644 "${SSL_CERT_PATH}.crt"
+        run_cmd chmod 600 "${SSL_KEY_PATH}.key"
+        run_cmd chown root:root "${SSL_CERT_PATH}.crt" "${SSL_KEY_PATH}.key"
+        
+        log info "SSL certificate generated successfully"
+        log info "Certificate: ${SSL_CERT_PATH}.crt"
+        log info "Private key: ${SSL_KEY_PATH}.key"
+        
+        # Show certificate info in debug mode
+        if [ "$LOG_LEVEL" = "debug" ]; then
+            log debug "Certificate details:"
+            openssl x509 -in "${SSL_CERT_PATH}.crt" -noout -text | head -20
+        fi
     fi
 }
 
@@ -721,7 +864,78 @@ configure_nginx() {
         sed -i -E "s@proxy_pass[[:space:]]+http://127.0.0.1:[0-9]+/api/@proxy_pass http://127.0.0.1:${BACKEND_PORT}/api/@g" "$tmp_conf" || true
         sed -i -E "s@proxy_pass[[:space:]]+http://127.0.0.1:[0-9]+/health@proxy_pass http://127.0.0.1:${BACKEND_PORT}/health@g" "$tmp_conf" || true
     else
-        cat > "$tmp_conf" <<EOF
+        if [ "$ENABLE_SSL" = true ]; then
+            # HTTPS configuration
+            cat > "$tmp_conf" <<EOF
+# HTTP to HTTPS redirect
+server {
+  listen 80;
+  server_name ${DOMAIN};
+  
+$(if [ "$FORCE_HTTPS_REDIRECT" = true ]; then
+echo "  return 301 https://\$server_name\$request_uri;"
+else
+echo "  location /.well-known/acme-challenge/ { 
+    root ${WEB_ROOT}; 
+  }
+  location / {
+    return 301 https://\$server_name\$request_uri;
+  }"
+fi)
+}
+
+# HTTPS server
+server {
+  listen ${NGINX_PORT} ssl http2;
+  server_name ${DOMAIN};
+  
+  ssl_certificate ${SSL_CERT_PATH}.crt;
+  ssl_certificate_key ${SSL_KEY_PATH}.key;
+  
+  # SSL configuration
+  ssl_protocols TLSv1.2 TLSv1.3;
+  ssl_ciphers ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-AES128-SHA256:ECDHE-RSA-AES256-SHA384;
+  ssl_prefer_server_ciphers off;
+  ssl_session_cache shared:SSL:10m;
+  ssl_session_timeout 10m;
+
+  root ${WEB_ROOT};
+  index index.html;
+
+  # Security headers
+  add_header X-Frame-Options DENY;
+  add_header X-Content-Type-Options nosniff;
+  add_header X-XSS-Protection "1; mode=block";
+  add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+
+  location / {
+    try_files \$uri /index.html;
+  }
+
+  location /api/ {
+    proxy_pass http://127.0.0.1:${BACKEND_PORT}/api/;
+    proxy_http_version 1.1;
+    proxy_set_header Host \$host;
+    proxy_set_header X-Real-IP \$remote_addr;
+    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto \$scheme;
+    proxy_set_header Upgrade \$http_upgrade;
+    proxy_set_header Connection "upgrade";
+  }
+
+  location /health {
+    proxy_pass http://127.0.0.1:${BACKEND_PORT}/health;
+    proxy_http_version 1.1;
+    proxy_set_header Host \$host;
+    proxy_set_header X-Real-IP \$remote_addr;
+    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto \$scheme;
+  }
+}
+EOF
+        else
+            # HTTP only configuration
+            cat > "$tmp_conf" <<EOF
 server {
   listen ${NGINX_PORT};
   server_name ${DOMAIN};
@@ -730,30 +944,31 @@ server {
   index index.html;
 
   location / {
-    try_files $uri /index.html;
+    try_files \$uri /index.html;
   }
 
   location /api/ {
     proxy_pass http://127.0.0.1:${BACKEND_PORT}/api/;
     proxy_http_version 1.1;
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
-    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Host \$host;
+    proxy_set_header X-Real-IP \$remote_addr;
+    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto \$scheme;
+    proxy_set_header Upgrade \$http_upgrade;
     proxy_set_header Connection "upgrade";
   }
 
   location /health {
     proxy_pass http://127.0.0.1:${BACKEND_PORT}/health;
     proxy_http_version 1.1;
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header Host \$host;
+    proxy_set_header X-Real-IP \$remote_addr;
+    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto \$scheme;
   }
 }
 EOF
+        fi
     fi
 
     local desired_checksum existing_checksum stored_checksum
@@ -879,6 +1094,7 @@ fi
 ensure_venv
 setup_backend_service
 build_frontend
+generate_ssl_certificate
 configure_nginx
 configure_firewall
 verify_stack

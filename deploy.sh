@@ -37,7 +37,7 @@ SERVICE_FILE="/etc/systemd/system/pi-monitor-backend.service"
 STATE_DIR=""
 SYSTEM_USER=""
 
-# SSL/HTTPS Configuration
+# SSL/HTTPS Configuration (legacy direct exposure)
 ENABLE_SSL=false
 SSL_CERT_PATH="/etc/ssl/certs/pi-monitor"
 SSL_KEY_PATH="/etc/ssl/private/pi-monitor"
@@ -49,7 +49,15 @@ SSL_CITY="City"
 SSL_ORG="Pi Monitor"
 SSL_OU="IT Department"
 
-# Let's Encrypt
+# Cloudflare Tunnel (preferred for HTTPS without port-forwarding)
+ENABLE_CLOUDFLARE=false
+CF_HOSTNAME=""           # e.g., pi.cabhinav.com
+CF_TUNNEL_NAME="pi-monitor"
+CF_TUNNEL_ID=""         # optional, if already created
+CF_CREDENTIALS_FILE=""  # e.g., /etc/cloudflared/<TUNNEL_ID>.json
+CF_TOKEN=""             # optional; if provided, run connector with token
+
+# Let's Encrypt (disabled when Cloudflare is enabled)
 ENABLE_LETSENCRYPT=false
 LE_EMAIL=""
 LE_STAGING=false
@@ -68,7 +76,7 @@ USE_SETUP_SCRIPT=false
 SILENT_OUTPUT=true   # suppress noisy command outputs by default
 SHOW_CONFIG=false
 TEST_CHECKSUMS=false
-FORCE_HTTPS_REDIRECT=true  # Redirect HTTP to HTTPS when SSL is enabled
+FORCE_HTTPS_REDIRECT=true  # Redirect HTTP to HTTPS when SSL is enabled (ignored if Cloudflare enabled)
 
 domain_updated=false
 api_key_updated=false
@@ -221,21 +229,12 @@ Flags:
   --force-backend              Force backend restart
   --use-setup-script           Run scripts/setup_venv_systemd.sh as a bootstrap (optional)
   
-  SSL/HTTPS Options:
-  --enable-ssl                 Enable HTTPS with self-signed certificates
-  --ssl-cert-path PATH         SSL certificate file path (default: ${SSL_CERT_PATH})
-  --ssl-key-path PATH          SSL private key file path (default: ${SSL_KEY_PATH})
-  --ssl-cert-days N            Certificate validity in days (default: ${SSL_CERT_DAYS})
-  --ssl-country VALUE          Certificate country code (default: ${SSL_COUNTRY})
-  --ssl-state VALUE            Certificate state/province (default: ${SSL_STATE})
-  --ssl-city VALUE             Certificate city (default: ${SSL_CITY})
-  --ssl-org VALUE              Certificate organization (default: ${SSL_ORG})
-  --ssl-ou VALUE               Certificate organizational unit (default: ${SSL_OU})
-  --force-ssl-regen            Force SSL certificate regeneration
-  --no-https-redirect          Disable automatic HTTP to HTTPS redirect
-  --enable-lets-encrypt        Obtain a trusted HTTPS certificate via Let's Encrypt
-  --le-email EMAIL             Email for Let's Encrypt registration/expiry notices
-  --le-staging                 Use Let's Encrypt staging (for testing / rate-limit safe)
+  Cloudflare Tunnel (HTTPS without port-forwarding):
+  --enable-cloudflare          Enable Cloudflare Tunnel and configure HTTPS via Cloudflare
+  --cf-hostname VALUE          Hostname to expose (e.g., pi.cabhinav.com)
+  --cf-tunnel-name VALUE       Tunnel name (default: ${CF_TUNNEL_NAME})
+  --cf-token VALUE             Optional connector token (if using token-based auth)
+  --no-https-redirect          Disable HTTP->HTTPS redirect on local Nginx (usually leave enabled)
   --silent-output              Suppress noisy command outputs (default)
   --verbose-output             Show full outputs of package managers/builds
   --show-config                Print resolved configuration and exit
@@ -318,20 +317,11 @@ parse_args() {
             --verbose-output) SILENT_OUTPUT=false; shift 1 ;;
             --show-config) SHOW_CONFIG=true; shift 1 ;;
             --test-checksums) TEST_CHECKSUMS=true; shift 1 ;;
-            --enable-ssl) ENABLE_SSL=true; NGINX_PORT="443"; shift 1 ;;
-            --ssl-cert-path) SSL_CERT_PATH="$2"; shift 2 ;;
-            --ssl-key-path) SSL_KEY_PATH="$2"; shift 2 ;;
-            --ssl-cert-days) SSL_CERT_DAYS="$2"; shift 2 ;;
-            --ssl-country) SSL_COUNTRY="$2"; shift 2 ;;
-            --ssl-state) SSL_STATE="$2"; shift 2 ;;
-            --ssl-city) SSL_CITY="$2"; shift 2 ;;
-            --ssl-org) SSL_ORG="$2"; shift 2 ;;
-            --ssl-ou) SSL_OU="$2"; shift 2 ;;
-            --force-ssl-regen) FORCE_SSL_REGENERATE=true; shift 1 ;;
+            --enable-cloudflare) ENABLE_CLOUDFLARE=true; shift 1 ;;
+            --cf-hostname) CF_HOSTNAME="$2"; shift 2 ;;
+            --cf-tunnel-name) CF_TUNNEL_NAME="$2"; shift 2 ;;
+            --cf-token) CF_TOKEN="$2"; shift 2 ;;
             --no-https-redirect) FORCE_HTTPS_REDIRECT=false; shift 1 ;;
-            --enable-lets-encrypt|--enable-letsencrypt) ENABLE_LETSENCRYPT=true; shift 1 ;;
-            --le-email) LE_EMAIL="$2"; shift 2 ;;
-            --le-staging) LE_STAGING=true; shift 1 ;;
             -h|--help) usage; exit 0 ;;
             *) log error "Unknown flag: $1"; usage; exit 2 ;;
         esac
@@ -352,14 +342,8 @@ SITE_NAME="pi-monitor"
 if [ -n "$DOMAIN" ] && [ "$DOMAIN" != "_" ]; then SITE_NAME="$DOMAIN"; fi
 SITE_CONF_DST="$NGINX_SITES_AVAILABLE/$SITE_NAME"
 if [ -f "$SITE_CONF_DST" ]; then
-    if grep -qE 'listen[^;]*443.*ssl|ssl_certificate' "$SITE_CONF_DST"; then
-        # If an SSL site is already configured, stick with SSL unless explicitly overridden
-        if [ "$ENABLE_SSL" != true ]; then ENABLE_SSL=true; fi
-        if [ "$NGINX_PORT" = "80" ]; then NGINX_PORT="443"; fi
-    fi
+    : # With Cloudflare-only mode, we ignore prior SSL hints
 fi
-# If port 443 is selected, prefer SSL
-if [ "$NGINX_PORT" = "443" ] && [ "$ENABLE_SSL" != true ]; then ENABLE_SSL=true; fi
 
 # Minimal announcer (always prints)
 announce() {
@@ -379,35 +363,30 @@ fi
 if [ -z "$STATIC_IP" ]; then
     STATIC_IP="127.0.0.1"
 fi
-# Align production URL with resolved STATIC_IP and SSL settings
-if [ "$ENABLE_SSL" = true ]; then
-    PROTOCOL="https"
-    if [ "$NGINX_PORT" = "443" ]; then
-        PORT_SUFFIX=""
-    else
-        PORT_SUFFIX=":$NGINX_PORT"
-    fi
-else
+# Align production URL: with Cloudflare, the public URL is https on CF_HOSTNAME; locally we serve http
+if [ "$ENABLE_CLOUDFLARE" = true ]; then
     PROTOCOL="http"
-    if [ "$NGINX_PORT" = "80" ]; then
-        PORT_SUFFIX=""
+    PORT_SUFFIX=""
+else
+    if [ "$ENABLE_SSL" = true ]; then
+        PROTOCOL="https"
+        if [ "$NGINX_PORT" = "443" ]; then PORT_SUFFIX=""; else PORT_SUFFIX=":$NGINX_PORT"; fi
     else
-        PORT_SUFFIX=":$NGINX_PORT"
+        PROTOCOL="http"
+        if [ "$NGINX_PORT" = "80" ]; then PORT_SUFFIX=""; else PORT_SUFFIX=":$NGINX_PORT"; fi
     fi
 fi
 
 if [ "$PRODUCTION_URL" = "http://localhost" ] || [ -z "$PRODUCTION_URL" ]; then
-    if [ "$DOMAIN" != "_" ]; then
-        PRODUCTION_URL="${PROTOCOL}://${DOMAIN}${PORT_SUFFIX}"
+    if [ "$ENABLE_CLOUDFLARE" = true ] && [ -n "$DOMAIN" ] && [ "$DOMAIN" != "_" ]; then
+        PRODUCTION_URL="https://${DOMAIN}"
     else
-        PRODUCTION_URL="${PROTOCOL}://${STATIC_IP}${PORT_SUFFIX}"
+        if [ "$DOMAIN" != "_" ]; then PRODUCTION_URL="${PROTOCOL}://${DOMAIN}${PORT_SUFFIX}"; else PRODUCTION_URL="${PROTOCOL}://${STATIC_IP}${PORT_SUFFIX}"; fi
     fi
 fi
 
-# Ensure https scheme when SSL is enabled even if config.json provided http
-if [ "$ENABLE_SSL" = true ]; then
-    PRODUCTION_URL="$(echo "$PRODUCTION_URL" | sed -E 's#^http://#https://#')"
-fi
+# Force https scheme in production URL when Cloudflare is enabled
+if [ "$ENABLE_CLOUDFLARE" = true ]; then PRODUCTION_URL="$(echo "$PRODUCTION_URL" | sed -E 's#^http://#https://#')"; fi
 
 # Show resolved configuration and exit early if requested
 if [ "$SHOW_CONFIG" = true ]; then
@@ -430,6 +409,7 @@ force_frontend:    $FORCE_FRONTEND
 force_backend:     $FORCE_BACKEND
 use_setup_script:  $USE_SETUP_SCRIPT
 enable_ssl:        $ENABLE_SSL
+enable_cloudflare: $ENABLE_CLOUDFLARE
 ssl_cert_path:     $SSL_CERT_PATH
 ssl_key_path:      $SSL_KEY_PATH
 ssl_cert_days:     $SSL_CERT_DAYS
@@ -979,8 +959,8 @@ configure_nginx() {
     # Note: Do not remove existing site files here; it breaks checksum diffing and
     # forces unnecessary updates each run. We manage the target file directly below.
 
-    # When SSL is enabled, ignore the static template and generate appropriate config
-    if [ -f "$site_conf_src" ] && [ "$ENABLE_SSL" != true ]; then
+    # When SSL is enabled (legacy) or Cloudflare is on, prefer simple HTTP config locally
+    if [ -f "$site_conf_src" ] && { [ "$ENABLE_SSL" != true ] || [ "$ENABLE_CLOUDFLARE" = true ]; }; then
         cp "$site_conf_src" "$tmp_conf"
         sed -i -E "s/server_name[[:space:]].*;/server_name ${DOMAIN} ${STATIC_IP} localhost _; /" "$tmp_conf" || true
 		sed -i -E "s@root[[:space:]].*;@root ${WEB_ROOT};@" "$tmp_conf"
@@ -991,7 +971,7 @@ configure_nginx() {
         sed -i -E "s@proxy_pass[[:space:]]+http://127.0.0.1:[0-9]+/api/@proxy_pass http://127.0.0.1:${BACKEND_PORT}/api/@g" "$tmp_conf" || true
         sed -i -E "s@proxy_pass[[:space:]]+http://127.0.0.1:[0-9]+/health@proxy_pass http://127.0.0.1:${BACKEND_PORT}/health@g" "$tmp_conf" || true
     else
-        if [ "$ENABLE_SSL" = true ]; then
+        if [ "$ENABLE_SSL" = true ] && [ "$ENABLE_CLOUDFLARE" != true ]; then
             # HTTPS configuration
             cat > "$tmp_conf" <<EOF
 # HTTP to HTTPS redirect
@@ -1140,7 +1120,7 @@ configure_firewall() {
         if ufw status 2>/dev/null | grep -qi active; then
             log info "Configuring UFW to allow HTTP (80/tcp)"
             run_cmd ufw allow 80/tcp || true
-            if [ "$ENABLE_SSL" = true ]; then
+            if [ "$ENABLE_SSL" = true ] && [ "$ENABLE_CLOUDFLARE" != true ]; then
                 log info "Configuring UFW to allow HTTPS (443/tcp)"
                 run_cmd ufw allow 443/tcp || true
             fi
@@ -1151,7 +1131,7 @@ configure_firewall() {
         if firewall-cmd --state >/dev/null 2>&1; then
             log info "Configuring firewalld to allow HTTP (80/tcp)"
             run_cmd firewall-cmd --permanent --add-service=http || true
-            if [ "$ENABLE_SSL" = true ]; then
+            if [ "$ENABLE_SSL" = true ] && [ "$ENABLE_CLOUDFLARE" != true ]; then
                 log info "Configuring firewalld to allow HTTPS (443/tcp)"
                 run_cmd firewall-cmd --permanent --add-service=https || true
             fi
@@ -1161,43 +1141,11 @@ configure_firewall() {
 }
 
 issue_lets_encrypt_cert() {
+    # Disabled in Cloudflare-only mode
+    if [ "$ENABLE_CLOUDFLARE" = true ]; then return 0; fi
     if [ "$ENABLE_LETSENCRYPT" != true ]; then return 0; fi
-    if [ "$ENABLE_SSL" != true ]; then ENABLE_SSL=true; fi
-    if [ -z "$DOMAIN" ] || [ "$DOMAIN" = "_" ]; then
-        log error "Let's Encrypt requires a real domain (set --domain)."; exit 2
-    fi
-    if [ -z "$LE_EMAIL" ]; then
-        log error "Provide contact email for Let's Encrypt using --le-email."; exit 2
-    fi
-
-    log info "Installing certbot"
-    if ! command -v certbot >/dev/null 2>&1; then
-        run_cmd apt-get update -y
-        run_cmd apt-get install -y certbot python3-certbot-nginx
-    fi
-
-    # Ensure temporary HTTP config exists so ACME can validate
-    if ! systemctl is-active --quiet nginx; then
-        run_cmd systemctl start nginx || true
-    fi
-
-    local staging_flag=""
-    if [ "$LE_STAGING" = true ]; then staging_flag="--staging"; fi
-
-    log info "Requesting Let's Encrypt certificate for $DOMAIN (certonly)"
-    # Use certonly so certbot does not write its own site file; we'll manage nginx ourselves
-    run_cmd certbot certonly --nginx -d "$DOMAIN" --email "$LE_EMAIL" --agree-tos $staging_flag --non-interactive || true
-
-    # Paths where certbot stores certs
-    CERT_FILE="/etc/letsencrypt/live/${DOMAIN}/fullchain.pem"
-    KEY_FILE="/etc/letsencrypt/live/${DOMAIN}/privkey.pem"
-
-    if [ ! -f "$CERT_FILE" ] || [ ! -f "$KEY_FILE" ]; then
-        log error "Let's Encrypt certificate not found at $CERT_FILE. Falling back to self-signed."
-        ENABLE_LETSENCRYPT=false
-    else
-        log info "Let's Encrypt certificate issued successfully"
-    fi
+    # Legacy path retained but not used when Cloudflare is on
+    log warn "Let's Encrypt path is deprecated in Cloudflare mode"
 }
 
 # ----------------------------------------------------------------------------
@@ -1221,25 +1169,35 @@ verify_stack() {
     if ! systemctl is-active --quiet nginx; then
         log error "Nginx is not running"; systemctl status nginx --no-pager -l || true; exit 1
     fi
-    # Frontend through nginx (http or https depending on port)
-    if [ "$ENABLE_SSL" = true ]; then
-        ROOT_URL="https://localhost:${NGINX_PORT}/"
-        CURL_FLAGS="-kfsS"   # -k to allow self-signed certs
-    else
+    # Frontend through nginx (http locally when Cloudflare is enabled)
+    if [ "$ENABLE_CLOUDFLARE" = true ]; then
         ROOT_URL="http://localhost:${NGINX_PORT}/"
         CURL_FLAGS="-fsS"
+    else
+        if [ "$ENABLE_SSL" = true ]; then
+            ROOT_URL="https://localhost:${NGINX_PORT}/"
+            CURL_FLAGS="-kfsS"
+        else
+            ROOT_URL="http://localhost:${NGINX_PORT}/"
+            CURL_FLAGS="-fsS"
+        fi
     fi
     if ! curl $CURL_FLAGS "$ROOT_URL" >/dev/null 2>&1; then
         log warn "Frontend root check failed (may be starting). Re-testing Nginx config"
         nginx -t || true
     fi
     # Proxy health through nginx
-    if [ "$ENABLE_SSL" = true ]; then
-        PROXY_HEALTH_URL="https://localhost:${NGINX_PORT}/health"
-        CURL_FLAGS="-kfsS"
-    else
+    if [ "$ENABLE_CLOUDFLARE" = true ]; then
         PROXY_HEALTH_URL="http://localhost:${NGINX_PORT}/health"
         CURL_FLAGS="-fsS"
+    else
+        if [ "$ENABLE_SSL" = true ]; then
+            PROXY_HEALTH_URL="https://localhost:${NGINX_PORT}/health"
+            CURL_FLAGS="-kfsS"
+        else
+            PROXY_HEALTH_URL="http://localhost:${NGINX_PORT}/health"
+            CURL_FLAGS="-fsS"
+        fi
     fi
     if ! curl $CURL_FLAGS "$PROXY_HEALTH_URL" >/dev/null 2>&1; then
         log error "Nginx proxy to /health failed"; exit 1
@@ -1285,14 +1243,13 @@ ensure_venv
 setup_backend_service
 build_frontend
 
-# Determine certificate file paths for nginx
-CERT_FILE="${SSL_CERT_PATH}.crt"
-KEY_FILE="${SSL_KEY_PATH}.key"
+# In Cloudflare mode, serve HTTP locally; otherwise handle legacy HTTPS
+if [ "$ENABLE_CLOUDFLARE" != true ]; then
+  CERT_FILE="${SSL_CERT_PATH}.crt"
+  KEY_FILE="${SSL_KEY_PATH}.key"
+  issue_lets_encrypt_cert
+fi
 
-# If Let's Encrypt requested, attempt issuance and override paths
-issue_lets_encrypt_cert
-
-# Now write nginx config using CERT_FILE/KEY_FILE
 configure_nginx
 configure_firewall
 verify_stack

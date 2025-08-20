@@ -600,6 +600,37 @@ verify_stack() {
         log info "Cloudflare tunnel configured"
         if systemctl is-active --quiet cloudflared; then
             log info "cloudflared service: active"
+            
+            # Check tunnel connectivity and DNS
+            local host="${CF_HOSTNAME:-$DOMAIN}"
+            log info "Checking tunnel status for $host"
+            
+            # Check if tunnel is serving traffic
+            if curl -fsS --max-time 8 "https://$host/health" >/dev/null 2>&1; then
+                log info "Tunnel health check passed: https://$host/health"
+                
+                # Get DNS records to verify tunnel routing
+                local dns_records
+                dns_records=$(dig +short "$host" 2>/dev/null | tr '\n' ' ' || echo "DNS lookup failed")
+                log info "DNS A records: $dns_records"
+                
+                # Check if we're getting Cloudflare edge IPs
+                if echo "$dns_records" | grep -q "104.21\|104.16\|104.32\|104.48\|104.64\|104.80\|104.96"; then
+                    log info "Domain serving OK: https://$host/health"
+                    log info "Cloudflare edge detected"
+                    
+                    # Check for CF-Ray header
+                    if curl -fsS --max-time 8 -I "https://$host/health" 2>/dev/null | grep -q "CF-Ray"; then
+                        log info "Cloudflare CF-Ray present"
+                    else
+                        log warn "CF-Ray header not detected"
+                    fi
+                else
+                    log warn "DNS not pointing to Cloudflare edge IPs: $dns_records"
+                fi
+            else
+                log warn "Tunnel health check failed: https://$host/health"
+            fi
         else
             log error "cloudflared service: inactive"
         fi

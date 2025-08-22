@@ -269,10 +269,9 @@ Flags:
   --quiet                      Shortcut for --log-level warn
   --no-color                   Disable ANSI colors
   --dry-run                    Print actions without executing
-  --only TARGET                frontend|backend|nginx|verify
+  --only TARGET                frontend|backend|verify
   --skip-frontend              Skip frontend build/deploy
   --skip-backend               Skip backend service setup
-  --skip-nginx                 Skip nginx setup
   --force-frontend             Force frontend rebuild
   --force-backend              Force backend restart
   --test-checksums             Test checksum generation and comparison
@@ -307,7 +306,6 @@ parse_args() {
             --only) ONLY_TARGET="$2"; shift 2 ;;
             --skip-frontend) SKIP_FRONTEND=true; shift 1 ;;
             --skip-backend) SKIP_BACKEND=true; shift 1 ;;
-            --skip-nginx) SKIP_NGINX=true; shift 1 ;;
             --force-frontend) FORCE_FRONTEND=true; shift 1 ;;
             --force-backend) FORCE_BACKEND=true; shift 1 ;;
             --test-checksums) TEST_CHECKSUMS=true; shift 1 ;;
@@ -334,7 +332,6 @@ log_level:         $LOG_LEVEL
 only:              ${ONLY_TARGET:-}
 skip_frontend:     $SKIP_FRONTEND
 skip_backend:      $SKIP_BACKEND
-skip_nginx:        $SKIP_NGINX
 force_frontend:    $FORCE_FRONTEND
 force_backend:     $FORCE_BACKEND
 enable_cloudflare: $ENABLE_CLOUDFLARE
@@ -369,15 +366,11 @@ check_checksums() {
         
         local frontend_checksum=$(generate_checksum "$PI_MON_DIR/frontend")
         local backend_checksum=$(generate_checksum "$PI_MON_DIR/backend")
-        local nginx_checksum=$(generate_checksum "$NGINX_SITES_AVAILABLE/pi-monitor")
-        
         log info "Frontend checksum: $frontend_checksum"
         log info "Backend checksum: $backend_checksum"
-        log info "Nginx checksum: $nginx_checksum"
         
         local stored_frontend=""
         local stored_backend=""
-        local stored_nginx=""
         
         if [ -f "$STATE_DIR/frontend.checksum" ]; then
             stored_frontend=$(cat "$STATE_DIR/frontend.checksum")
@@ -389,11 +382,6 @@ check_checksums() {
             log info "Stored backend checksum: $stored_backend"
         fi
         
-        if [ -f "$STATE_DIR/nginx.checksum" ]; then
-            stored_nginx=$(cat "$STATE_DIR/nginx.checksum")
-            log info "Stored nginx checksum: $stored_nginx"
-        fi
-        
         if [ "$frontend_checksum" != "$stored_frontend" ] && [ -n "$stored_frontend" ]; then
             log info "Frontend changes detected - rebuild needed"
             NEED_FRONTEND_BUILD=true
@@ -402,10 +390,6 @@ check_checksums() {
         if [ "$backend_checksum" != "$stored_backend" ] && [ -n "$stored_backend" ]; then
             log info "Backend changes detected - restart needed"
             FORCE_BACKEND=true
-        fi
-        
-        if [ "$nginx_checksum" != "$stored_nginx" ] && [ -n "$stored_nginx" ]; then
-            log info "Nginx changes detected - reconfiguration needed"
         fi
         
         log info "=== CHECKSUM TESTING COMPLETE ==="
@@ -419,6 +403,8 @@ check_checksums() {
 log info "Checking current state"
 log info "Starting deployment..."
 log info "Note: This script will automatically stop/start services as needed"
+log info "Tip: Press SPACEBAR during retry loops to skip and continue immediately"
+log info "Skip locations: Backend health, Cloudflare tunnel, Frontend check"
 
 mkdir -p "$STATE_DIR" || log error "Cannot create state directory $STATE_DIR."
 run_cmd chown "$SYSTEM_USER":"$SYSTEM_USER" "$STATE_DIR"
@@ -443,11 +429,6 @@ if [ -f "$SERVICE_FILE" ]; then
     if systemctl is-active --quiet pi-monitor-backend.service; then SERVICE_RUNNING=true; fi
 fi
 
-NGINX_CONFIGURED=false
-if [ -f "$NGINX_SITES_AVAILABLE/pi-monitor" ] && [ -L "$NGINX_SITES_ENABLED/pi-monitor" ]; then
-    NGINX_CONFIGURED=true
-fi
-
 FRONTEND_BUILT=false
 [ -f "$WEB_ROOT/index.html" ] && FRONTEND_BUILT=true
 
@@ -464,10 +445,16 @@ for i in {1..3}; do
         break
     fi
     log warn "Backend health check failed, retrying ($i/3)..."
+    log info "Press SPACEBAR to skip retries and continue deployment"
+    read -t 5 -n 1 -s input || true
+    if [ "$input" = " " ]; then
+        log info "Spacebar pressed - skipping backend health check and continuing deployment"
+        break
+    fi
     sleep 5
 done
 
-log info "Status: User:$USER_EXISTS | Project:$PI_MON_EXISTS | Venv:$VENV_EXISTS | Service:$SERVICE_RUNNING | Nginx:$NGINX_CONFIGURED | Frontend:$FRONTEND_BUILT"
+log info "Status: User:$USER_EXISTS | Project:$PI_MON_EXISTS | Venv:$VENV_EXISTS | Service:$SERVICE_RUNNING | Frontend:$FRONTEND_BUILT"
 
 # ----------------------------------------------------------------------------
 # Ensure user and directories
@@ -565,6 +552,12 @@ EOF
                 break
             else
                 log warn "Local tunnel endpoint not responding, retrying ($i/3)..."
+                log info "Press SPACEBAR to skip retries and continue deployment"
+                read -t 10 -n 1 -s input || true
+                if [ "$input" = " " ]; then
+                    log info "Spacebar pressed - skipping retries and continuing deployment"
+                    break
+                fi
                 sleep 10
             fi
         done
@@ -588,6 +581,12 @@ EOF
             fi
             if [ $i -eq 1 ]; then
                 log info "Waiting for Cloudflare routing to update... (this typically takes 10-15 minutes)"
+            fi
+            log info "Press SPACEBAR to skip domain check and continue deployment"
+            read -t 30 -n 1 -s input || true
+            if [ "$input" = " " ]; then
+                log info "Spacebar pressed - skipping domain check and continuing deployment"
+                break
             fi
             sleep 30
         done
@@ -1116,6 +1115,12 @@ verify_stack() {
             break
         fi
         log warn "Frontend HTTP root check failed, retrying ($i/3)..."
+        log info "Press SPACEBAR to skip retries and continue deployment"
+        read -t 5 -n 1 -s input || true
+        if [ "$input" = " " ]; then
+            log info "Spacebar pressed - skipping frontend check and continuing deployment"
+            break
+        fi
         sleep 5
     done
     
@@ -1124,6 +1129,12 @@ verify_stack() {
             break
         fi
         log warn "Nginx HTTP proxy to /health failed, retrying ($i/3)..."
+        log info "Press SPACEBAR to skip retries and continue deployment"
+        read -t 5 -n 1 -s input || true
+        if [ "$input" = " " ]; then
+            log info "Spacebar pressed - skipping Nginx health check and continuing deployment"
+            break
+        fi
         sleep 5
     done
     

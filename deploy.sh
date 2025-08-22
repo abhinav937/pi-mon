@@ -659,12 +659,9 @@ setup_cloudflare() {
             fi
         fi
         
-        # Now install the tunnel service
-        log info "Installing tunnel service..."
-        if ! cloudflared service install; then
-            log error "Failed to install tunnel service. Check tunnel configuration."
-            exit 1
-        fi
+        # Skip cloudflared service install since we're creating our own systemd service
+        log info "Skipping cloudflared service install (using custom systemd service)..."
+        log info "✓ Tunnel service will be configured manually"
         
         log info "Creating systemd service configuration..."
         cat > /etc/systemd/system/cloudflared.service <<EOF

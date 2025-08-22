@@ -672,16 +672,19 @@ setup_cloudflare() {
             fi
         fi
         
-        # Update tunnel ingress rules to point to port 5001
-        log info "Updating tunnel ingress rules to port ${BACKEND_PORT}..."
-        if ! cloudflared tunnel ingress rule set "$ACTUAL_TUNNEL_NAME" "${CF_HOSTNAME}" "http://localhost:${BACKEND_PORT}"; then
-            log warn "Failed to update ingress rules automatically"
-            log info "Attempting manual tunnel configuration..."
-            
-            # Try to create a config file for manual configuration
-            log info "Creating manual tunnel config for port ${BACKEND_PORT}..."
-            mkdir -p ~/.cloudflared
-            cat > ~/.cloudflared/config.yml <<EOF
+        # Get the actual tunnel ID first (needed for fallback config)
+        log info "Getting tunnel ID..."
+        TUNNEL_ID=$(cloudflared tunnel list | grep "$ACTUAL_TUNNEL_NAME" | awk '{print $1}')
+        if [ -z "$TUNNEL_ID" ]; then
+            log error "Failed to get tunnel ID for $ACTUAL_TUNNEL_NAME"
+            exit 1
+        fi
+        log info "✓ Found tunnel ID: $TUNNEL_ID"
+        
+        # Since we can't easily update existing tunnel ingress rules, create a config file
+        log info "Creating tunnel configuration file for port ${BACKEND_PORT}..."
+        mkdir -p ~/.cloudflared
+        cat > ~/.cloudflared/config.yml <<EOF
 tunnel: $ACTUAL_TUNNEL_NAME
 credentials-file: ~/.cloudflared/$TUNNEL_ID.json
 
@@ -690,26 +693,16 @@ ingress:
     service: http://localhost:${BACKEND_PORT}
   - service: http_status:404
 EOF
-            
-            log info "✓ Manual config created at ~/.cloudflared/config.yml"
-            log info "You may need to restart the tunnel with: cloudflared tunnel run --config ~/.cloudflared/config.yml"
-        else
-            log info "✓ Tunnel ingress rules updated to port ${BACKEND_PORT}"
-        fi
+        
+        log info "✓ Tunnel config created at ~/.cloudflared/config.yml"
+        log info "✓ Configures forwarding from ${CF_HOSTNAME} to localhost:${BACKEND_PORT}"
         
         # Skip cloudflared service install since we're creating our own systemd service
         log info "Skipping cloudflared service install (using custom systemd service)..."
         log info "✓ Tunnel service will be configured manually"
         
         log info "Creating systemd service configuration..."
-        # Get the actual tunnel ID
-        log info "Getting tunnel ID..."
-        TUNNEL_ID=$(cloudflared tunnel list | grep "$ACTUAL_TUNNEL_NAME" | awk '{print $1}')
-        if [ -z "$TUNNEL_ID" ]; then
-            log error "Failed to get tunnel ID for $ACTUAL_TUNNEL_NAME"
-            exit 1
-        fi
-        log info "✓ Found tunnel ID: $TUNNEL_ID"
+        # Tunnel ID already obtained above
         
         # Since we're using an existing tunnel, let's use the simple approach
         log info "Using existing tunnel with direct forwarding..."
@@ -730,7 +723,7 @@ Wants=network.target
 [Service]
 Type=simple
 Environment=TUNNEL_TOKEN=${CF_TOKEN}
-ExecStart=/usr/bin/cloudflared tunnel --no-autoupdate run "$ACTUAL_TUNNEL_NAME"
+ExecStart=/usr/bin/cloudflared tunnel --no-autoupdate run --config ~/.cloudflared/config.yml
 Restart=always
 RestartSec=10
 StandardOutput=journal

@@ -514,10 +514,33 @@ setup_cloudflare() {
     if [ "$ENABLE_CLOUDFLARE" = true ]; then
         log info "=== CLOUDFLARE TUNNEL SETUP ==="
         if ! command -v cloudflared >/dev/null 2>&1; then
-            log info "Installing cloudflared..."
-            run_cmd wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm64 -O /usr/local/bin/cloudflared
-            run_cmd chmod +x /usr/local/bin/cloudflared
+            log info "Installing cloudflared from official repository..."
+            
+            # Add Cloudflare GPG key
+            log info "Adding Cloudflare GPG key..."
+            run_cmd mkdir -p --mode=0755 /usr/share/keyrings
+            run_cmd curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null
+            
+            # Add Cloudflare repository
+            log info "Adding Cloudflare repository..."
+            echo 'deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared any main' | run_cmd tee /etc/apt/sources.list.d/cloudflared.list
+            
+            # Update and install
+            log info "Updating package list and installing cloudflared..."
+            run_cmd apt-get update
+            run_cmd apt-get install -y cloudflared
+            
+            # Verify installation
+            if ! command -v cloudflared >/dev/null 2>&1; then
+                log error "Failed to install cloudflared from repository."
+                log info "Falling back to manual download..."
+                run_cmd wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm64 -O /usr/local/bin/cloudflared
+                run_cmd chmod +x /usr/local/bin/cloudflared
+            else
+                log info "✓ cloudflared installed from official repository"
+            fi
         fi
+        
         if ! command -v cloudflared >/dev/null 2>&1; then
             log error "Failed to install cloudflared."
             exit 1

@@ -17,6 +17,7 @@ VENV_DIR=""
 SERVICE_FILE="/etc/systemd/system/pi-monitor-backend.service"
 STATE_DIR=""
 SYSTEM_USER=""
+PIP_FLAGS="--no-cache-dir --prefer-binary"
 
 # Cloudflare Tunnel
 ENABLE_CLOUDFLARE=false
@@ -77,7 +78,7 @@ pre_flight_checks() {
         log error "Invalid JSON in $CONFIG_FILE."
         exit 1
     fi
-    if [ "$ENABLE_CLOUDFLARE" = true ] && [ -z "$CF_TOKEN" ] || [ -z "$CF_HOSTNAME" ]; then
+    if [ "$ENABLE_CLOUDFLARE" = true ] && { [ -z "$CF_TOKEN" ] || [ -z "$CF_HOSTNAME" ]; }; then
         log error "Cloudflare enabled but missing token or hostname."
         exit 1
     fi
@@ -173,7 +174,7 @@ run_cmd() {
         log debug "DRY-RUN: $*"
     else
         log debug "EXEC: $*"
-        eval "$@"
+        "$@"
     fi
 }
 
@@ -498,11 +499,15 @@ setup_cloudflare() {
         log info "Setting up Cloudflare tunnel"
         if ! command -v cloudflared >/dev/null 2>&1; then
             log info "Installing cloudflared for Cloudflare tunnel"
-            run_cmd "wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm64 -O /usr/local/bin/cloudflared"
+            run_cmd wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm64 -O /usr/local/bin/cloudflared
             run_cmd chmod +x /usr/local/bin/cloudflared
         fi
+        if ! command -v cloudflared >/dev/null 2>&1; then
+            log error "Failed to install cloudflared."
+            exit 1
+        fi
         # Start cloudflared tunnel in the background
-        run_cmd "cloudflared tunnel --no-autoupdate run --token \"$CF_TOKEN\" &"
+        run_cmd cloudflared tunnel --no-autoupdate run --token "$CF_TOKEN" &
         log info "Cloudflare tunnel started for $CF_HOSTNAME"
     fi
 }
@@ -536,23 +541,43 @@ ensure_venv() {
         
         run_cmd sudo -u "$SYSTEM_USER" "$python_cmd" -m venv "$VENV_DIR"
         
-        local pip_flags="--no-cache-dir --prefer-binary"
+        if ! [ -f "$VENV_DIR/bin/pip" ]; then
+            log error "Virtual environment creation failed: pip not found in $VENV_DIR/bin."
+            exit 1
+        fi
+        
         if [ "$SILENT_OUTPUT" = true ]; then
-            run_cmd "\"$VENV_DIR/bin/pip\" install -q --upgrade pip $pip_flags >> \"$LOG_FILE\" 2>&1" || log error "pip upgrade failed, check $LOG_FILE."
+            run_cmd "$VENV_DIR/bin/pip install -q --upgrade pip $PIP_FLAGS" >> "$LOG_FILE" 2>&1 || {
+                log error "pip upgrade failed, check $LOG_FILE."
+                exit 1
+            }
         else
-            run_cmd "$VENV_DIR/bin/pip" install --upgrade pip $pip_flags
+            run_cmd "$VENV_DIR/bin/pip" install --upgrade pip "$PIP_FLAGS"
         fi
     fi
     
     if [ ! -f "$PI_MON_DIR/backend/requirements.txt" ]; then
         log warn "requirements.txt missing, installing default dependencies."
-        run_cmd "\"$VENV_DIR/bin/pip\" install psutil==5.9.6 $pip_flags" || log error "Failed to install default dependencies, check $LOG_FILE."
+        if [ "$SILENT_OUTPUT" = true ]; then
+            run_cmd "$VENV_DIR/bin/pip install -q psutil==5.9.6 $PIP_FLAGS" >> "$LOG_FILE" 2>&1 || {
+                log error "Failed to install default dependencies, check $LOG_FILE."
+                exit 1
+            }
+        else
+            run_cmd "$VENV_DIR/bin/pip" install psutil==5.9.6 "$PIP_FLAGS"
+        fi
     else
         log info "Installing/updating backend dependencies (optimized for Pi 5)"
+        log debug "requirements.txt contents:"
+        log debug "$(cat "$PI_MON_DIR/backend/requirements.txt")"
         if [ "$SILENT_OUTPUT" = true ]; then
-            run_cmd "\"$VENV_DIR/bin/pip\" install -q -r \"$PI_MON_DIR/backend/requirements.txt\" --upgrade $pip_flags >> \"$LOG_FILE\" 2>&1" || log error "pip install failed, check $LOG_FILE."
+            run_cmd "$VENV_DIR/bin/pip install -q -r $PI_MON_DIR/backend/requirements.txt --upgrade $PIP_FLAGS" >> "$LOG_FILE" 2>&1 || {
+                log error "pip install failed, check $LOG_FILE for details."
+                cat "$LOG_FILE" >&2
+                exit 1
+            }
         else
-            run_cmd "$VENV_DIR/bin/pip" install -r "$PI_MON_DIR/backend/requirements.txt" --upgrade $pip_flags
+            run_cmd "$VENV_DIR/bin/pip" install -r "$PI_MON_DIR/backend/requirements.txt" --upgrade "$PIP_FLAGS"
         fi
     fi
 }
@@ -660,8 +685,8 @@ build_frontend() {
             run_cmd apt-get install -y nodejs
         else
             if [ "$SILENT_OUTPUT" = true ]; then
-                run_cmd "curl -fsSL https://deb.nodesource.com/setup_20.x | bash - >> \"$LOG_FILE\" 2>&1"
-                run_cmd "apt-get install -y -qq nodejs >> \"$LOG_FILE\" 2>&1"
+                run_cmd curl -fsSL https://deb.nodesource.com/setup_20.x \| bash - >> "$LOG_FILE" 2>&1
+                run_cmd apt-get install -y -qq nodejs >> "$LOG_FILE" 2>&1
             else
                 run_cmd curl -fsSL https://deb.nodesource.com/setup_20.x \| bash -
                 run_cmd apt-get install -y nodejs
@@ -685,12 +710,18 @@ build_frontend() {
     
     if [ "$SILENT_OUTPUT" = true ]; then
         ( cd "$PI_MON_DIR/frontend" && \
-          run_cmd "npm install $npm_flags --silent --loglevel=error --no-progress >> \"$LOG_FILE\" 2>&1" || log error "npm install failed, check $LOG_FILE." && \
-          run_cmd "$build_env npm run -s build >> \"$LOG_FILE\" 2>&1" || log error "npm build failed, check $LOG_FILE." )
+          run_cmd npm install "$npm_flags" --silent --loglevel=error --no-progress >> "$LOG_FILE" 2>&1 || {
+              log error "npm install failed, check $LOG_FILE."
+              exit 1
+          } && \
+          run_cmd env "$build_env" npm run -s build >> "$LOG_FILE" 2>&1 || {
+              log error "npm build failed, check $LOG_FILE."
+              exit 1
+          } )
     else
         ( cd "$PI_MON_DIR/frontend" && \
-          run_cmd npm install $npm_flags && \
-          run_cmd $build_env npm run build )
+          run_cmd npm install "$npm_flags" && \
+          run_cmd env "$build_env" npm run build )
     fi
     
     run_cmd mkdir -p "$WEB_ROOT"
@@ -698,7 +729,7 @@ build_frontend() {
     if command -v rsync >/dev/null 2>&1; then
         run_cmd rsync -a --delete "$PI_MON_DIR/frontend/build/" "$WEB_ROOT/"
     else
-        run_cmd "find \"$WEB_ROOT\" -mindepth 1 -delete"
+        run_cmd find "$WEB_ROOT" -mindepth 1 -delete
         run_cmd cp -r "$PI_MON_DIR/frontend/build/"* "$WEB_ROOT/"
     fi
     run_cmd chown -R www-data:www-data "$WEB_ROOT"
@@ -803,7 +834,11 @@ EOF
     if [ -L "$NGINX_SITES_ENABLED/default" ]; then run_cmd rm "$NGINX_SITES_ENABLED/default"; fi
     
     if [ "$SILENT_OUTPUT" = true ]; then
-        run_cmd "nginx -t >/dev/null 2>&1" || { nginx -t; log error "Nginx configuration test failed."; exit 1; }
+        run_cmd nginx -t >/dev/null 2>&1 || {
+            nginx -t
+            log error "Nginx configuration test failed."
+            exit 1
+        }
     else
         run_cmd nginx -t || log error "Nginx configuration test failed."
     fi

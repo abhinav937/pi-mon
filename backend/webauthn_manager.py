@@ -302,8 +302,9 @@ class WebAuthnManager:
             )
             
             if verification.verified:
-                # Store the credential - use base64url encoding for consistency
-                credential_id = self._base64_to_base64url(verification.credential_id)
+                # Store the credential - use the credential ID from the frontend for consistency
+                # The frontend sends credential.id which is what we need to store and look up later
+                credential_id = credential['id']  # Use the frontend credential ID
                 public_key = base64.b64encode(verification.credential_public_key).decode('utf-8')
                 
                 cred_id = self.db.store_credential(
@@ -342,12 +343,18 @@ class WebAuthnManager:
                 if user:
                     user_creds = self.db.get_user_credentials(user['id'])
                     for cred in user_creds:
-                        # Convert stored base64url credential ID back to bytes
-                        cred_id_base64 = self._base64url_to_base64(cred['credential_id'])
+                        # The stored credential_id is already in the format the frontend expects
+                        # We need to convert it to bytes for the WebAuthn library
+                        try:
+                            # Try to decode the stored credential ID as base64url
+                            cred_id_bytes = base64.b64decode(self._base64url_to_base64(cred['credential_id']))
+                        except Exception as e:
+                            logger.error(f"Failed to decode credential ID {cred['credential_id']}: {e}")
+                            continue
                         
                         allow_credentials.append(
                             PublicKeyCredentialDescriptor(
-                                id=base64.b64decode(cred_id_base64),
+                                id=cred_id_bytes,
                                 transports=[
                                     AuthenticatorTransport.USB,
                                     AuthenticatorTransport.NFC,
@@ -415,8 +422,10 @@ class WebAuthnManager:
                 # Fallback to old method for compatibility
                 auth_credential = AuthenticationCredential.parse_raw(json.dumps(credential))
             
-            # Get credential from database - convert to base64url for database lookup
-            credential_id = self._base64_to_base64url(auth_credential.raw_id)
+            # Get credential from database - use the credential ID directly from frontend
+            # The frontend sends credential.id which is already in base64url format
+            credential_id = credential['id']
+            
             stored_cred = self.db.get_credential_by_id(credential_id)
             
             if not stored_cred:

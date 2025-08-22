@@ -870,187 +870,7 @@ build_frontend() {
 # ----------------------------------------------------------------------------
 # Nginx config
 # ----------------------------------------------------------------------------
-configure_nginx() {
-    if [ "$SKIP_NGINX" = true ]; then return 0; fi
-    if [ "$ONLY_TARGET" = "backend" ] || [ "$ONLY_TARGET" = "frontend" ] || [ "$ONLY_TARGET" = "verify" ]; then return 0; fi
-    
-    if [ ! -d "$WEB_ROOT" ]; then
-        log error "Web root directory ($WEB_ROOT) does not exist."
-        exit 1
-    fi
-    if ss -tuln | grep -q ":80 "; then
-        log info "Port 80 is in use, checking for Nginx..."
-        if systemctl is-active --quiet nginx; then
-            log info "Stopping Nginx to reconfigure..."
-            systemctl stop nginx
-            sleep 2
-        else
-            log warn "Port 80 in use by unknown service, attempting to free it..."
-            # Try to stop common web servers
-            systemctl stop apache2 2>/dev/null || true
-            systemctl stop lighttpd 2>/dev/null || true
-            sleep 2
-        fi
-        
-        # Check again
-        if ss -tuln | grep -q ":80 "; then
-            log error "Port 80 still in use after stopping services. Please check manually."
-            exit 1
-        fi
-    fi
-    if ss -tuln | grep -q ":${BACKEND_PORT} "; then
-        log info "Backend port ${BACKEND_PORT} is in use, checking for existing service..."
-        if systemctl is-active --quiet pi-monitor-backend.service; then
-            log info "Stopping existing backend service to reconfigure..."
-            systemctl stop pi-monitor-backend.service
-            sleep 2
-        else
-            log warn "Port ${BACKEND_PORT} in use by unknown service, attempting to free it..."
-            # Try to kill any process using the port
-            local pid
-            pid=$(ss -tuln | grep ":${BACKEND_PORT} " | awk '{print $7}' | cut -d'/' -f1 | head -1)
-            if [ -n "$pid" ] && [ "$pid" != "-" ]; then
-                log info "Killing process $pid using port ${BACKEND_PORT}..."
-                kill "$pid" 2>/dev/null || true
-                sleep 2
-            fi
-        fi
-        
-        # Check again
-        if ss -tuln | grep -q ":${BACKEND_PORT} "; then
-            log error "Backend port ${BACKEND_PORT} still in use after stopping services. Please check manually."
-            exit 1
-        fi
-    fi
-    
-    log info "Configuring Nginx for domain $DOMAIN"
-    if ! command -v nginx >/dev/null 2>&1; then
-        run_cmd apt-get update -y
-        run_cmd apt-get install -y nginx nginx-extras || log error "Nginx installation failed."
-    fi
-    if ! command -v nginx >/dev/null 2>&1; then
-        log error "Nginx installation failed."
-        exit 1
-    fi
-    
-    log info "Applying Pi 5 Nginx optimizations"
-    
-    # Check if gzip is already enabled in main nginx.conf
-    if grep -q "gzip on" /etc/nginx/nginx.conf 2>/dev/null; then
-        log info "Gzip already enabled in main config, skipping duplicate settings"
-        cat > /etc/nginx/conf.d/pi-monitor-optimizations.conf <<EOF
-# Pi 5 specific Nginx optimizations for pi-monitor (gzip excluded - already enabled)
-client_body_buffer_size 16k;
-client_header_buffer_size 1k;
-large_client_header_buffers 2 1k;
-
-open_file_cache max=1000 inactive=20s;
-open_file_cache_valid 30s;
-open_file_cache_min_uses 2;
-open_file_cache_errors on;
-
-keepalive_timeout 65;
-keepalive_requests 100;
-client_max_body_size 10m;
-EOF
-    else
-        log info "Adding complete Pi 5 Nginx optimizations including gzip"
-        cat > /etc/nginx/conf.d/pi-monitor-optimizations.conf <<EOF
-# Pi 5 specific Nginx optimizations for pi-monitor
-client_body_buffer_size 16k;
-client_header_buffer_size 1k;
-large_client_header_buffers 2 1k;
-
-gzip on;
-gzip_vary on;
-gzip_min_length 1024;
-gzip_types text/plain text/css text/xml text/javascript application/javascript application/xml+rss application/json;
-
-open_file_cache max=1000 inactive=20s;
-open_file_cache_valid 30s;
-open_file_cache_min_uses 2;
-open_file_cache_errors on;
-
-keepalive_timeout 65;
-keepalive_requests 100;
-client_max_body_size 10m;
-EOF
-    fi
-
-    cat > "$NGINX_SITES_AVAILABLE/pi-monitor" <<EOF
-server {
-    listen 80;
-    server_name $DOMAIN;
-
-    root ${WEB_ROOT};
-    index index.html;
-
-    location / {
-        try_files \$uri /index.html;
-    }
-
-    location /api/ {
-        proxy_pass http://127.0.0.1:${BACKEND_PORT}/api/;
-        proxy_http_version 1.1;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection "upgrade";
-    }
-
-    location /health {
-        proxy_pass http://127.0.0.1:${BACKEND_PORT}/health;
-        proxy_http_version 1.1;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-    }
-
-    add_header X-Frame-Options "SAMEORIGIN" always;
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header X-XSS-Protection "1; mode=block" always;
-}
-EOF
-
-    run_cmd ln -sf "$NGINX_SITES_AVAILABLE/pi-monitor" "$NGINX_SITES_ENABLED/pi-monitor"
-    if [ -L "$NGINX_SITES_ENABLED/default" ]; then run_cmd rm "$NGINX_SITES_ENABLED/default"; fi
-    
-    if [ "$SILENT_OUTPUT" = true ]; then
-        run_cmd nginx -t >/dev/null 2>&1 || {
-            nginx -t
-            log error "Nginx configuration test failed."
-            exit 1
-        }
-    else
-        run_cmd nginx -t || log error "Nginx configuration test failed."
-    fi
-    run_cmd systemctl restart nginx
-    
-    # Verify Nginx started successfully
-    if ! systemctl is-active --quiet nginx; then
-        log error "Nginx failed to start after configuration"
-        systemctl status nginx --no-pager -l || true
-        exit 1
-    fi
-    
-    log info "✓ Nginx started successfully with new configuration"
-    
-    local nginx_checksum
-    nginx_checksum=$(generate_checksum "$NGINX_SITES_AVAILABLE/pi-monitor")
-    echo "$nginx_checksum" > "$STATE_DIR/nginx.checksum"
-    log info "Nginx checksum stored: $nginx_checksum"
-    
-    # Configure UFW
-    if command -v ufw >/dev/null 2>&1; then
-        log info "Configuring UFW to allow HTTP (80/tcp)"
-        run_cmd ufw allow 80/tcp
-        log info "Configuring UFW to allow HTTPS (443/tcp)"
-        run_cmd ufw allow 443/tcp
-    fi
-}
+configure_reverse_proxy() { :; }
 
 # ----------------------------------------------------------------------------
 # Verification
@@ -1099,48 +919,18 @@ verify_stack() {
         exit 1
     fi
     
-    if ! systemctl is-active --quiet nginx; then
-        log error "Nginx is not running"
-        systemctl status nginx --no-pager -l || true
-        exit 1
-    fi
-    
-    if [ ! -f "$WEB_ROOT/index.html" ]; then
-        log error "Frontend build output ($WEB_ROOT/index.html) is missing."
-        exit 1
-    fi
-    
-    for i in {1..3}; do
-        if curl -fsS "http://localhost/" >/dev/null 2>&1; then
-            break
-        fi
-        log warn "Frontend HTTP root check failed, retrying ($i/3)..."
-        log info "Press SPACEBAR to skip retries and continue deployment"
-        read -t 5 -n 1 -s input || true
-        if [ "$input" = " " ]; then
-            log info "Spacebar pressed - skipping frontend check and continuing deployment"
-            break
-        fi
-        sleep 5
-    done
-    
-    for i in {1..3}; do
-        if curl -fsS "http://localhost/health" >/dev/null 2>&1; then
-            break
-        fi
-        log warn "Nginx HTTP proxy to /health failed, retrying ($i/3)..."
-        log info "Press SPACEBAR to skip retries and continue deployment"
-        read -t 5 -n 1 -s input || true
-        if [ "$input" = " " ]; then
-            log info "Spacebar pressed - skipping Nginx health check and continuing deployment"
-            break
-        fi
-        sleep 5
-    done
-    
-    if ! curl -fsS "http://localhost/health" >/dev/null 2>&1; then
-        log error "Nginx HTTP proxy to /health failed"
-        exit 1
+    # If Cloudflare is enabled, verify the public health endpoint; otherwise check local backend only
+    if [ "$ENABLE_CLOUDFLARE" = true ] && [ -n "$CF_HOSTNAME" ]; then
+        for i in {1..3}; do
+            if curl -fsS "https://$CF_HOSTNAME/health" >/dev/null 2>&1; then
+                break
+            fi
+            log warn "Public HTTPS /health via Cloudflare not ready, retrying ($i/3)..."
+            log info "Press SPACEBAR to skip retries and continue deployment"
+            read -t 10 -n 1 -s input || true
+            [ "$input" = " " ] && break
+            sleep 10
+        done
     fi
     
     if [ "$ENABLE_CLOUDFLARE" = true ]; then
@@ -1180,7 +970,7 @@ setup_cloudflare
 ensure_venv
 setup_backend_service
 build_frontend
-configure_nginx
+configure_reverse_proxy
 verify_stack
 
 log info "deploy complete"

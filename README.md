@@ -28,8 +28,8 @@ nano config.json     # edit as needed
 After deployment:
 
 - Frontend: `http://localhost/`
-- Backend API: `http://localhost:5001`
-- Health: `http://localhost:5001/health`
+- Backend API: `http://localhost:80`
+- Health: `http://localhost:80/health`
 
 On a Raspberry Pi you can also use the helper script to set up a virtualenv, nginx, and the systemd service in one shot:
 
@@ -44,7 +44,7 @@ Core settings live in `config.json`.
 ```json
 {
   "ports": {
-    "backend": 5001,
+            "backend": 80,
     "frontend": 80,
     "frontend_dev": 3000
   },
@@ -180,7 +180,7 @@ sudo systemctl restart nginx
 
 - Port in use:
   ```bash
-  sudo lsof -i:5001 || sudo fuser -k 5001/tcp
+  sudo lsof -i:80 || sudo fuser -k 80/tcp
   ```
 - Service not starting:
   ```bash
@@ -189,7 +189,7 @@ sudo systemctl restart nginx
   ```
 - Health check:
   ```bash
-  curl -v http://localhost:5001/health
+  curl -v http://localhost/health
   ```
 
 ## Project structure (brief)

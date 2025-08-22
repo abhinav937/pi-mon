@@ -128,7 +128,7 @@ def test_server_creation():
         print("Testing server creation...")
         from server import PiMonitorServer
         
-        port = 5001
+        port = 80
         print(f"Creating server on port {port}...")
         server = PiMonitorServer(port=port)
         print("✅ Server created successfully")

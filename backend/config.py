@@ -46,7 +46,7 @@ class Config:
         """Setup default configuration values"""
         defaults = {
             "ports": {
-                "backend": 5001,
+                "backend": 80,
                 "frontend": 80,
                 "frontend_dev": 3000
             },
@@ -82,7 +82,7 @@ class Config:
     
     def get_port(self, service):
         """Get port for a specific service"""
-        return self.config_data.get("ports", {}).get(service, 5001)
+        return self.config_data.get("ports", {}).get(service, 80)
     
     def get_backend_endpoints(self):
         """Get backend endpoints configuration"""

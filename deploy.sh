@@ -52,7 +52,7 @@ log() {
 DOMAIN=""
 API_KEY=""
 ENV=""
-BACKEND_PORT="5001"
+BACKEND_PORT="80"
 PI_MON_DIR=""
 WEB_ROOT="/var/www/pi-monitor"
 NGINX_SITES_AVAILABLE="/etc/nginx/sites-available"
@@ -201,13 +201,13 @@ usage() {
     local help_domain="pi.cabhinav.com"
     local help_api_key="pi-monitor-api-key-2024"
     local help_env="production"
-    local help_backend_port="5001"
+            local help_backend_port="80"
     
     if [ -f "$CONFIG_FILE" ]; then
         help_domain=$(jq -r '.deployment_defaults.domain // "pi.cabhinav.com"' "$CONFIG_FILE" 2>/dev/null || echo "pi.cabhinav.com")
         help_api_key=$(jq -r '.deployment_defaults.api_key // "pi-monitor-api-key-2024"' "$CONFIG_FILE" 2>/dev/null || echo "pi-monitor-api-key-2024")
         help_env=$(jq -r '.deployment_defaults.env // "production"' "$CONFIG_FILE" 2>/dev/null || echo "production")
-        help_backend_port=$(jq -r '.deployment_defaults.backend_port // "5001"' "$CONFIG_FILE" 2>/dev/null || echo "5001")
+        help_backend_port=$(jq -r '.deployment_defaults.backend_port // "80"' "$CONFIG_FILE" 2>/dev/null || echo "80")
     fi
     
     cat <<USAGE
@@ -284,7 +284,7 @@ if [ -f "$CONFIG_FILE" ]; then
     DOMAIN=${DOMAIN:-$(jq -r '.deployment_defaults.domain // "pi.cabhinav.com"' "$CONFIG_FILE")}
     API_KEY=${API_KEY:-$(jq -r '.deployment_defaults.api_key // "pi-monitor-api-key-2024"' "$CONFIG_FILE")}
     ENV=${ENV:-$(jq -r '.deployment_defaults.env // "production"' "$CONFIG_FILE")}
-    BACKEND_PORT=${BACKEND_PORT:-$(jq -r '.deployment_defaults.backend_port // "5001"' "$CONFIG_FILE")}
+    BACKEND_PORT=${BACKEND_PORT:-$(jq -r '.deployment_defaults.backend_port // "80"' "$CONFIG_FILE")}
     
     # Load Cloudflare settings
     ENABLE_CLOUDFLARE=$(jq -r '.cloudflare.enable // false' "$CONFIG_FILE")
@@ -296,7 +296,7 @@ else
     DOMAIN=${DOMAIN:-"pi.cabhinav.com"}
     API_KEY=${API_KEY:-"pi-monitor-api-key-2024"}
     ENV=${ENV:-"production"}
-    BACKEND_PORT=${BACKEND_PORT:-"5001"}
+    BACKEND_PORT=${BACKEND_PORT:-"80"}
 fi
 
 # If CF hostname exists, use it as DOMAIN
@@ -962,17 +962,17 @@ EOF
     run_cmd systemctl enable pi-monitor-backend.service
     
     # Handle port conflicts by stopping existing service first
-    log info "Ensuring port 5001 is free for backend service..."
+            log info "Ensuring port 80 is free for backend service..."
     if systemctl is-active --quiet pi-monitor-backend.service; then
-        log info "Stopping existing backend service to free port 5001..."
+        log info "Stopping existing backend service to free port 80..."
         run_cmd systemctl stop pi-monitor-backend.service || true
         sleep 2  # Wait for port to be released
     fi
     
-    # Check if port 5001 is still in use by other processes
+    # Check if port 80 is still in use by other processes
     if command -v netstat >/dev/null 2>&1; then
-        if netstat -tln 2>/dev/null | grep -q ":5001 "; then
-            log warn "Port 5001 still in use by another process, waiting..."
+        if netstat -tln 2>/dev/null | grep -q ":80 "; then
+            log warn "Port 80 still in use by another process, waiting..."
             sleep 3
         fi
     fi
@@ -1000,9 +1000,9 @@ EOF
             log error "Backend service failed to start"
             log info "Checking service logs for port conflict..."
             systemctl status pi-monitor-backend.service --no-pager -l || true
-            log info "Checking what's using port 5001..."
+            log info "Checking what's using port 80..."
             if command -v netstat >/dev/null 2>&1; then
-                netstat -tlnp 2>/dev/null | grep ":5001 " || true
+                netstat -tlnp 2>/dev/null | grep ":80 " || true
             fi
             exit 1
         fi

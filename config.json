@@ -84,9 +84,9 @@
   },
   "urls": {
     "local": {
-      "backend": "http://localhost:5001",
+      "backend": "http://localhost:80",
       "frontend": "http://localhost:80",
-      "health": "http://localhost:5001/health"
+      "health": "http://localhost:80/health"
     },
     "production": {
       "backend": "https://pi.cabhinav.com",
@@ -101,7 +101,7 @@
     "env": "production",
     "production_url": "https://pi.cabhinav.com",
     "nginx_port": "80",
-    "backend_port": "5001"
+    "backend_port": "80"
   },
   "cloudflare": {
     "enable": true,

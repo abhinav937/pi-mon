@@ -31,7 +31,7 @@ class Config:
         """Return default configuration if file is missing"""
         return {
             "ports": {
-                "backend": 5001,
+                "backend": 80,
                 "frontend": 80,
                 "frontend_dev": 3000
             },
@@ -61,7 +61,7 @@ class Config:
     
     def get_port(self, service: str) -> int:
         """Get port for a specific service"""
-        return self.get(f"ports.{service}", 5001)
+        return self.get(f"ports.{service}", 80)
     
     def get_service_config(self, service: str) -> Dict[str, Any]:
         """Get configuration for a specific service"""

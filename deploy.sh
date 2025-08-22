@@ -893,7 +893,28 @@ configure_nginx() {
     fi
     
     log info "Applying Pi 5 Nginx optimizations"
-    cat > /etc/nginx/conf.d/pi-monitor-optimizations.conf <<EOF
+    
+    # Check if gzip is already enabled in main nginx.conf
+    if grep -q "gzip on" /etc/nginx/nginx.conf 2>/dev/null; then
+        log info "Gzip already enabled in main config, skipping duplicate settings"
+        cat > /etc/nginx/conf.d/pi-monitor-optimizations.conf <<EOF
+# Pi 5 specific Nginx optimizations for pi-monitor (gzip excluded - already enabled)
+client_body_buffer_size 16k;
+client_header_buffer_size 1k;
+large_client_header_buffers 2 1k;
+
+open_file_cache max=1000 inactive=20s;
+open_file_cache_valid 30s;
+open_file_cache_min_uses 2;
+open_file_cache_errors on;
+
+keepalive_timeout 65;
+keepalive_requests 100;
+client_max_body_size 10m;
+EOF
+    else
+        log info "Adding complete Pi 5 Nginx optimizations including gzip"
+        cat > /etc/nginx/conf.d/pi-monitor-optimizations.conf <<EOF
 # Pi 5 specific Nginx optimizations for pi-monitor
 client_body_buffer_size 16k;
 client_header_buffer_size 1k;
@@ -913,6 +934,7 @@ keepalive_timeout 65;
 keepalive_requests 100;
 client_max_body_size 10m;
 EOF
+    fi
 
     cat > "$NGINX_SITES_AVAILABLE/pi-monitor" <<EOF
 server {

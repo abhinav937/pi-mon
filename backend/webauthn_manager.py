@@ -364,9 +364,9 @@ class WebAuthnManager:
                 user_verification=UserVerificationRequirement.PREFERRED,
             )
             
-                            # Store challenge
-                challenge_key = f"auth_challenge_{self._base64_to_base64url(options.challenge)[:16]}"
-                self._store_challenge(challenge_key, options.challenge)
+            # Store challenge
+            challenge_key = f"auth_challenge_{self._base64_to_base64url(options.challenge)[:16]}"
+            self._store_challenge(challenge_key, options.challenge)
             
             return {
                 'success': True,

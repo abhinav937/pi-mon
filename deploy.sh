@@ -17,7 +17,7 @@ VENV_DIR=""
 SERVICE_FILE="/etc/systemd/system/pi-monitor-backend.service"
 STATE_DIR=""
 SYSTEM_USER=""
-PIP_FLAGS="--no-cache-dir --prefer-binary"
+PIP_FLAGS="--no-cache-dir"
 
 # Cloudflare Tunnel
 ENABLE_CLOUDFLARE=false
@@ -186,11 +186,12 @@ detect_system() {
     arch=$(uname -m)
     
     if [ "$arch" = "aarch64" ] || [ "$arch" = "arm64" ]; then
-        log info "Detected ARM64 architecture (Raspberry Pi 5 compatible)"
         if [ -f /proc/cpuinfo ] && grep -q "Raspberry Pi" /proc/cpuinfo; then
             local pi_model
             pi_model=$(grep "Model" /proc/cpuinfo | head -1 | cut -d: -f2 | xargs)
-            log info "Hardware: $pi_model"
+            log info "Hardware: $pi_model (ARM64)"
+        else
+            log info "ARM64 architecture detected"
         fi
     fi
 }
@@ -218,7 +219,6 @@ optimize_pi5_system() {
     fi
     
     # Set Pi 5 specific ulimits
-    log info "Setting Pi 5 specific system limits"
     cat > /etc/security/limits.d/pi-monitor.conf <<EOF
 # Pi 5 specific limits for pi-monitor
 ${SYSTEM_USER} soft nofile 65536
@@ -229,7 +229,7 @@ www-data soft nofile 65536
 www-data hard nofile 65536
 EOF
     
-    log info "Pi 5 system optimizations applied"
+    log info "Pi 5 optimizations applied"
 }
 
 # ----------------------------------------------------------------------------
@@ -417,7 +417,7 @@ check_checksums() {
 # Discovery and state
 # ----------------------------------------------------------------------------
 log info "Checking current state"
-log info "pi-mon deploy starting"
+log info "Starting deployment..."
 
 mkdir -p "$STATE_DIR" || log error "Cannot create state directory $STATE_DIR."
 run_cmd chown "$SYSTEM_USER":"$SYSTEM_USER" "$STATE_DIR"
@@ -466,8 +466,7 @@ for i in {1..3}; do
     sleep 5
 done
 
-log info "User exists: $USER_EXISTS | Project: $PI_MON_EXISTS | Venv: $VENV_EXISTS | Service: $SERVICE_RUNNING | Nginx: $NGINX_CONFIGURED | Frontend: $FRONTEND_BUILT"
-log info "paths: PI_MON_DIR=$PI_MON_DIR WEB_ROOT=$WEB_ROOT VENV_DIR=$VENV_DIR"
+log info "Status: User:$USER_EXISTS | Project:$PI_MON_EXISTS | Venv:$VENV_EXISTS | Service:$SERVICE_RUNNING | Nginx:$NGINX_CONFIGURED | Frontend:$FRONTEND_BUILT"
 
 # ----------------------------------------------------------------------------
 # Ensure user and directories
@@ -494,9 +493,8 @@ ensure_user() {
 setup_cloudflare() {
     if [ "$ENABLE_CLOUDFLARE" = true ]; then
         log info "=== CLOUDFLARE TUNNEL SETUP ==="
-        log info "Step 1: Installing cloudflared..."
         if ! command -v cloudflared >/dev/null 2>&1; then
-            log info "Installing cloudflared for Cloudflare tunnel"
+            log info "Installing cloudflared..."
             run_cmd wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm64 -O /usr/local/bin/cloudflared
             run_cmd chmod +x /usr/local/bin/cloudflared
         fi
@@ -506,7 +504,7 @@ setup_cloudflare() {
         fi
         log info "cloudflared present"
         
-        log info "Step 2: Configuring cloudflared service (token-based)"
+        log info "Configuring cloudflared service (token-based)"
         log info "- Domain: $CF_HOSTNAME"
         log info "- Tunnel Name: $CF_TUNNEL_NAME"
         log info "- Token: ${CF_TOKEN:0:10}...[redacted]"
@@ -517,7 +515,7 @@ setup_cloudflare() {
             exit 1
         fi
         
-        log info "Step 3: Creating systemd service configuration..."
+        log info "Creating systemd service configuration..."
         cat > /etc/systemd/system/cloudflared.service <<EOF
 [Unit]
 Description=Cloudflared tunnel for Pi Monitor
@@ -537,17 +535,17 @@ SyslogIdentifier=cloudflared
 WantedBy=multi-user.target
 EOF
         
-        log info "Step 4: Reloading systemd and enabling service..."
+        log info "Reloading systemd and enabling service..."
         run_cmd systemctl daemon-reload
         run_cmd systemctl enable cloudflared
         
-        log info "Step 5: Stopping existing cloudflared service..."
+        log info "Stopping existing cloudflared service..."
         systemctl stop cloudflared >/dev/null 2>&1 || true
         
-        log info "Step 6: Starting cloudflared service..."
+        log info "Starting cloudflared service..."
         run_cmd systemctl start cloudflared
         
-        log info "Step 7: Verifying service status..."
+        log info "Verifying service status..."
         if systemctl is-active --quiet cloudflared; then
             log info "✓ cloudflared service started successfully"
         else
@@ -558,7 +556,6 @@ EOF
         log info "Step 8: Waiting for tunnel to establish connection to Cloudflare..."
         log info "This may take a few minutes as the tunnel connects to Cloudflare's edge network"
         for i in {1..60}; do
-            log info "Connection attempt $i/60..."
             if curl -fsS "http://127.0.0.1:${BACKEND_PORT}/health" >/dev/null 2>&1; then
                 log info "✓ Local tunnel endpoint responding"
             else
@@ -570,8 +567,9 @@ EOF
                 log info "✓ Domain serving OK: https://$CF_HOSTNAME/health"
                 break
             fi
-            log info "Waiting for Cloudflare to update routing tables..."
-            log info "This typically takes 2-5 minutes for new connections"
+            if [ $i -eq 1 ]; then
+                log info "Waiting for Cloudflare to update routing tables... (this typically takes 2-5 minutes)"
+            fi
             sleep 10
         done
         if ! curl -fsS "https://$CF_HOSTNAME/health" >/dev/null 2>&1; then
@@ -640,13 +638,17 @@ ensure_venv() {
         log debug "requirements.txt contents:"
         log debug "$(cat "$PI_MON_DIR/backend/requirements.txt")"
         if [ "$SILENT_OUTPUT" = true ]; then
-            run_cmd "$VENV_DIR/bin/pip" install -q -r "$PI_MON_DIR/backend/requirements.txt" --upgrade "$PIP_FLAGS" >> "$LOG_FILE" 2>&1 || {
+            log info "Installing/updating backend dependencies (optimized for Pi 5)"
+            if ! "$VENV_DIR/bin/pip" install -q -r "$PI_MON_DIR/backend/requirements.txt" --upgrade "$PIP_FLAGS" >> "$LOG_FILE" 2>&1; then
                 log error "pip install failed, check $LOG_FILE for details."
-                cat "$LOG_FILE" >&2
                 exit 1
-            }
+            fi
         else
-            run_cmd "$VENV_DIR/bin/pip" install -r "$PI_MON_DIR/backend/requirements.txt" --upgrade "$PIP_FLAGS"
+            log info "Installing/updating backend dependencies (optimized for Pi 5)"
+            if ! "$VENV_DIR/bin/pip" install -r "$PI_MON_DIR/backend/requirements.txt" --upgrade "$PIP_FLAGS"; then
+                log error "pip install failed"
+                exit 1
+            fi
         fi
     fi
 }

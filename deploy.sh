@@ -672,6 +672,31 @@ setup_cloudflare() {
             fi
         fi
         
+        # Update tunnel ingress rules to point to port 5001
+        log info "Updating tunnel ingress rules to port ${BACKEND_PORT}..."
+        if ! cloudflared tunnel ingress rule set "$ACTUAL_TUNNEL_NAME" "${CF_HOSTNAME}" "http://localhost:${BACKEND_PORT}"; then
+            log warn "Failed to update ingress rules automatically"
+            log info "Attempting manual tunnel configuration..."
+            
+            # Try to create a config file for manual configuration
+            log info "Creating manual tunnel config for port ${BACKEND_PORT}..."
+            mkdir -p ~/.cloudflared
+            cat > ~/.cloudflared/config.yml <<EOF
+tunnel: $ACTUAL_TUNNEL_NAME
+credentials-file: ~/.cloudflared/$TUNNEL_ID.json
+
+ingress:
+  - hostname: ${CF_HOSTNAME}
+    service: http://localhost:${BACKEND_PORT}
+  - service: http_status:404
+EOF
+            
+            log info "✓ Manual config created at ~/.cloudflared/config.yml"
+            log info "You may need to restart the tunnel with: cloudflared tunnel run --config ~/.cloudflared/config.yml"
+        else
+            log info "✓ Tunnel ingress rules updated to port ${BACKEND_PORT}"
+        fi
+        
         # Skip cloudflared service install since we're creating our own systemd service
         log info "Skipping cloudflared service install (using custom systemd service)..."
         log info "✓ Tunnel service will be configured manually"

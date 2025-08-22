@@ -447,6 +447,7 @@ if [ "$FRONTEND_BUILT" = false ] || [ "$FORCE_FRONTEND" = true ]; then
 fi
 
 BACKEND_ACCESSIBLE=false
+BACKEND_CHECK_SKIPPED=false
 for i in {1..3}; do
     if curl -fsS "http://127.0.0.1:${BACKEND_PORT}/health" >/dev/null 2>&1; then
         BACKEND_ACCESSIBLE=true
@@ -456,12 +457,17 @@ for i in {1..3}; do
     log info "Press SPACEBAR to skip retries and continue deployment"
     if wait_for_space_to_skip 5; then
         log info "Spacebar pressed - skipping backend health check and continuing deployment"
+        BACKEND_CHECK_SKIPPED=true
         break
     fi
     sleep 5
 done
 
-log info "Status: User:$USER_EXISTS | Project:$PI_MON_EXISTS | Venv:$VENV_EXISTS | Service:$SERVICE_RUNNING | Frontend:$FRONTEND_BUILT"
+if [ "$BACKEND_CHECK_SKIPPED" = true ]; then
+    log info "Status: User:$USER_EXISTS | Project:$PI_MON_EXISTS | Venv:$VENV_EXISTS | Service:$SERVICE_RUNNING | Frontend:$FRONTEND_BUILT | Backend:Skipped"
+else
+    log info "Status: User:$USER_EXISTS | Project:$PI_MON_EXISTS | Venv:$VENV_EXISTS | Service:$SERVICE_RUNNING | Frontend:$FRONTEND_BUILT | Backend:$BACKEND_ACCESSIBLE"
+fi
 
 # ----------------------------------------------------------------------------
 # Ensure user and directories
@@ -1163,9 +1169,17 @@ verify_stack() {
         exit 1
     fi
     
-    if [ "$BACKEND_ACCESSIBLE" = false ]; then
+    if [ "$BACKEND_ACCESSIBLE" = false ] && [ "$BACKEND_CHECK_SKIPPED" = false ]; then
         log error "Backend health check failed after retries"
         exit 1
+    elif [ "$BACKEND_CHECK_SKIPPED" = true ]; then
+        log warn "Backend health check was skipped by user - attempting one final check"
+        if curl -fsS "http://127.0.0.1:${BACKEND_PORT}/health" >/dev/null 2>&1; then
+            log info "✓ Backend is now accessible"
+            BACKEND_ACCESSIBLE=true
+        else
+            log warn "Backend still not accessible, but continuing due to user skip"
+        fi
     fi
     
     # If Cloudflare is enabled, verify the public health endpoint; otherwise check local backend only
@@ -1305,4 +1319,10 @@ build_frontend
 configure_reverse_proxy
 verify_stack
 
-log info "Deployment complete"
+if [ "$BACKEND_CHECK_SKIPPED" = true ] && [ "$BACKEND_ACCESSIBLE" = false ]; then
+    log warn "Deployment completed with warnings: Backend health check was skipped and backend is not accessible"
+    log info "You may need to manually check the backend service: systemctl status pi-monitor-backend.service"
+    log info "To restart the backend: sudo ./deploy.sh --target restart"
+else
+    log info "Deployment complete"
+fi

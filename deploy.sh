@@ -683,8 +683,8 @@ setup_cloudflare() {
         
         # Since we can't easily update existing tunnel ingress rules, create a config file
         log info "Creating tunnel configuration file for port ${BACKEND_PORT}..."
-        mkdir -p ~/.cloudflared
-        cat > ~/.cloudflared/config.yml <<EOF
+        mkdir -p /etc/cloudflared
+        cat > /etc/cloudflared/config.yml <<EOF
 tunnel: $ACTUAL_TUNNEL_NAME
 credentials-file: ~/.cloudflared/$TUNNEL_ID.json
 
@@ -694,7 +694,11 @@ ingress:
   - service: http_status:404
 EOF
         
-        log info "✓ Tunnel config created at ~/.cloudflared/config.yml"
+        # Set proper permissions
+        chmod 644 /etc/cloudflared/config.yml
+        chown root:root /etc/cloudflared/config.yml
+        
+        log info "✓ Tunnel config created at /etc/cloudflared/config.yml"
         log info "✓ Configures forwarding from ${CF_HOSTNAME} to localhost:${BACKEND_PORT}"
         
         # Skip cloudflared service install since we're creating our own systemd service
@@ -723,7 +727,7 @@ Wants=network.target
 [Service]
 Type=simple
 Environment=TUNNEL_TOKEN=${CF_TOKEN}
-ExecStart=/usr/bin/cloudflared tunnel --no-autoupdate run --config ~/.cloudflared/config.yml
+ExecStart=/usr/bin/cloudflared tunnel --no-autoupdate run --config /etc/cloudflared/config.yml
 Restart=always
 RestartSec=10
 StandardOutput=journal

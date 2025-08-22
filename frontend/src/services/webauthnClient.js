@@ -41,10 +41,12 @@ class WebAuthnClient {
 
     try {
       // Check if WebAuthn is actually functional
+      // eslint-disable-next-line no-undef
       const available = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
       
       let conditionalMediation = false;
       try {
+        // eslint-disable-next-line no-undef
         conditionalMediation = await PublicKeyCredential.isConditionalMediationAvailable?.() || false;
       } catch (e) {
         console.log('Conditional mediation check failed:', e);

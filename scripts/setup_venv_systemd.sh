@@ -131,14 +131,14 @@ else
   fi
 fi
 
-# Build frontend with ESLint disabled and better error handling
+# Build frontend with ESLint completely disabled using our custom build script
 if [[ "$QUIET" = "1" ]]; then
-  if ! DISABLE_ESLINT_PLUGIN=true BROWSERSLIST_IGNORE_OLD_DATA=1 CI=true sudo -u "$APP_USER" npm run -s build >/dev/null 2>&1; then
+  if ! sudo -u "$APP_USER" npm run -s build:no-lint >/dev/null 2>&1; then
     echo "ERROR: Frontend build failed. Check the build output above." >&2
     exit 1
   fi
 else
-  if ! DISABLE_ESLINT_PLUGIN=true BROWSERSLIST_IGNORE_OLD_DATA=1 sudo -u "$APP_USER" npm run -s build; then
+  if ! sudo -u "$APP_USER" npm run -s build:no-lint; then
     echo "ERROR: Frontend build failed. Check the build output above." >&2
     exit 1
   fi

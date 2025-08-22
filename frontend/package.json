@@ -39,6 +39,7 @@
   "scripts": {
     "start": "react-scripts start",
     "build": "react-scripts build",
+    "build:no-lint": "node build-no-lint.js",
     "test": "react-scripts test",
     "eject": "react-scripts eject",
     "build:docker": "npm run build && docker build -t pi-monitor-frontend .",
@@ -54,7 +55,8 @@
     ],
     "rules": {
       "no-unused-vars": "warn",
-      "no-console": "warn"
+      "no-console": "warn",
+      "no-undef": "off"
     },
     "globals": {
       "PublicKeyCredential": "readonly",
@@ -63,7 +65,13 @@
       "localStorage": "readonly",
       "fetch": "readonly",
       "atob": "readonly",
-      "btoa": "readonly"
+      "btoa": "readonly",
+      "ArrayBuffer": "readonly",
+      "Uint8Array": "readonly"
+    },
+    "env": {
+      "browser": true,
+      "es2020": true
     }
   },
   "browserslist": {

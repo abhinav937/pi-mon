@@ -26,7 +26,14 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Fix: If we're in a scripts subdirectory, go up to the parent
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Handle both direct execution and piped execution
+if [[ -n "${BASH_SOURCE[0]:-}" ]]; then
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+else
+    # Fallback for piped execution (curl | bash)
+    SCRIPT_DIR="$(pwd)"
+fi
+
 if [[ "$(basename "$SCRIPT_DIR")" == "scripts" ]]; then
     APP_DIR="${1:-$(dirname "$SCRIPT_DIR")}"
 else

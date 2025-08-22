@@ -84,7 +84,21 @@ SHOW_CONFIG=false
 NEED_FRONTEND_BUILD=false
 TEST_CHECKSUMS=false
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Handle both direct execution and piped execution
+if [[ -n "${BASH_SOURCE[0]:-}" ]]; then
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+else
+    # Fallback for piped execution (curl | bash)
+    # Try to detect if we're in a pi-mon directory
+    if [[ -d "backend" && -d "frontend" ]]; then
+        SCRIPT_DIR="$(pwd)"
+    else
+        # Create a temporary directory and work from there
+        TEMP_DIR="$(mktemp -d)"
+        SCRIPT_DIR="$TEMP_DIR"
+        log info "Running in piped mode, using temporary directory: $TEMP_DIR"
+    fi
+fi
 
 # Derive defaults
 [ -n "$PI_MON_DIR" ] || PI_MON_DIR="$SCRIPT_DIR"

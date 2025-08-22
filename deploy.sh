@@ -204,7 +204,7 @@ optimize_pi5_system() {
         available_govs=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_available_governors)
         if echo "$available_govs" | grep -q "performance"; then
             log info "Setting CPU governor to performance mode"
-            echo performance | tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor >/dev/null 2>&1
+            run_cmd echo performance \| tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor >/dev/null 2>&1
         fi
     fi
     
@@ -367,7 +367,6 @@ check_checksums() {
     if [ "$TEST_CHECKSUMS" = true ]; then
         log info "=== CHECKSUM TESTING ==="
         
-        # Generate current checksums
         local frontend_checksum=$(generate_checksum "$PI_MON_DIR/frontend")
         local backend_checksum=$(generate_checksum "$PI_MON_DIR/backend")
         local nginx_checksum=$(generate_checksum "$NGINX_SITES_AVAILABLE/pi-monitor")
@@ -376,7 +375,6 @@ check_checksums() {
         log info "Backend checksum: $backend_checksum"
         log info "Nginx checksum: $nginx_checksum"
         
-        # Check stored checksums
         local stored_frontend=""
         local stored_backend=""
         local stored_nginx=""
@@ -396,7 +394,6 @@ check_checksums() {
             log info "Stored nginx checksum: $stored_nginx"
         fi
         
-        # Compare checksums
         if [ "$frontend_checksum" != "$stored_frontend" ] && [ -n "$stored_frontend" ]; then
             log info "Frontend changes detected - rebuild needed"
             NEED_FRONTEND_BUILD=true
@@ -496,7 +493,8 @@ ensure_user() {
 # ----------------------------------------------------------------------------
 setup_cloudflare() {
     if [ "$ENABLE_CLOUDFLARE" = true ]; then
-        log info "Setting up Cloudflare tunnel"
+        log info "=== CLOUDFLARE TUNNEL SETUP ==="
+        log info "Step 1: Installing cloudflared..."
         if ! command -v cloudflared >/dev/null 2>&1; then
             log info "Installing cloudflared for Cloudflare tunnel"
             run_cmd wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm64 -O /usr/local/bin/cloudflared
@@ -506,9 +504,80 @@ setup_cloudflare() {
             log error "Failed to install cloudflared."
             exit 1
         fi
-        # Start cloudflared tunnel in the background
-        run_cmd cloudflared tunnel --no-autoupdate run --token "$CF_TOKEN" &
-        log info "Cloudflare tunnel started for $CF_HOSTNAME"
+        log info "cloudflared present"
+        
+        log info "Step 2: Configuring cloudflared service (token-based)"
+        log info "- Domain: $CF_HOSTNAME"
+        log info "- Tunnel Name: $CF_TUNNEL_NAME"
+        log info "- Token: ${CF_TOKEN:0:10}...[redacted]"
+        
+        # Validate token format (basic check for non-empty and reasonable length)
+        if [ ${#CF_TOKEN} -lt 50 ]; then
+            log error "Invalid Cloudflare token format (too short)."
+            exit 1
+        fi
+        
+        log info "Step 3: Creating systemd service configuration..."
+        cat > /etc/systemd/system/cloudflared.service <<EOF
+[Unit]
+Description=Cloudflared tunnel for Pi Monitor
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/cloudflared tunnel --no-autoupdate run --token ${CF_TOKEN}
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cloudflared
+
+[Install]
+WantedBy=multi-user.target
+EOF
+        
+        log info "Step 4: Reloading systemd and enabling service..."
+        run_cmd systemctl daemon-reload
+        run_cmd systemctl enable cloudflared
+        
+        log info "Step 5: Stopping existing cloudflared service..."
+        systemctl stop cloudflared >/dev/null 2>&1 || true
+        
+        log info "Step 6: Starting cloudflared service..."
+        run_cmd systemctl start cloudflared
+        
+        log info "Step 7: Verifying service status..."
+        if systemctl is-active --quiet cloudflared; then
+            log info "✓ cloudflared service started successfully"
+        else
+            log error "cloudflared service failed to start. Check journalctl -u cloudflared."
+            exit 1
+        fi
+        
+        log info "Step 8: Waiting for tunnel to establish connection to Cloudflare..."
+        log info "This may take a few minutes as the tunnel connects to Cloudflare's edge network"
+        for i in {1..60}; do
+            log info "Connection attempt $i/60..."
+            if curl -fsS "http://127.0.0.1:${BACKEND_PORT}/health" >/dev/null 2>&1; then
+                log info "✓ Local tunnel endpoint responding"
+            else
+                log warn "Local tunnel endpoint not responding, retrying ($i/60)..."
+                sleep 10
+                continue
+            fi
+            if curl -fsS "https://$CF_HOSTNAME/health" >/dev/null 2>&1; then
+                log info "✓ Domain serving OK: https://$CF_HOSTNAME/health"
+                break
+            fi
+            log info "Waiting for Cloudflare to update routing tables..."
+            log info "This typically takes 2-5 minutes for new connections"
+            sleep 10
+        done
+        if ! curl -fsS "https://$CF_HOSTNAME/health" >/dev/null 2>&1; then
+            log warn "Tunnel health check failed: https://$CF_HOSTNAME/health"
+            log info "Check tunnel status manually: journalctl -u cloudflared -n 50"
+        fi
     fi
 }
 
@@ -547,7 +616,7 @@ ensure_venv() {
         fi
         
         if [ "$SILENT_OUTPUT" = true ]; then
-            run_cmd "$VENV_DIR/bin/pip install -q --upgrade pip $PIP_FLAGS" >> "$LOG_FILE" 2>&1 || {
+            run_cmd "$VENV_DIR/bin/pip" install -q --upgrade pip "$PIP_FLAGS" >> "$LOG_FILE" 2>&1 || {
                 log error "pip upgrade failed, check $LOG_FILE."
                 exit 1
             }
@@ -559,7 +628,7 @@ ensure_venv() {
     if [ ! -f "$PI_MON_DIR/backend/requirements.txt" ]; then
         log warn "requirements.txt missing, installing default dependencies."
         if [ "$SILENT_OUTPUT" = true ]; then
-            run_cmd "$VENV_DIR/bin/pip install -q psutil==5.9.6 $PIP_FLAGS" >> "$LOG_FILE" 2>&1 || {
+            run_cmd "$VENV_DIR/bin/pip" install -q psutil==5.9.6 "$PIP_FLAGS" >> "$LOG_FILE" 2>&1 || {
                 log error "Failed to install default dependencies, check $LOG_FILE."
                 exit 1
             }
@@ -571,7 +640,7 @@ ensure_venv() {
         log debug "requirements.txt contents:"
         log debug "$(cat "$PI_MON_DIR/backend/requirements.txt")"
         if [ "$SILENT_OUTPUT" = true ]; then
-            run_cmd "$VENV_DIR/bin/pip install -q -r $PI_MON_DIR/backend/requirements.txt --upgrade $PIP_FLAGS" >> "$LOG_FILE" 2>&1 || {
+            run_cmd "$VENV_DIR/bin/pip" install -q -r "$PI_MON_DIR/backend/requirements.txt" --upgrade "$PIP_FLAGS" >> "$LOG_FILE" 2>&1 || {
                 log error "pip install failed, check $LOG_FILE for details."
                 cat "$LOG_FILE" >&2
                 exit 1
@@ -760,7 +829,7 @@ configure_nginx() {
         exit 1
     fi
     
-    log info "Configuring Nginx for Raspberry Pi 5"
+    log info "Configuring Nginx for domain $DOMAIN"
     if ! command -v nginx >/dev/null 2>&1; then
         run_cmd apt-get update -y
         run_cmd apt-get install -y nginx nginx-extras || log error "Nginx installation failed."
@@ -795,7 +864,7 @@ EOF
     cat > "$NGINX_SITES_AVAILABLE/pi-monitor" <<EOF
 server {
     listen 80;
-    server_name localhost;
+    server_name $DOMAIN;
 
     root ${WEB_ROOT};
     index index.html;
@@ -848,6 +917,14 @@ EOF
     nginx_checksum=$(generate_checksum "$NGINX_SITES_AVAILABLE/pi-monitor")
     echo "$nginx_checksum" > "$STATE_DIR/nginx.checksum"
     log info "Nginx checksum stored: $nginx_checksum"
+    
+    # Configure UFW
+    if command -v ufw >/dev/null 2>&1; then
+        log info "Configuring UFW to allow HTTP (80/tcp)"
+        run_cmd ufw allow 80/tcp
+        log info "Configuring UFW to allow HTTPS (443/tcp)"
+        run_cmd ufw allow 443/tcp
+    fi
 }
 
 # ----------------------------------------------------------------------------
@@ -927,6 +1004,28 @@ verify_stack() {
     if ! curl -fsS "http://localhost/health" >/dev/null 2>&1; then
         log error "Nginx HTTP proxy to /health failed"
         exit 1
+    fi
+    
+    if [ "$ENABLE_CLOUDFLARE" = true ]; then
+        if systemctl is-active --quiet cloudflared; then
+            log info "cloudflared service: active"
+            local dns_records
+            dns_records=$(dig +short A "$CF_HOSTNAME" 2>/dev/null || echo "")
+            log info "DNS A records: $dns_records"
+            if curl -fsS "https://$CF_HOSTNAME/health" >/dev/null 2>&1; then
+                log info "Domain serving OK: https://$CF_HOSTNAME/health"
+                if curl -I "https://$CF_HOSTNAME/health" 2>/dev/null | grep -q "CF-Ray"; then
+                    log info "Cloudflare edge detected"
+                    log info "Cloudflare CF-Ray present"
+                fi
+            else
+                log warn "Domain not reachable (yet): https://$CF_HOSTNAME/health"
+            fi
+        else
+            log error "cloudflared service not running"
+            journalctl -u cloudflared -n 50 --no-pager || true
+            exit 1
+        fi
     fi
     
     log info "=== VERIFICATION COMPLETE ==="

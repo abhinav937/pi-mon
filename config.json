@@ -35,7 +35,7 @@
   "frontend": {
     "framework": "React",
     "build_tool": "npm",
-    "production_port": 80
+    "production_port": 3000
   },
   "monitoring": {
     "system_metrics": [
@@ -85,7 +85,7 @@
   "urls": {
     "local": {
       "backend": "http://localhost:80",
-      "frontend": "http://localhost:80",
+      "frontend": "http://localhost:3000",
       "health": "http://localhost:80/health"
     },
     "production": {

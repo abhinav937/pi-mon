@@ -27,7 +27,7 @@ nano config.json     # edit as needed
 
 After deployment:
 
-- Frontend: `http://localhost/`
+- Frontend: `http://localhost:3000/`
 - Backend API: `http://localhost:80`
 - Health: `http://localhost:80/health`
 
@@ -44,8 +44,8 @@ Core settings live in `config.json`.
 ```json
 {
   "ports": {
-            "backend": 80,
-    "frontend": 80,
+             "backend": 80,
+    "frontend": 3000,
     "frontend_dev": 3000
   },
   "services": {

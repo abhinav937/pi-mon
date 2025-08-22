@@ -32,7 +32,7 @@ class Config:
         return {
             "ports": {
                 "backend": 80,
-                "frontend": 80,
+                "frontend": 3000,
                 "frontend_dev": 3000
             },
             "services": {

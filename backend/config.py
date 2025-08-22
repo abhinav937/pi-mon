@@ -47,7 +47,7 @@ class Config:
         defaults = {
             "ports": {
                 "backend": 80,
-                "frontend": 80,
+                "frontend": 3000,
                 "frontend_dev": 3000
             },
             "backend": {

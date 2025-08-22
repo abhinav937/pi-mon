@@ -901,6 +901,22 @@ setup_backend_service() {
         sleep 2
     fi
     
+    # Setup authbind if port is privileged (<1024)
+    local exec_start="${VENV_DIR}/bin/python ${PI_MON_DIR}/backend/start_service.py"
+    if [ "${BACKEND_PORT}" -lt 1024 ]; then
+        if ! command -v authbind >/dev/null 2>&1; then
+            log info "Installing authbind to allow non-root binding to port ${BACKEND_PORT}"
+            run_cmd apt-get update -y
+            run_cmd apt-get install -y authbind
+        fi
+        log info "Configuring authbind for user ${SYSTEM_USER} on port ${BACKEND_PORT}"
+        run_cmd mkdir -p /etc/authbind/byport
+        run_cmd touch /etc/authbind/byport/${BACKEND_PORT}
+        run_cmd chown ${SYSTEM_USER}:${SYSTEM_USER} /etc/authbind/byport/${BACKEND_PORT}
+        run_cmd chmod 755 /etc/authbind/byport/${BACKEND_PORT}
+        exec_start="/usr/bin/authbind --deep ${VENV_DIR}/bin/python ${PI_MON_DIR}/backend/start_service.py"
+    fi
+    
     # Always update the service file to ensure correct configuration
     log info "Updating systemd service configuration"
     cat > "$SERVICE_FILE" <<EOF
@@ -917,7 +933,7 @@ WorkingDirectory=${PI_MON_DIR}/backend
 Environment=PYTHONUNBUFFERED=1
 Environment=PI_MONITOR_ENV=production
 EnvironmentFile=${PI_MON_DIR}/backend/.env
-ExecStart=${VENV_DIR}/bin/python ${PI_MON_DIR}/backend/start_service.py
+ExecStart=$exec_start
 Restart=always
 RestartSec=10
 StandardOutput=journal
@@ -941,28 +957,14 @@ WantedBy=multi-user.target
 EOF
 
     # Verify the service file was created correctly
-    if ! grep -q "ExecStart=${VENV_DIR}/bin/python ${PI_MON_DIR}/backend/start_service.py" "$SERVICE_FILE"; then
+    if ! grep -q "ExecStart=$exec_start" "$SERVICE_FILE"; then
         log error "Service file configuration is incorrect"
-        log error "Expected: ExecStart=${VENV_DIR}/bin/python ${PI_MON_DIR}/backend/start_service.py"
+        log error "Expected: ExecStart=$exec_start"
         log error "Actual: $(grep 'ExecStart=' "$SERVICE_FILE")"
         exit 1
     fi
     
     log info "✓ Service file configured correctly"
-
-    # Give Python binary permission to bind to port 80 (privileged port)
-    log info "Setting port 80 binding capability for Python binary..."
-    if command -v setcap >/dev/null 2>&1; then
-        if sudo setcap 'cap_net_bind_service=+ep' "${VENV_DIR}/bin/python" 2>/dev/null; then
-            log info "✓ Port 80 binding capability set successfully"
-        else
-            log warn "Failed to set port 80 binding capability"
-            log warn "Backend may fail to start if port 80 requires root privileges"
-        fi
-    else
-        log warn "setcap command not found, cannot set port 80 binding capability"
-        log warn "Backend may fail to start if port 80 requires root privileges"
-    fi
 
     log info "Configuring backend .env"
     cat > "$PI_MON_DIR/backend/.env" <<EOF

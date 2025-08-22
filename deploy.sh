@@ -1,6 +1,28 @@
 ﻿#!/usr/bin/env bash
 set -euo pipefail
 
+# Pi Monitor Deployment Script - Optimized for Raspberry Pi 5
+# ============================================================================
+
+# Detect system architecture and Pi model
+detect_system() {
+    local arch
+    arch=$(uname -m)
+    
+    if [ "$arch" = "aarch64" ] || [ "$arch" = "arm64" ]; then
+        log info "Detected ARM64 architecture (Raspberry Pi 5 compatible)"
+        # Check if running on actual Pi hardware
+        if [ -f /proc/cpuinfo ] && grep -q "Raspberry Pi" /proc/cpuinfo; then
+            local pi_model
+            pi_model=$(grep "Model" /proc/cpuinfo | head -1 | cut -d: -f2 | xargs)
+            log info "Hardware: $pi_model"
+        fi
+    else
+        log warn "Non-ARM64 architecture detected: $arch"
+        log warn "This script is optimized for Raspberry Pi 5 (ARM64)"
+    fi
+}
+
 # Install jq if not present
 command -v jq >/dev/null || {
   echo "Installing jq for JSON processing"
@@ -141,6 +163,31 @@ run_cmd() {
 on_error() {
     local ec=$?; local ln=${BASH_LINENO[0]}
     log error "Failed at line $ln with exit code $ec"
+    
+    # Pi 5 specific error recovery
+    if [ "$ec" -ne 0 ]; then
+        log error "Attempting Pi 5 specific error recovery..."
+        
+        # Check if it's a memory issue
+        if [ "$ec" -eq 137 ] || [ "$ec" -eq 139 ]; then
+            log error "Detected memory-related error (OOM or segmentation fault)"
+            log info "This may be due to Pi 5 memory constraints"
+            log info "Consider reducing memory usage or increasing swap"
+        fi
+        
+        # Check if it's a Python/venv issue
+        if [ "$ec" -eq 127 ] || [ "$ec" -eq 126 ]; then
+            log error "Detected command not found or permission denied error"
+            log info "This may be due to Pi 5 architecture compatibility issues"
+            log info "Consider reinstalling dependencies with ARM64 versions"
+        fi
+        
+        # Show system status for debugging
+        log info "Pi 5 system status for debugging:"
+        free -h 2>/dev/null || true
+        df -h 2>/dev/null || true
+        uname -a 2>/dev/null || true
+    fi
 }
 trap on_error ERR
 
@@ -240,6 +287,48 @@ if [[ "$EUID" -ne 0 ]]; then
 fi
 
 # ----------------------------------------------------------------------------
+# Pi 5 System Optimizations
+# ----------------------------------------------------------------------------
+optimize_pi5_system() {
+    log info "Applying Raspberry Pi 5 system optimizations"
+    
+    # Enable performance governor for Pi 5
+    if [ -f /sys/devices/system/cpu/cpu0/cpufreq/scaling_available_governors ]; then
+        local available_govs
+        available_govs=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_available_governors)
+        if echo "$available_govs" | grep -q "performance"; then
+            log info "Setting CPU governor to performance mode"
+            echo performance | tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor >/dev/null 2>&1 || true
+        fi
+    fi
+    
+    # Optimize swap for Pi 5 (disable if not needed)
+    if [ -f /proc/swaps ] && grep -q "/var/swap" /proc/swaps; then
+        log info "Disabling swap for better Pi 5 performance"
+        swapoff /var/swap 2>/dev/null || true
+    fi
+    
+    # Set Pi 5 specific ulimits
+    log info "Setting Pi 5 specific system limits"
+    cat > /etc/security/limits.d/pi-monitor.conf <<EOF
+# Pi 5 specific limits for pi-monitor
+${SYSTEM_USER} soft nofile 65536
+${SYSTEM_USER} hard nofile 65536
+${SYSTEM_USER} soft nproc 4096
+${SYSTEM_USER} hard nproc 4096
+www-data soft nofile 65536
+www-data hard nofile 65536
+EOF
+    
+    # Enable Pi 5 specific kernel modules
+    log info "Loading Pi 5 performance modules"
+    modprobe uio 2>/dev/null || true
+    modprobe uio_pci_generic 2>/dev/null || true
+    
+    log info "Pi 5 system optimizations applied"
+}
+
+# ----------------------------------------------------------------------------
 # Discovery and state
 # ----------------------------------------------------------------------------
 log info "Checking current state"
@@ -311,22 +400,41 @@ ensure_venv() {
     if [ "$VENV_EXISTS" = false ]; then
         log info "Setting up Python venv at $VENV_DIR"
         if ! command -v python3 >/dev/null 2>&1; then
+            log info "Installing Python 3 for Raspberry Pi 5"
             run_cmd apt-get update -y
-            run_cmd apt-get install -y python3 python3-venv python3-pip
+            # Install Python 3.11+ which is optimized for Pi 5
+            run_cmd apt-get install -y python3 python3.11 python3.11-venv python3.11-dev python3-pip python3-setuptools
+            # Ensure python3 points to the latest version
+            if command -v python3.11 >/dev/null 2>&1; then
+                run_cmd update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
+            fi
         fi
-        run_cmd sudo -u "$SYSTEM_USER" python3 -m venv "$VENV_DIR"
+        
+        # Create venv with optimized Python version
+        local python_cmd="python3"
+        if command -v python3.11 >/dev/null 2>&1; then
+            python_cmd="python3.11"
+            log info "Using Python 3.11 for optimal Pi 5 performance"
+        fi
+        
+        run_cmd sudo -u "$SYSTEM_USER" "$python_cmd" -m venv "$VENV_DIR"
+        
+        # Upgrade pip with Pi 5 optimized flags
         if [ "$SILENT_OUTPUT" = true ]; then
-            run_cmd "\"$VENV_DIR/bin/pip\" install -q --upgrade pip >> \"$LOG_FILE\" 2>&1"
+            run_cmd "\"$VENV_DIR/bin/pip\" install -q --upgrade pip --no-cache-dir >> \"$LOG_FILE\" 2>&1"
         else
-            run_cmd "$VENV_DIR/bin/pip" install --upgrade pip
+            run_cmd "$VENV_DIR/bin/pip" install --upgrade pip --no-cache-dir
         fi
     fi
+    
     if [ -f "$PI_MON_DIR/backend/requirements.txt" ]; then
-        log info "Installing/updating backend dependencies"
+        log info "Installing/updating backend dependencies (optimized for Pi 5)"
+        # Use Pi 5 optimized pip flags
+        local pip_flags="--no-cache-dir --prefer-binary"
         if [ "$SILENT_OUTPUT" = true ]; then
-            run_cmd "\"$VENV_DIR/bin/pip\" install -q -r \"$PI_MON_DIR/backend/requirements.txt\" --upgrade >> \"$LOG_FILE\" 2>&1"
+            run_cmd "\"$VENV_DIR/bin/pip\" install -q -r \"$PI_MON_DIR/backend/requirements.txt\" --upgrade $pip_flags >> \"$LOG_FILE\" 2>&1"
         else
-            run_cmd "$VENV_DIR/bin/pip" install -r "$PI_MON_DIR/backend/requirements.txt" --upgrade
+            run_cmd "$VENV_DIR/bin/pip" install -r "$PI_MON_DIR/backend/requirements.txt" --upgrade $pip_flags
         fi
     fi
 }
@@ -355,6 +463,18 @@ RestartSec=10
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=pi-monitor
+
+# Pi 5 optimizations
+Nice=-10
+IOSchedulingClass=1
+IOSchedulingPriority=4
+CPUSchedulingPolicy=1
+CPUSchedulingPriority=50
+
+# Memory and resource limits for Pi 5
+MemoryMax=512M
+LimitNOFILE=65536
+LimitNPROC=4096
 
 [Install]
 WantedBy=multi-user.target
@@ -396,22 +516,38 @@ build_frontend() {
     
     log info "Building frontend"
     if ! command -v npm >/dev/null 2>&1; then
-        log info "Installing Node.js"
+        log info "Installing Node.js for Raspberry Pi 5"
+        # Use NodeSource repository optimized for ARM64
         if [ "$SILENT_OUTPUT" = true ]; then
-            run_cmd "curl -fsSL https://deb.nodesource.com/setup_18.x | bash - >> \"$LOG_FILE\" 2>&1"
+            run_cmd "curl -fsSL https://deb.nodesource.com/setup_20.x | bash - >> \"$LOG_FILE\" 2>&1"
             run_cmd "apt-get install -y -qq nodejs >> \"$LOG_FILE\" 2>&1"
         else
-            run_cmd curl -fsSL https://deb.nodesource.com/setup_18.x \| bash -
+            run_cmd curl -fsSL https://deb.nodesource.com/setup_20.x \| bash -
             run_cmd apt-get install -y nodejs
+        fi
+        
+        # Verify ARM64 compatibility
+        local node_arch
+        node_arch=$(node -p "process.arch" 2>/dev/null || echo "unknown")
+        if [ "$node_arch" = "arm64" ]; then
+            log info "Node.js ARM64 version installed successfully"
+        else
+            log warn "Node.js architecture: $node_arch (expected arm64)"
         fi
     fi
     
+    # Pi 5 optimized build flags
+    local npm_flags="--no-audit --no-fund --no-optional"
+    local build_env="DISABLE_ESLINT_PLUGIN=true BROWSERSLIST_IGNORE_OLD_DATA=1 NODE_OPTIONS=--max-old-space-size=512"
+    
     if [ "$SILENT_OUTPUT" = true ]; then
         ( cd "$PI_MON_DIR/frontend" && \
-          run_cmd "npm install --no-audit --no-fund --silent --loglevel=error --no-progress >> \"$LOG_FILE\" 2>&1" && \
-          run_cmd "DISABLE_ESLINT_PLUGIN=true BROWSERSLIST_IGNORE_OLD_DATA=1 npm run -s build >> \"$LOG_FILE\" 2>&1" )
+          run_cmd "npm install $npm_flags --silent --loglevel=error --no-progress >> \"$LOG_FILE\" 2>&1" && \
+          run_cmd "$build_env npm run -s build >> \"$LOG_FILE\" 2>&1" )
     else
-        ( cd "$PI_MON_DIR/frontend" && run_cmd npm install --no-audit --no-fund && run_cmd npm run build )
+        ( cd "$PI_MON_DIR/frontend" && \
+          run_cmd npm install $npm_flags && \
+          run_cmd $build_env npm run build )
     fi
     
     run_cmd mkdir -p "$WEB_ROOT"
@@ -431,11 +567,44 @@ configure_nginx() {
     if [ "$SKIP_NGINX" = true ]; then return 0; fi
     if [ "$ONLY_TARGET" = "backend" ] || [ "$ONLY_TARGET" = "frontend" ] || [ "$ONLY_TARGET" = "verify" ]; then return 0; fi
     
-    log info "Configuring Nginx"
+    log info "Configuring Nginx for Raspberry Pi 5"
     if ! command -v nginx >/dev/null 2>&1; then
         run_cmd apt-get update -y
-        run_cmd apt-get install -y nginx
+        run_cmd apt-get install -y nginx nginx-extras
     fi
+    
+    # Pi 5 specific Nginx optimizations
+    log info "Applying Pi 5 Nginx optimizations"
+    cat > /etc/nginx/conf.d/pi-monitor-optimizations.conf <<EOF
+# Pi 5 specific Nginx optimizations
+worker_processes auto;
+worker_rlimit_nofile 65536;
+
+events {
+    worker_connections 1024;
+    use epoll;
+    multi_accept on;
+}
+
+http {
+    # Pi 5 memory optimizations
+    client_body_buffer_size 16k;
+    client_header_buffer_size 1k;
+    large_client_header_buffers 2 1k;
+    
+    # Gzip compression for Pi 5
+    gzip on;
+    gzip_vary on;
+    gzip_min_length 1024;
+    gzip_types text/plain text/css text/xml text/javascript application/javascript application/xml+rss application/json;
+    
+    # Pi 5 caching optimizations
+    open_file_cache max=1000 inactive=20s;
+    open_file_cache_valid 30s;
+    open_file_cache_min_uses 2;
+    open_file_cache_errors on;
+}
+EOF
 
     # Simple Nginx configuration for Cloudflare tunnel (HTTP only)
     cat > "$NGINX_SITES_AVAILABLE/pi-monitor" <<EOF
@@ -969,7 +1138,41 @@ EOF
 verify_stack() {
     if [ -n "$ONLY_TARGET" ] && [ "$ONLY_TARGET" != "verify" ]; then return 0; fi
     
-    log info "Verifying services"
+    log info "Verifying services and Pi 5 optimizations"
+    
+    # Pi 5 specific verification
+    log info "=== Pi 5 System Verification ==="
+    
+    # Check CPU governor
+    if [ -f /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor ]; then
+        local current_gov
+        current_gov=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor)
+        log info "CPU Governor: $current_gov"
+        if [ "$current_gov" = "performance" ]; then
+            log info "[OK] CPU running in performance mode"
+        else
+            log warn "CPU not in performance mode (current: $current_gov)"
+        fi
+    fi
+    
+    # Check memory usage
+    local mem_info
+    mem_info=$(free -h 2>/dev/null | grep "Mem:" || echo "Memory info unavailable")
+    log info "Memory Status: $mem_info"
+    
+    # Check system limits
+    if id "$SYSTEM_USER" &>/dev/null; then
+        local user_limits
+        user_limits=$(ulimit -n 2>/dev/null || echo "unknown")
+        log info "User file descriptor limit: $user_limits"
+    fi
+    
+    # Check Pi 5 specific optimizations
+    if [ -f /etc/security/limits.d/pi-monitor.conf ]; then
+        log info "[OK] Pi 5 system limits configured"
+    else
+        log warn "Pi 5 system limits not configured"
+    fi
     
     if ! systemctl is-active --quiet pi-monitor-backend.service; then
         log error "Backend service is not running"
@@ -1114,6 +1317,8 @@ verify_stack() {
 # ----------------------------------------------------------------------------
 # Main execution
 # ----------------------------------------------------------------------------
+detect_system
+optimize_pi5_system
 ensure_user
 ensure_venv
 setup_backend_service

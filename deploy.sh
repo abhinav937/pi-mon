@@ -418,6 +418,7 @@ check_checksums() {
 # ----------------------------------------------------------------------------
 log info "Checking current state"
 log info "Starting deployment..."
+log info "Note: This script will automatically stop/start services as needed"
 
 mkdir -p "$STATE_DIR" || log error "Cannot create state directory $STATE_DIR."
 run_cmd chown "$SYSTEM_USER":"$SYSTEM_USER" "$STATE_DIR"
@@ -721,6 +722,20 @@ EOF
         sleep 5
     fi
     
+    # Ensure backend service is running
+    if ! systemctl is-active --quiet pi-monitor-backend.service; then
+        log info "Starting backend service..."
+        run_cmd systemctl start pi-monitor-backend.service
+        sleep 5
+        
+        # Verify it started
+        if ! systemctl is-active --quiet pi-monitor-backend.service; then
+            log error "Backend service failed to start"
+            systemctl status pi-monitor-backend.service --no-pager -l || true
+            exit 1
+        fi
+    fi
+    
     local backend_checksum
     backend_checksum=$(generate_checksum "$PI_MON_DIR/backend")
     echo "$backend_checksum" > "$STATE_DIR/backend.checksum"
@@ -823,12 +838,48 @@ configure_nginx() {
         exit 1
     fi
     if ss -tuln | grep -q ":80 "; then
-        log error "Port 80 is already in use."
-        exit 1
+        log info "Port 80 is in use, checking for Nginx..."
+        if systemctl is-active --quiet nginx; then
+            log info "Stopping Nginx to reconfigure..."
+            systemctl stop nginx
+            sleep 2
+        else
+            log warn "Port 80 in use by unknown service, attempting to free it..."
+            # Try to stop common web servers
+            systemctl stop apache2 2>/dev/null || true
+            systemctl stop lighttpd 2>/dev/null || true
+            sleep 2
+        fi
+        
+        # Check again
+        if ss -tuln | grep -q ":80 "; then
+            log error "Port 80 still in use after stopping services. Please check manually."
+            exit 1
+        fi
     fi
     if ss -tuln | grep -q ":${BACKEND_PORT} "; then
-        log error "Backend port ${BACKEND_PORT} is already in use."
-        exit 1
+        log info "Backend port ${BACKEND_PORT} is in use, checking for existing service..."
+        if systemctl is-active --quiet pi-monitor-backend.service; then
+            log info "Stopping existing backend service to reconfigure..."
+            systemctl stop pi-monitor-backend.service
+            sleep 2
+        else
+            log warn "Port ${BACKEND_PORT} in use by unknown service, attempting to free it..."
+            # Try to kill any process using the port
+            local pid
+            pid=$(ss -tuln | grep ":${BACKEND_PORT} " | awk '{print $7}' | cut -d'/' -f1 | head -1)
+            if [ -n "$pid" ] && [ "$pid" != "-" ]; then
+                log info "Killing process $pid using port ${BACKEND_PORT}..."
+                kill "$pid" 2>/dev/null || true
+                sleep 2
+            fi
+        fi
+        
+        # Check again
+        if ss -tuln | grep -q ":${BACKEND_PORT} "; then
+            log error "Backend port ${BACKEND_PORT} still in use after stopping services. Please check manually."
+            exit 1
+        fi
     fi
     
     log info "Configuring Nginx for domain $DOMAIN"
@@ -914,6 +965,15 @@ EOF
         run_cmd nginx -t || log error "Nginx configuration test failed."
     fi
     run_cmd systemctl restart nginx
+    
+    # Verify Nginx started successfully
+    if ! systemctl is-active --quiet nginx; then
+        log error "Nginx failed to start after configuration"
+        systemctl status nginx --no-pager -l || true
+        exit 1
+    fi
+    
+    log info "✓ Nginx started successfully with new configuration"
     
     local nginx_checksum
     nginx_checksum=$(generate_checksum "$NGINX_SITES_AVAILABLE/pi-monitor")

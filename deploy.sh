@@ -953,10 +953,10 @@ EOF
     # Give Python binary permission to bind to port 80 (privileged port)
     log info "Setting port 80 binding capability for Python binary..."
     if command -v setcap >/dev/null 2>&1; then
-        if setcap 'cap_net_bind_service=+ep' "${VENV_DIR}/bin/python" 2>/dev/null; then
+        if sudo setcap 'cap_net_bind_service=+ep' "${VENV_DIR}/bin/python" 2>/dev/null; then
             log info "✓ Port 80 binding capability set successfully"
         else
-            log warn "Failed to set port 80 binding capability (may need sudo)"
+            log warn "Failed to set port 80 binding capability"
             log warn "Backend may fail to start if port 80 requires root privileges"
         fi
     else

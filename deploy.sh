@@ -950,6 +950,20 @@ EOF
     
     log info "✓ Service file configured correctly"
 
+    # Give Python binary permission to bind to port 80 (privileged port)
+    log info "Setting port 80 binding capability for Python binary..."
+    if command -v setcap >/dev/null 2>&1; then
+        if setcap 'cap_net_bind_service=+ep' "${VENV_DIR}/bin/python" 2>/dev/null; then
+            log info "✓ Port 80 binding capability set successfully"
+        else
+            log warn "Failed to set port 80 binding capability (may need sudo)"
+            log warn "Backend may fail to start if port 80 requires root privileges"
+        fi
+    else
+        log warn "setcap command not found, cannot set port 80 binding capability"
+        log warn "Backend may fail to start if port 80 requires root privileges"
+    fi
+
     log info "Configuring backend .env"
     cat > "$PI_MON_DIR/backend/.env" <<EOF
 PI_MONITOR_API_KEY=$API_KEY

@@ -555,28 +555,54 @@ EOF
         fi
         
         log info "Step 8: Waiting for tunnel to establish connection to Cloudflare..."
-        log info "This may take a few minutes as the tunnel connects to Cloudflare's edge network"
-        for i in {1..60}; do
+        log info "This may take 10-15 minutes as the tunnel connects to Cloudflare's edge network"
+        log info "You can check progress manually with: journalctl -u cloudflared -f"
+        
+        # Try a few quick checks first
+        for i in {1..3}; do
             if curl -fsS "http://127.0.0.1:${BACKEND_PORT}/health" >/dev/null 2>&1; then
                 log info "✓ Local tunnel endpoint responding"
+                break
             else
-                log warn "Local tunnel endpoint not responding, retrying ($i/60)..."
+                log warn "Local tunnel endpoint not responding, retrying ($i/3)..."
                 sleep 10
-                continue
             fi
+        done
+        
+        # Check if local endpoint is working
+        if ! curl -fsS "http://127.0.0.1:${BACKEND_PORT}/health" >/dev/null 2>&1; then
+            log warn "Local tunnel endpoint not responding after 3 attempts"
+            log info "Tunnel may still be connecting. Please wait 10-15 minutes and check manually:"
+            log info "  - Check tunnel status: journalctl -u cloudflared -n 50"
+            log info "  - Check local health: curl http://127.0.0.1:${BACKEND_PORT}/health"
+            log info "  - Check domain: curl https://$CF_HOSTNAME/health"
+            log info "Continuing with deployment..."
+            return 0
+        fi
+        
+        # Try domain check a few times
+        for i in {1..3}; do
             if curl -fsS "https://$CF_HOSTNAME/health" >/dev/null 2>&1; then
                 log info "✓ Domain serving OK: https://$CF_HOSTNAME/health"
                 break
             fi
             if [ $i -eq 1 ]; then
-                log info "Waiting for Cloudflare to update routing tables... (this typically takes 2-5 minutes)"
+                log info "Waiting for Cloudflare routing to update... (this typically takes 10-15 minutes)"
             fi
-            sleep 10
+            sleep 30
         done
+        
         if ! curl -fsS "https://$CF_HOSTNAME/health" >/dev/null 2>&1; then
-            log warn "Tunnel health check failed: https://$CF_HOSTNAME/health"
-            log info "Check tunnel status manually: journalctl -u cloudflared -n 50"
+            log warn "Domain not yet accessible via Cloudflare"
+            log info "This is normal for new tunnels. Please wait 10-15 minutes and check:"
+            log info "  - Domain: https://$CF_HOSTNAME/health"
+            log info "  - Tunnel logs: journalctl -u cloudflared -f"
+            log info "Continuing with deployment..."
         fi
+        
+        log info "✓ Cloudflare tunnel setup completed"
+        log info "Note: Domain may take 10-15 minutes to become accessible"
+
     fi
 }
 

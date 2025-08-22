@@ -643,12 +643,12 @@ ensure_venv() {
     if [ ! -f "$PI_MON_DIR/backend/requirements.txt" ]; then
         log warn "requirements.txt missing, installing default dependencies."
         if [ "$SILENT_OUTPUT" = true ]; then
-            run_cmd "$VENV_DIR/bin/pip" install -q psutil==5.9.6 "$PIP_FLAGS" >> "$LOG_FILE" 2>&1 || {
+            run_cmd "$VENV_DIR/bin/pip" install -q psutil>=5.9.0,<6.0.0 "$PIP_FLAGS" >> "$LOG_FILE" 2>&1 || {
                 log error "Failed to install default dependencies, check $LOG_FILE."
                 exit 1
             }
         else
-            run_cmd "$VENV_DIR/bin/pip" install psutil==5.9.6 "$PIP_FLAGS"
+            run_cmd "$VENV_DIR/bin/pip" install psutil>=5.9.0,<6.0.0 "$PIP_FLAGS"
         fi
     else
         log info "Installing/updating backend dependencies (optimized for Pi 5)"

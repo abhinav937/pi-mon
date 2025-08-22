@@ -27,25 +27,54 @@ def main():
         print("🚀 Starting Pi Monitor Backend Service...")
         print("=" * 50)
         
-        # Test imports first
+        # Test imports first with better error handling
         print("🧪 Testing server components...")
-        from config import config
-        print("✅ Configuration loaded")
         
-        from server import PiMonitorServer
-        print("✅ Server module loaded")
+        try:
+            from config import config
+            print("✅ Configuration loaded")
+            print(f"   Config file: {config.config_file}")
+            print(f"   Backend port: {config.get_port('backend')}")
+        except Exception as e:
+            print(f"❌ Configuration import failed: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
+        
+        try:
+            from server import PiMonitorServer
+            print("✅ Server module loaded")
+        except Exception as e:
+            print(f"❌ Server module import failed: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
         
         # Create and start server
         port = config.get_port('backend')
         print(f"📍 Starting server on port {port}")
-        print(f"🌐 Production URL: {config.get_production_urls().get('api_base')}")
         
-        server = PiMonitorServer(port=port)
+        try:
+            prod_urls = config.get_production_urls()
+            api_base = prod_urls.get('api_base', 'N/A')
+            print(f"🌐 Production URL: {api_base}")
+        except Exception as e:
+            print(f"⚠️  Could not get production URLs: {e}")
+            api_base = 'N/A'
         
-        print("✅ Server created successfully")
+        try:
+            server = PiMonitorServer(port=port)
+            print("✅ Server created successfully")
+        except Exception as e:
+            print(f"❌ Server creation failed: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
+        
         print("🚀 Starting HTTP server...")
         print(f"🔗 Health check: http://0.0.0.0:{port}/health")
-        print(f"🌐 Production health: {config.get_production_urls().get('api_base')}:{port}/health")
+        if api_base != 'N/A':
+            print(f"🌐 Production health: {api_base}:{port}/health")
         print("=" * 50)
         
         # Start the server

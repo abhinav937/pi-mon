@@ -1,13 +1,29 @@
 #!/usr/bin/bash
 
 # Pi Monitor: setup without Docker (venv + systemd + nginx)
-# Usage: sudo ./scripts/setup_venv_systemd.sh [APP_DIR]
+# This script is designed to work with deploy.sh as a prerequisite
+# Usage: sudo ./scripts/setup_venv_systemd.sh [APP_DIR] [--force]
 # Default APP_DIR is current working directory
+# --force flag will re-run setup even if already completed
 
 set -euo pipefail
 
 # Quiet mode controlled by environment (set by deploy.sh)
 QUIET="${PMON_QUIET:-0}"
+FORCE_SETUP=false
+
+# Parse command line arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --force)
+            FORCE_SETUP=true
+            shift
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
 
 # Fix: If we're in a scripts subdirectory, go up to the parent
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -45,6 +61,16 @@ fi
 
 command -v python3 >/dev/null 2>&1 || { echo "python3 not found" >&2; exit 1; }
 command -v npm >/dev/null 2>&1 || { echo "npm not found (install Node 18+)" >&2; exit 1; }
+
+# Check if setup is already complete (unless --force is used)
+SETUP_MARKER="$APP_DIR/.setup_complete"
+if [[ -f "$SETUP_MARKER" && "$FORCE_SETUP" != "true" ]]; then
+    if [[ "$QUIET" != "1" ]]; then
+        echo "==> Setup already completed. Use --force to re-run setup."
+        echo "==> If you need to update, use deploy.sh instead."
+    fi
+    exit 0
+fi
 
 if [[ "$QUIET" != "1" ]]; then echo "==> Installing system packages (nginx, rsync)"; fi
 if [[ "$QUIET" = "1" ]]; then
@@ -84,13 +110,33 @@ if [[ "$QUIET" != "1" ]]; then echo "==> Building frontend"; fi
 # Ensure correct ownership before installing dependencies
 chown -R "$APP_USER":"$APP_GROUP" "$FRONTEND_DIR"
 pushd "$FRONTEND_DIR" >/dev/null
+
+# Install dependencies with better error handling
 if [[ "$QUIET" = "1" ]]; then
-  sudo -u "$APP_USER" npm install --no-audit --no-fund --no-optional --silent --loglevel=error --no-progress >/dev/null 2>&1
-  DISABLE_ESLINT_PLUGIN=true BROWSERSLIST_IGNORE_OLD_DATA=1 CI=true sudo -u "$APP_USER" npm run -s build >/dev/null 2>&1
+  if ! sudo -u "$APP_USER" npm install --no-audit --no-fund --no-optional --silent --loglevel=error --no-progress >/dev/null 2>&1; then
+    echo "ERROR: npm install failed. Check permissions and try again." >&2
+    exit 1
+  fi
 else
-  sudo -u "$APP_USER" npm install --no-audit --no-fund --no-optional --silent --loglevel=error --no-progress
-  DISABLE_ESLINT_PLUGIN=true BROWSERSLIST_IGNORE_OLD_DATA=1 sudo -u "$APP_USER" npm run -s build
+  if ! sudo -u "$APP_USER" npm install --no-audit --no-fund --no-optional --silent --loglevel=error --no-progress; then
+    echo "ERROR: npm install failed. Check permissions and try again." >&2
+    exit 1
+  fi
 fi
+
+# Build frontend with ESLint disabled and better error handling
+if [[ "$QUIET" = "1" ]]; then
+  if ! DISABLE_ESLINT_PLUGIN=true BROWSERSLIST_IGNORE_OLD_DATA=1 CI=true sudo -u "$APP_USER" npm run -s build >/dev/null 2>&1; then
+    echo "ERROR: Frontend build failed. Check the build output above." >&2
+    exit 1
+  fi
+else
+  if ! DISABLE_ESLINT_PLUGIN=true BROWSERSLIST_IGNORE_OLD_DATA=1 sudo -u "$APP_USER" npm run -s build; then
+    echo "ERROR: Frontend build failed. Check the build output above." >&2
+    exit 1
+  fi
+fi
+
 popd >/dev/null
 
 if [[ "$QUIET" != "1" ]]; then echo "==> Deploying frontend to $WWW_ROOT"; fi
@@ -152,6 +198,13 @@ systemctl restart nginx >/dev/null 2>&1
 set -e
 
 if [[ "$QUIET" != "1" ]]; then echo "==> Installing systemd service for backend ($SYSTEMD_SERVICE)"; fi
+
+# Stop existing service if running
+if systemctl is-active --quiet pi-monitor-backend.service 2>/dev/null; then
+    if [[ "$QUIET" != "1" ]]; then echo "==> Stopping existing backend service..."; fi
+    systemctl stop pi-monitor-backend.service 2>/dev/null || true
+fi
+
 cat > "$SYSTEMD_SERVICE" <<EOF
 [Unit]
 Description=Pi Monitor Backend (venv)
@@ -196,5 +249,10 @@ else
 fi
 
 if [[ "$QUIET" != "1" ]]; then echo "==> Done. Frontend on http://<host>/, backend on http://127.0.0.1:5001 (proxied at /api)"; fi
+
+# Mark setup as complete
+echo "$(date): Setup completed successfully" > "$SETUP_MARKER"
+chown "$APP_USER":"$APP_GROUP" "$SETUP_MARKER"
+if [[ "$QUIET" != "1" ]]; then echo "==> Setup marked as complete. Use deploy.sh for future updates."; fi
 
 

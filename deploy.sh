@@ -366,6 +366,30 @@ log info "Note: This script will automatically stop/start services as needed"
 log info "Tip: Press SPACEBAR during retry loops to skip and continue immediately"
 log info "Skip locations: Backend health, Cloudflare tunnel, Frontend check"
 
+# Check if initial setup is required
+if [ ! -f "$PI_MON_DIR/.setup_complete" ]; then
+    log info "Initial setup not detected. Running setup_venv_systemd.sh first..."
+    if [ -f "$PI_MON_DIR/scripts/setup_venv_systemd.sh" ]; then
+        # Ensure the script is executable
+        if [ ! -x "$PI_MON_DIR/scripts/setup_venv_systemd.sh" ]; then
+            log info "Making setup script executable..."
+            chmod +x "$PI_MON_DIR/scripts/setup_venv_systemd.sh"
+        fi
+        
+        log info "Running initial setup script..."
+        PMON_QUIET=1 "$PI_MON_DIR/scripts/setup_venv_systemd.sh" "$PI_MON_DIR"
+        if [ $? -ne 0 ]; then
+            log error "Initial setup failed. Please run setup_venv_systemd.sh manually first."
+            exit 1
+        fi
+        log info "Initial setup completed successfully."
+    else
+        log error "Setup script not found at $PI_MON_DIR/scripts/setup_venv_systemd.sh"
+        log error "Please run the setup script first or ensure it exists."
+        exit 1
+    fi
+fi
+
 USER_EXISTS=false
 if id "$SYSTEM_USER" &>/dev/null; then USER_EXISTS=true; else log error "User '$SYSTEM_USER' does not exist"; fi
 

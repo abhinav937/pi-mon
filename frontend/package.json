@@ -55,6 +55,15 @@
     "rules": {
       "no-unused-vars": "warn",
       "no-console": "warn"
+    },
+    "globals": {
+      "PublicKeyCredential": "readonly",
+      "navigator": "readonly",
+      "window": "readonly",
+      "localStorage": "readonly",
+      "fetch": "readonly",
+      "atob": "readonly",
+      "btoa": "readonly"
     }
   },
   "browserslist": {

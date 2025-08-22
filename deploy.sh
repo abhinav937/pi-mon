@@ -341,7 +341,43 @@ generate_checksum() {
     if [ -f "$path" ]; then
         sha256sum "$path" | cut -d' ' -f1 | cut -c1-8 || echo "0"
     elif [ -d "$path" ]; then
-        find "$path" -type f -exec sha256sum {} \; | sort | sha256sum | cut -d' ' -f1 | cut -c1-8 || echo "0"
+        # First try fast mtime-based check for large directories
+        local file_count
+        file_count=$(find "$path" -type f 2>/dev/null | wc -l)
+        
+        if [ "$file_count" -gt 1000 ]; then
+            # For large directories, use modification time-based checksum (much faster)
+            find "$path" -type f \
+                -not -path "*/node_modules/*" \
+                -not -path "*/.git/*" \
+                -not -path "*/build/*" \
+                -not -path "*/.venv/*" \
+                -not -path "*/__pycache__/*" \
+                -not -path "*.pyc" \
+                -not -path "*.pyo" \
+                -not -path "*.log" \
+                -not -path "*.tmp" \
+                -not -path "*.cache" \
+                -size -10M \
+                -printf "%T@ %p\n" 2>/dev/null | \
+                sort | sha256sum | cut -d' ' -f1 | cut -c1-8 || echo "0"
+        else
+            # For smaller directories, use content-based checksum
+            find "$path" -type f \
+                -not -path "*/node_modules/*" \
+                -not -path "*/.git/*" \
+                -not -path "*/build/*" \
+                -not -path "*/.venv/*" \
+                -not -path "*/__pycache__/*" \
+                -not -path "*.pyc" \
+                -not -path "*.pyo" \
+                -not -path "*.log" \
+                -not -path "*.tmp" \
+                -not -path "*.cache" \
+                -size -10M \
+                -exec sha256sum {} \; 2>/dev/null | \
+                sort | sha256sum | cut -d' ' -f1 | cut -c1-8 || echo "0"
+        fi
     else
         echo "0"
     fi
@@ -386,8 +422,46 @@ check_checksums() {
     # Regular checksum checking for deployment
     log info "=== CHECKING FOR CHANGES ==="
     
-    local frontend_checksum=$(generate_checksum "$PI_MON_DIR/frontend")
-    local backend_checksum=$(generate_checksum "$PI_MON_DIR/backend")
+    log info "Generating frontend checksum (max 15s)..."
+    local frontend_checksum
+    frontend_checksum=$(timeout 15s bash -c 'generate_checksum "$1"' _ "$PI_MON_DIR/frontend" 2>/dev/null || echo "timeout")
+    
+    log info "Generating backend checksum (max 15s)..."
+    local backend_checksum
+    backend_checksum=$(timeout 15s bash -c 'generate_checksum "$1"' _ "$PI_MON_DIR/backend" 2>/dev/null || echo "timeout")
+    
+    if [ "$frontend_checksum" = "timeout" ] || [ "$backend_checksum" = "timeout" ]; then
+        log warn "Checksum generation timed out, using fallback change detection"
+        
+        # Fallback: check if frontend build is newer than source
+        if [ -d "$PI_MON_DIR/frontend/build" ] && [ -d "$PI_MON_DIR/frontend/src" ]; then
+            local src_newer
+            src_newer=$(find "$PI_MON_DIR/frontend/src" -newer "$PI_MON_DIR/frontend/build" -type f 2>/dev/null | head -1)
+            if [ -n "$src_newer" ]; then
+                log info "Frontend source files newer than build - rebuild needed"
+                NEED_FRONTEND_BUILD=true
+            else
+                log info "Frontend build appears up-to-date"
+            fi
+        else
+            log info "No frontend build found - rebuild needed"
+            NEED_FRONTEND_BUILD=true
+        fi
+        
+        # Fallback: check if backend files have been modified recently
+        if [ -d "$PI_MON_DIR/backend" ]; then
+            local backend_recent
+            backend_recent=$(find "$PI_MON_DIR/backend" -name "*.py" -mtime -1 2>/dev/null | head -1)
+            if [ -n "$backend_recent" ]; then
+                log info "Backend Python files modified recently - restart needed"
+                FORCE_BACKEND=true
+            else
+                log info "Backend appears unchanged"
+            fi
+        fi
+        
+        return 0
+    fi
     
     local stored_frontend=""
     local stored_backend=""

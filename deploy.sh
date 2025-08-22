@@ -664,8 +664,8 @@ setup_cloudflare() {
         log info "✓ Tunnel service will be configured manually"
         
         log info "Creating systemd service configuration..."
-        # Get the actual tunnel ID for the credentials file
-        log info "Getting tunnel ID for credentials file..."
+        # Get the actual tunnel ID
+        log info "Getting tunnel ID..."
         TUNNEL_ID=$(cloudflared tunnel list | grep "$ACTUAL_TUNNEL_NAME" | awk '{print $1}')
         if [ -z "$TUNNEL_ID" ]; then
             log error "Failed to get tunnel ID for $ACTUAL_TUNNEL_NAME"
@@ -673,37 +673,15 @@ setup_cloudflare() {
         fi
         log info "✓ Found tunnel ID: $TUNNEL_ID"
         
-        # Create a config file for the tunnel
-        log info "Creating tunnel configuration file..."
-        cat > /etc/cloudflared/config.yml <<EOF
-tunnel: $ACTUAL_TUNNEL_NAME
-credentials-file: ~/.cloudflared/$TUNNEL_ID.json
-
-ingress:
-  - hostname: ${CF_HOSTNAME}
-    service: http://localhost:${BACKEND_PORT}
-  - service: http_status:404
-EOF
-
-        log info "✓ Tunnel config file created:"
-        log info "  Tunnel: $ACTUAL_TUNNEL_NAME"
-        log info "  Credentials: ~/.cloudflared/$TUNNEL_ID.json"
-        log info "  Hostname: ${CF_HOSTNAME}"
-        log info "  Service: http://localhost:${BACKEND_PORT}"
+        # Since we're using an existing tunnel, let's use the simple approach
+        log info "Using existing tunnel with direct forwarding..."
+        log info "✓ Tunnel: $ACTUAL_TUNNEL_NAME (ID: $TUNNEL_ID)"
+        log info "✓ Hostname: ${CF_HOSTNAME}"
+        log info "✓ Service: http://localhost:${BACKEND_PORT}"
         
-        # Verify the config file exists and is readable
-        if [ ! -f /etc/cloudflared/config.yml ]; then
-            log error "Config file was not created"
-            exit 1
-        fi
-        
-        # Check if credentials file exists
-        if [ ! -f ~/.cloudflared/$TUNNEL_ID.json ]; then
-            log error "Credentials file not found: ~/.cloudflared/$TUNNEL_ID.json"
-            log info "Available credentials files:"
-            ls -la ~/.cloudflared/*.json 2>/dev/null || log info "  No .json files found"
-            exit 1
-        fi
+        # Use the token from config.json for authentication
+        log info "Using Cloudflare token for tunnel authentication..."
+        export TUNNEL_TOKEN="${CF_TOKEN}"
 
         cat > /etc/systemd/system/cloudflared.service <<EOF
 [Unit]
@@ -713,7 +691,8 @@ Wants=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/cloudflared tunnel --no-autoupdate run --config /etc/cloudflared/config.yml
+Environment=TUNNEL_TOKEN=${CF_TOKEN}
+ExecStart=/usr/bin/cloudflared tunnel --no-autoupdate run "$ACTUAL_TUNNEL_NAME"
 Restart=always
 RestartSec=10
 StandardOutput=journal

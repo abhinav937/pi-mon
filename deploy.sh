@@ -89,6 +89,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Derive defaults
 [ -n "$PI_MON_DIR" ] || PI_MON_DIR="$SCRIPT_DIR"
 [ -n "$SYSTEM_USER" ] || SYSTEM_USER="${SUDO_USER:-$(id -un)}"
+[ -n "$STATE_DIR" ] || STATE_DIR="$PI_MON_DIR/.deploy_state"
 
 CONFIG_FILE="$PI_MON_DIR/config.json"
 
@@ -277,7 +278,6 @@ if [ -n "$CF_HOSTNAME" ]; then
 fi
 
 [ -n "$VENV_DIR" ] || VENV_DIR="$PI_MON_DIR/.venv"
-[ -n "$STATE_DIR" ] || STATE_DIR="$PI_MON_DIR/.deploy_state"
 
 # Show resolved configuration and exit early if requested
 if [ "$SHOW_CONFIG" = true ]; then

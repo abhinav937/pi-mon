@@ -46,10 +46,6 @@ class WebAuthnManager:
         self.rp_name = str(rp_name)  # Ensure it's a string
         self.origin = origin or self._get_origin()
         
-        logger.info(f"WebAuthn Manager initialization - RP ID: {self.rp_id} (type: {type(self.rp_id)})")
-        logger.info(f"WebAuthn Manager initialization - Origin: {self.origin} (type: {type(self.origin)})")
-        logger.info(f"WebAuthn Manager initialization - RP Name: {self.rp_name} (type: {type(self.rp_name)})")
-        
         self.db = AuthDatabase()
         self.jwt_secret = self._get_jwt_secret()
         
@@ -211,34 +207,31 @@ class WebAuthnManager:
             if not user_id:
                 raise Exception("Failed to create/get user")
             
-            logger.info(f"User ID type: {type(user_id)}, value: {user_id}")
-            logger.info(f"RP ID type: {type(self.rp_id)}, value: {self.rp_id}")
-            logger.info(f"Origin type: {type(self.origin)}, value: {self.origin}")
-            
             # Get existing credentials to exclude them
             existing_creds = self.db.get_user_credentials(user_id)
             exclude_credentials = []
             
             for cred in existing_creds:
-                # Convert stored base64url credential ID back to bytes
-                cred_id_base64 = self._base64url_to_base64(cred['credential_id'])
-                
-                exclude_credentials.append(
-                    PublicKeyCredentialDescriptor(
-                        id=base64.b64decode(cred_id_base64),
-                        transports=[
-                            AuthenticatorTransport.USB,
-                            AuthenticatorTransport.NFC,
-                            AuthenticatorTransport.BLE,
-                            AuthenticatorTransport.INTERNAL,
-                            AuthenticatorTransport.HYBRID,
-                        ]
+                # The stored credential_id is now the frontend credential ID (base64url string)
+                # Convert it to bytes for the WebAuthn library
+                try:
+                    cred_id_bytes = base64.b64decode(self._base64url_to_base64(cred['credential_id']))
+                    
+                    exclude_credentials.append(
+                        PublicKeyCredentialDescriptor(
+                            id=cred_id_bytes,
+                            transports=[
+                                AuthenticatorTransport.USB,
+                                AuthenticatorTransport.NFC,
+                                AuthenticatorTransport.BLE,
+                                AuthenticatorTransport.INTERNAL,
+                                AuthenticatorTransport.HYBRID,
+                            ]
+                        )
                     )
-                )
-            
-            logger.info(f"About to call generate_registration_options with user_id: {user_id}")
-            logger.info(f"About to call generate_registration_options with rp_id: {self.rp_id}")
-            logger.info(f"About to call generate_registration_options with rp_name: {self.rp_name}")
+                except Exception as e:
+                    logger.error(f"Failed to decode existing credential ID {cred['credential_id']}: {e}")
+                    continue
             
             options = generate_registration_options(
                 rp_id=str(self.rp_id),  # Ensure it's a string
@@ -371,10 +364,10 @@ class WebAuthnManager:
                 if user:
                     user_creds = self.db.get_user_credentials(user['id'])
                     for cred in user_creds:
-                        # The stored credential_id is already in the format the frontend expects
+                        # The stored credential_id is now the frontend credential ID (base64url string)
                         # We need to convert it to bytes for the WebAuthn library
                         try:
-                            # Try to decode the stored credential ID as base64url
+                            # The credential ID is already base64url encoded, just decode it
                             cred_id_bytes = base64.b64decode(self._base64url_to_base64(cred['credential_id']))
                         except Exception as e:
                             logger.error(f"Failed to decode credential ID {cred['credential_id']}: {e}")

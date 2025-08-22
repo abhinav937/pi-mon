@@ -655,8 +655,8 @@ ensure_venv() {
 
 setup_backend_service() {
     if [ "$SKIP_BACKEND" = true ]; then return 0; fi
-    if [ ! -x "$PI_MON_DIR/backend/start_service.py" ]; then
-        log error "Backend service script ($PI_MON_DIR/backend/start_service.py) is missing or not executable."
+    if [ ! -f "$PI_MON_DIR/backend/start_service.py" ]; then
+        log error "Backend service script ($PI_MON_DIR/backend/start_service.py) is missing."
         exit 1
     fi
     if [ "$SERVICE_EXISTS" = false ]; then

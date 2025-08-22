@@ -552,6 +552,29 @@ setup_cloudflare() {
         log info "- Tunnel Name: $CF_TUNNEL_NAME"
         log info "- Token: ${CF_TOKEN:0:10}...[redacted]"
         
+        # Ensure cloudflared is authenticated
+        log info "Ensuring cloudflared authentication..."
+        
+        # Try to use existing certificate first
+        if cloudflared tunnel list >/dev/null 2>&1; then
+            log info "✓ Using existing Cloudflare certificate"
+        else
+            log info "Existing certificate invalid or expired. Attempting to authenticate..."
+            
+            # Try to remove old certificate and re-authenticate
+            if [ -f ~/.cloudflared/cert.pem ]; then
+                log info "Removing old certificate for fresh authentication..."
+                rm -f ~/.cloudflared/cert.pem
+            fi
+            
+            if ! cloudflared login; then
+                log error "Failed to authenticate cloudflared. Please run 'cloudflared login' manually first."
+                log info "This will open a browser or give you a URL to authenticate with Cloudflare."
+                exit 1
+            fi
+        fi
+        log info "✓ Cloudflared authentication verified"
+        
         # Clean up any existing tunnel configuration
         log info "Cleaning up existing tunnel configuration..."
         systemctl stop cloudflared >/dev/null 2>&1 || true
@@ -580,14 +603,35 @@ setup_cloudflare() {
         
         log info "Setting up tunnel with token..."
         
+        # Try to use token-based authentication first
+        log info "Attempting token-based tunnel setup..."
+        
+        # Set the tunnel token for authentication
+        export TUNNEL_TOKEN="${CF_TOKEN}"
+        
         # First, check if tunnel exists
         if ! cloudflared tunnel list | grep -q "${CF_TUNNEL_NAME}"; then
             log info "Tunnel '${CF_TUNNEL_NAME}' not found, creating new tunnel..."
-            if ! cloudflared tunnel create "${CF_TUNNEL_NAME}"; then
-                log error "Failed to create tunnel '${CF_TUNNEL_NAME}'"
-                exit 1
+            
+            # Try token-based creation first
+            if TUNNEL_TOKEN="${CF_TOKEN}" cloudflared tunnel create "${CF_TUNNEL_NAME}" 2>/dev/null; then
+                log info "✓ New tunnel '${CF_TUNNEL_NAME}' created with token"
+            else
+                log info "Token-based creation failed, trying certificate authentication..."
+                
+                # Try to authenticate first
+                log info "Attempting to authenticate with Cloudflare..."
+                if ! cloudflared login; then
+                    log error "Failed to authenticate with Cloudflare. Please run 'cloudflared login' manually first."
+                    exit 1
+                fi
+                
+                # Try creating tunnel again
+                if ! cloudflared tunnel create "${CF_TUNNEL_NAME}"; then
+                    log error "Failed to create tunnel even after authentication"
+                    exit 1
+                fi
             fi
-            log info "✓ New tunnel '${CF_TUNNEL_NAME}' created"
         else
             log info "✓ Tunnel '${CF_TUNNEL_NAME}' already exists"
         fi

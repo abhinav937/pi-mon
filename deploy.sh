@@ -178,6 +178,23 @@ run_cmd() {
     fi
 }
 
+# Read a single key from the real terminal, not stdin. Returns 0 if SPACE pressed within timeout
+wait_for_space_to_skip() {
+    local timeout="${1:-5}"
+    local key=""
+    if [ -e /dev/tty ]; then
+        if IFS= read -r -s -n 1 -t "$timeout" key < /dev/tty; then
+            [ "$key" = " " ] && return 0
+        fi
+    else
+        # Fallback to stdin if /dev/tty not available
+        if IFS= read -r -s -n 1 -t "$timeout" key 2>/dev/null; then
+            [ "$key" = " " ] && return 0
+        fi
+    fi
+    return 1
+}
+
 # ----------------------------------------------------------------------------
 # Pi 5 System Detection and Optimization
 # ----------------------------------------------------------------------------
@@ -446,8 +463,7 @@ for i in {1..3}; do
     fi
     log warn "Backend health check failed, retrying ($i/3)..."
     log info "Press SPACEBAR to skip retries and continue deployment"
-    read -t 5 -n 1 -s input || true
-    if [ "$input" = " " ]; then
+    if wait_for_space_to_skip 5; then
         log info "Spacebar pressed - skipping backend health check and continuing deployment"
         break
     fi
@@ -553,8 +569,7 @@ EOF
             else
                 log warn "Local tunnel endpoint not responding, retrying ($i/3)..."
                 log info "Press SPACEBAR to skip retries and continue deployment"
-                read -t 10 -n 1 -s input || true
-                if [ "$input" = " " ]; then
+                if wait_for_space_to_skip 10; then
                     log info "Spacebar pressed - skipping retries and continuing deployment"
                     break
                 fi
@@ -583,8 +598,7 @@ EOF
                 log info "Waiting for Cloudflare routing to update... (this typically takes 10-15 minutes)"
             fi
             log info "Press SPACEBAR to skip domain check and continue deployment"
-            read -t 30 -n 1 -s input || true
-            if [ "$input" = " " ]; then
+            if wait_for_space_to_skip 30; then
                 log info "Spacebar pressed - skipping domain check and continuing deployment"
                 break
             fi
@@ -927,8 +941,9 @@ verify_stack() {
             fi
             log warn "Public HTTPS /health via Cloudflare not ready, retrying ($i/3)..."
             log info "Press SPACEBAR to skip retries and continue deployment"
-            read -t 10 -n 1 -s input || true
-            [ "$input" = " " ] && break
+            if wait_for_space_to_skip 10; then
+                break
+            fi
             sleep 10
         done
     fi

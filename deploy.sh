@@ -778,6 +778,23 @@ EOF
 
     run_cmd systemctl daemon-reload
     run_cmd systemctl enable pi-monitor-backend.service
+    
+    # Handle port conflicts by stopping existing service first
+    log info "Ensuring port 5001 is free for backend service..."
+    if systemctl is-active --quiet pi-monitor-backend.service; then
+        log info "Stopping existing backend service to free port 5001..."
+        run_cmd systemctl stop pi-monitor-backend.service || true
+        sleep 2  # Wait for port to be released
+    fi
+    
+    # Check if port 5001 is still in use by other processes
+    if command -v netstat >/dev/null 2>&1; then
+        if netstat -tln 2>/dev/null | grep -q ":5001 "; then
+            log warn "Port 5001 still in use by another process, waiting..."
+            sleep 3
+        fi
+    fi
+    
     if [ "$SERVICE_RUNNING" = false ]; then
         log info "Starting backend service"
         run_cmd systemctl start pi-monitor-backend.service
@@ -799,7 +816,12 @@ EOF
         # Verify it started
         if ! systemctl is-active --quiet pi-monitor-backend.service; then
             log error "Backend service failed to start"
+            log info "Checking service logs for port conflict..."
             systemctl status pi-monitor-backend.service --no-pager -l || true
+            log info "Checking what's using port 5001..."
+            if command -v netstat >/dev/null 2>&1; then
+                netstat -tlnp 2>/dev/null | grep ":5001 " || true
+            fi
             exit 1
         fi
     fi

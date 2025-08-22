@@ -672,7 +672,7 @@ Wants=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/cloudflared tunnel --no-autoupdate run --name "$ACTUAL_TUNNEL_NAME" --url http://localhost:${BACKEND_PORT}
+ExecStart=/usr/bin/cloudflared tunnel --no-autoupdate run "$ACTUAL_TUNNEL_NAME" --url http://localhost:${BACKEND_PORT}
 Restart=always
 RestartSec=10
 StandardOutput=journal

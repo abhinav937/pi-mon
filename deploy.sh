@@ -664,6 +664,18 @@ setup_cloudflare() {
         log info "✓ Tunnel service will be configured manually"
         
         log info "Creating systemd service configuration..."
+        # Create a config file for the tunnel
+        log info "Creating tunnel configuration file..."
+        cat > /etc/cloudflared/config.yml <<EOF
+tunnel: $ACTUAL_TUNNEL_NAME
+credentials-file: ~/.cloudflared/$ACTUAL_TUNNEL_NAME.json
+
+ingress:
+  - hostname: ${CF_HOSTNAME}
+    service: http://localhost:${BACKEND_PORT}
+  - service: http_status:404
+EOF
+
         cat > /etc/systemd/system/cloudflared.service <<EOF
 [Unit]
 Description=Cloudflared tunnel for Pi Monitor
@@ -672,7 +684,7 @@ Wants=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/cloudflared tunnel --no-autoupdate run "$ACTUAL_TUNNEL_NAME" --url http://localhost:${BACKEND_PORT}
+ExecStart=/usr/bin/cloudflared tunnel --no-autoupdate run --config /etc/cloudflared/config.yml
 Restart=always
 RestartSec=10
 StandardOutput=journal

@@ -45,6 +45,10 @@ class WebAuthnManager:
         self.rp_id = rp_id or self._get_rp_id()
         self.rp_name = rp_name
         self.origin = origin or self._get_origin()
+        
+        logger.info(f"WebAuthn Manager initialization - RP ID: {self.rp_id} (type: {type(self.rp_id)})")
+        logger.info(f"WebAuthn Manager initialization - Origin: {self.origin} (type: {type(self.origin)})")
+        
         self.db = AuthDatabase()
         self.jwt_secret = self._get_jwt_secret()
         
@@ -57,6 +61,7 @@ class WebAuthnManager:
         """Get Relying Party ID from environment or config"""
         rp_id = os.environ.get('WEBAUTHN_RP_ID')
         if rp_id:
+            logger.info(f"Using WEBAUTHN_RP_ID from environment: {rp_id} (type: {type(rp_id)})")
             return rp_id
 
         # Try to get from JSON config (preferred)
@@ -64,21 +69,28 @@ class WebAuthnManager:
             # Prefer explicit domain
             cfg_domain = config.get('deployment_defaults.domain')
             if isinstance(cfg_domain, str) and cfg_domain.strip():
-                return cfg_domain.strip()
+                rp_id = cfg_domain.strip()
+                logger.info(f"Using domain from config: {rp_id} (type: {type(rp_id)})")
+                return rp_id
 
             # Fallback to URLs in production config
             prod_backend = config.get('urls.production.backend')
             if isinstance(prod_backend, str) and prod_backend:
                 parsed = urlparse(prod_backend)
                 if parsed.hostname:
-                    return parsed.hostname
+                    rp_id = parsed.hostname
+                    logger.info(f"Using hostname from backend URL: {rp_id} (type: {type(rp_id)})")
+                    return rp_id
 
             prod_api_base = config.get('urls.production.api_base')
             if isinstance(prod_api_base, str) and prod_api_base:
                 parsed = urlparse(prod_api_base)
                 if parsed.hostname:
-                    return parsed.hostname
-        except Exception:
+                    rp_id = parsed.hostname
+                    logger.info(f"Using hostname from API base: {rp_id} (type: {type(rp_id)})")
+                    return rp_id
+        except Exception as e:
+            logger.error(f"Error getting RP ID from config: {e}")
             pass
 
         # Try to get from current hostname/IP as a last resort
@@ -86,11 +98,16 @@ class WebAuthnManager:
             import socket
             hostname = socket.getfqdn()
             if hostname and not hostname.startswith('localhost'):
-                return hostname
-        except Exception:
+                rp_id = hostname
+                logger.info(f"Using system hostname: {rp_id} (type: {type(rp_id)})")
+                return rp_id
+        except Exception as e:
+            logger.error(f"Error getting system hostname: {e}")
             pass
 
-        return 'localhost'
+        rp_id = 'localhost'
+        logger.info(f"Using default localhost: {rp_id} (type: {type(rp_id)})")
+        return rp_id
     
     def _get_origin(self) -> str:
         """Get origin URL"""
@@ -191,6 +208,8 @@ class WebAuthnManager:
             if not user_id:
                 raise Exception("Failed to create/get user")
             
+            logger.info(f"User ID type: {type(user_id)}, value: {user_id}")
+            
             # Get existing credentials to exclude them
             existing_creds = self.db.get_user_credentials(user_id)
             exclude_credentials = []
@@ -212,6 +231,7 @@ class WebAuthnManager:
                     )
                 )
             
+            logger.info(f"About to call generate_registration_options with user_id: {user_id}")
             options = generate_registration_options(
                 rp_id=self.rp_id,
                 rp_name=self.rp_name,

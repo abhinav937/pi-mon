@@ -164,60 +164,62 @@ class PiMonitorHandler(BaseHTTPRequestHandler):
         query_params = parse_qs(parsed_url.query)
         
         # Route to appropriate handler
-        if path == '/':
-            self._handle_root_endpoint()
-        elif path == '/health':
+        if path == '/health':
             self._handle_health_check()
-        elif path == '/api/version':
-            self._handle_version()
-        elif path == '/api/auth/user':
-            self._handle_get_user_info()
-        elif path == '/api/auth/status':
-            self._handle_auth_status()
-        elif path == '/api/system':
-            self._handle_system_stats(query_params)
-        elif path == '/api/system/enhanced':
-            self._handle_enhanced_system_stats()
-        elif path == '/api/system/info':
-            self._handle_system_info_detail()
-        elif path == '/api/services':
-            self._handle_services_list()
-        elif path == '/api/network':
-            self._handle_network_info()
-        elif path == '/api/network/stats':
-            self._handle_network_stats()
-        elif path == '/api/logs':
-            self._handle_logs_list(query_params)
-        elif path.startswith('/api/logs/') and '?' in self.path:
-            self._handle_log_read(query_params)
-        elif path.startswith('/api/logs/') and '/download' in path:
-            self._handle_log_download()
-        elif path.startswith('/api/logs/') and path.endswith('/clear'):
-            self._handle_log_clear()
-        elif path.startswith('/api/metrics/history'):
-            self._handle_metrics_history(query_params)
-        elif path.startswith('/api/metrics/range'):
-            self._handle_metrics_range(query_params)
-        elif path == '/api/metrics/database':
-            self._handle_database_stats()
-        elif path == '/api/metrics/export':
-            self._handle_metrics_export()
-        elif path == '/api/metrics/interval':
-            self._handle_metrics_interval(query_params)
-        elif path == '/api/metrics/retention':
-            self._handle_metrics_retention(query_params)
-        elif path == '/api/metrics':
-            self._handle_metrics_summary()
-        elif path == '/api/test':
-            self._handle_test_endpoint()
-        elif path == '/api/refresh':
-            self._handle_refresh()
-        elif path == '/api/power':
-            self._handle_power_status_get()
-        elif path.startswith('/api/service/'):
-            self._handle_service_endpoints(path)
+        elif path.startswith('/api/'):
+            # Handle all API endpoints
+            if path == '/api/version':
+                self._handle_version()
+            elif path == '/api/auth/user':
+                self._handle_get_user_info()
+            elif path == '/api/auth/status':
+                self._handle_auth_status()
+            elif path == '/api/system':
+                self._handle_system_stats(query_params)
+            elif path == '/api/system/enhanced':
+                self._handle_enhanced_system_stats()
+            elif path == '/api/system/info':
+                self._handle_system_info_detail()
+            elif path == '/api/services':
+                self._handle_services_list()
+            elif path == '/api/network':
+                self._handle_network_info()
+            elif path == '/api/network/stats':
+                self._handle_network_stats()
+            elif path == '/api/logs':
+                self._handle_logs_list(query_params)
+            elif path.startswith('/api/logs/') and '?' in self.path:
+                self._handle_log_read(query_params)
+            elif path.startswith('/api/logs/') and '/download' in path:
+                self._handle_log_download()
+            elif path.startswith('/api/logs/') and path.endswith('/clear'):
+                self._handle_log_clear()
+            elif path.startswith('/api/metrics/history'):
+                self._handle_metrics_history(query_params)
+            elif path.startswith('/api/metrics/range'):
+                self._handle_metrics_range(query_params)
+            elif path == '/api/metrics/database':
+                self._handle_database_stats()
+            elif path == '/api/metrics/export':
+                self._handle_metrics_export()
+            elif path == '/api/metrics/interval':
+                self._handle_metrics_interval(query_params)
+            elif path == '/api/metrics/retention':
+                self._handle_metrics_retention(query_params)
+            elif path == '/api/metrics':
+                self._handle_metrics_summary()
+            elif path == '/api/test':
+                self._handle_test_endpoint()
+            elif path == '/api/refresh':
+                self._handle_refresh()
+            elif path == '/api/power':
+                self._handle_power_status_get()
+            elif path.startswith('/api/service/'):
+                self._handle_service_endpoints(path)
+            else:
+                self._handle_404()
         else:
-            # Try to serve static files (frontend)
+            # Serve static files (frontend) for all non-API routes
             self._handle_static_files(path)
     
     def do_HEAD(self):
@@ -226,7 +228,7 @@ class PiMonitorHandler(BaseHTTPRequestHandler):
         path = parsed_url.path
 
         # Public endpoints
-        if path == '/health' or path == '/':
+        if path == '/health':
             self.send_response(200)
             self._set_common_headers()
             return
@@ -240,6 +242,22 @@ class PiMonitorHandler(BaseHTTPRequestHandler):
             self.send_response(200)
             self._set_common_headers()
             return
+
+        # For all other routes, try to serve static files
+        try:
+            web_root = "/var/www/pi-monitor"
+            if path == "/":
+                file_path = os.path.join(web_root, "index.html")
+            else:
+                file_path = os.path.join(web_root, path.lstrip("/"))
+            
+            if os.path.exists(file_path):
+                self.send_response(200)
+                self.send_header('Content-type', 'text/html' if path.endswith('.html') else 'application/octet-stream')
+                self._set_cors_headers()
+                return
+        except Exception:
+            pass
 
         # Not found
         self.send_response(404)
@@ -292,23 +310,6 @@ class PiMonitorHandler(BaseHTTPRequestHandler):
         self.end_headers()
     
     # Handler methods for different endpoints
-    def _handle_root_endpoint(self):
-        """Handle root endpoint"""
-        self.send_response(200)
-        self._set_common_headers()
-        
-        response = {
-            "message": "Pi Monitor Backend is running!",
-            "status": "ok",
-            "timestamp": time.strftime('%Y-%m-%d %H:%M:%S'),
-            "version": config.get('project.version', '1.0.0'),
-            "endpoints": config.get_backend_endpoints(),
-            "features": config.get('backend.features', {}),
-            "system_info": self.server_instance.system_monitor.get_system_info(),
-            "enhanced_monitoring": True
-        }
-        self.wfile.write(json.dumps(response).encode())
-    
     def _handle_health_check(self):
         """Handle health check"""
         self.send_response(200)

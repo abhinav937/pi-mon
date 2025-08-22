@@ -578,25 +578,35 @@ setup_cloudflare() {
         # Create config directory
         run_cmd mkdir -p /etc/cloudflared
         
-        # Create tunnel config file with correct port mapping
-        cat > /etc/cloudflared/config.yml <<EOF
-tunnel: ${CF_TUNNEL_NAME}
-credentials-file: /etc/cloudflared/credentials.json
-
-ingress:
-  - hostname: ${CF_HOSTNAME}
-    service: http://localhost:${BACKEND_PORT}
-  - service: http_status:404
-EOF
+        log info "Setting up tunnel with token..."
         
-        log info "Installing tunnel with token..."
-        # Install the tunnel using the token to create credentials
-        if ! cloudflared tunnel install --token "${CF_TOKEN}"; then
-            log error "Failed to install tunnel with token. Check if token is valid."
+        # First, check if tunnel exists
+        if ! cloudflared tunnel list | grep -q "${CF_TUNNEL_NAME}"; then
+            log info "Tunnel '${CF_TUNNEL_NAME}' not found, creating new tunnel..."
+            if ! cloudflared tunnel create "${CF_TUNNEL_NAME}"; then
+                log error "Failed to create tunnel '${CF_TUNNEL_NAME}'"
+                exit 1
+            fi
+            log info "✓ New tunnel '${CF_TUNNEL_NAME}' created"
+        else
+            log info "✓ Tunnel '${CF_TUNNEL_NAME}' already exists"
+        fi
+        
+        # Configure the tunnel routing
+        log info "Configuring tunnel routing to port ${BACKEND_PORT}..."
+        if ! cloudflared tunnel route dns "${CF_TUNNEL_NAME}" "${CF_HOSTNAME}"; then
+            log error "Failed to configure DNS routing for tunnel"
             exit 1
         fi
         
-        log info "✓ Tunnel installed successfully with token"
+        log info "✓ Tunnel DNS routing configured"
+        
+        # Now install the tunnel service
+        log info "Installing tunnel service..."
+        if ! cloudflared service install; then
+            log error "Failed to install tunnel service. Check tunnel configuration."
+            exit 1
+        fi
         
         log info "Creating systemd service configuration..."
         cat > /etc/systemd/system/cloudflared.service <<EOF
@@ -607,7 +617,7 @@ Wants=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/cloudflared tunnel --no-autoupdate run --config /etc/cloudflared/config.yml
+ExecStart=/usr/bin/cloudflared tunnel --no-autoupdate run --url http://localhost:${BACKEND_PORT}
 Restart=always
 RestartSec=10
 StandardOutput=journal

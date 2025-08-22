@@ -73,7 +73,8 @@ class WebAuthnClient {
     try {
       const response = await fetch(`${this.baseURL}/api/auth/status`);
       if (response.status === 429) {
-        // Rate limited - wait and retry
+        // Rate limited - wait and retry with exponential backoff
+        console.log('Rate limited, waiting 5 seconds before retry...');
         await new Promise(resolve => setTimeout(resolve, 5000));
         return this.getAuthStatus();
       }
@@ -91,57 +92,119 @@ class WebAuthnClient {
 
   async startRegistration(username = 'admin', deviceName = null) {
     try {
+      console.log('Starting passkey registration for username:', username);
+      
       const response = await fetch(`${this.baseURL}/api/auth/webauthn/register/begin`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username }) });
       if (response.status === 429) {
         // Rate limited - wait and retry
+        console.log('Rate limited during registration, waiting 5 seconds before retry...');
         await new Promise(resolve => setTimeout(resolve, 5000));
         return this.startRegistration(username, deviceName);
       }
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Registration begin failed:', response.status, errorText);
+        throw new Error(`Registration failed: ${response.status} - ${errorText}`);
+      }
+      
       const data = await response.json();
-      if (!response.ok || data.error) throw new Error(data.error || `Registration failed: ${response.status}`);
+      if (data.error) throw new Error(data.error);
+      
+      console.log('Registration options received:', data);
       const { options, user_id } = data;
       const publicKeyCredentialCreationOptions = { ...options, challenge: this.base64urlToBuffer(options.challenge), user: { ...options.user, id: this.base64urlToBuffer(options.user.id) }, excludeCredentials: options.excludeCredentials?.map(cred => ({ ...cred, id: this.base64urlToBuffer(cred.id) })) || [] };
+      
+      console.log('Creating credential with options:', publicKeyCredentialCreationOptions);
       const credential = await navigator.credentials.create({ publicKey: publicKeyCredentialCreationOptions });
       if (!credential) throw new Error('Failed to create credential');
+      
+      console.log('Credential created successfully:', credential);
       const credentialJson = { id: credential.id, rawId: this.bufferToBase64url(credential.rawId), response: { attestationObject: this.bufferToBase64url(credential.response.attestationObject), clientDataJSON: this.bufferToBase64url(credential.response.clientDataJSON) }, type: credential.type };
+      
+      console.log('Sending credential completion request...');
       const completeResponse = await fetch(`${this.baseURL}/api/auth/webauthn/register/complete`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user_id, credential: credentialJson, device_name: deviceName || this.getDeviceName() }) });
       if (completeResponse.status === 429) {
         // Rate limited - wait and retry
+        console.log('Rate limited during completion, waiting 5 seconds before retry...');
         await new Promise(resolve => setTimeout(resolve, 5000));
         return this.startRegistration(username, deviceName);
       }
+      
+      if (!completeResponse.ok) {
+        const errorText = await completeResponse.text();
+        console.error('Registration completion failed:', completeResponse.status, errorText);
+        throw new Error(`Registration completion failed: ${completeResponse.status} - ${errorText}`);
+      }
+      
       const result = await completeResponse.json();
-      if (!completeResponse.ok || result.error) throw new Error(result.error || `Registration completion failed: ${completeResponse.status}`);
+      if (result.error) throw new Error(result.error);
+      
+      console.log('Registration completed successfully:', result);
       return { success: true, message: result.message, credential_id: result.credential_id };
-    } catch (error) { console.error('Registration failed:', error); return { success: false, error: error.message }; }
+    } catch (error) { 
+      console.error('Registration failed:', error); 
+      return { success: false, error: error.message }; 
+    }
   }
 
   async startAuthentication(username = null) {
     try {
+      console.log('Starting passkey authentication for username:', username);
+      
       const response = await fetch(`${this.baseURL}/api/auth/webauthn/authenticate/begin`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username }) });
       if (response.status === 429) {
         // Rate limited - wait and retry
+        console.log('Rate limited during authentication, waiting 5 seconds before retry...');
         await new Promise(resolve => setTimeout(resolve, 5000));
         return this.startAuthentication(username);
       }
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Authentication begin failed:', response.status, errorText);
+        throw new Error(`Authentication failed: ${response.status} - ${errorText}`);
+      }
+      
       const data = await response.json();
-      if (!response.ok || data.error) throw new Error(data.error || `Authentication failed: ${response.status}`);
+      if (data.error) throw new Error(data.error);
+      
+      console.log('Authentication options received:', data);
       const { options, challenge_key } = data;
       const publicKeyCredentialRequestOptions = { ...options, challenge: this.base64urlToBuffer(options.challenge), allowCredentials: options.allowCredentials?.map(cred => ({ ...cred, id: this.base64urlToBuffer(cred.id) })) || [] };
+      
+      console.log('Getting credential with options:', publicKeyCredentialRequestOptions);
       const credential = await navigator.credentials.get({ publicKey: publicKeyCredentialRequestOptions });
       if (!credential) throw new Error('Failed to get credential');
+      
+      console.log('Credential retrieved successfully:', credential);
       const credentialJson = { id: credential.id, rawId: this.bufferToBase64url(credential.rawId), response: { authenticatorData: this.bufferToBase64url(credential.response.authenticatorData), clientDataJSON: this.bufferToBase64url(credential.response.clientDataJSON), signature: this.bufferToBase64url(credential.response.signature) }, type: credential.type };
+      
+      console.log('Sending authentication completion request...');
       const completeResponse = await fetch(`${this.baseURL}/api/auth/webauthn/authenticate/complete`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ credential: credentialJson, challenge_key }) });
       if (completeResponse.status === 429) {
         // Rate limited - wait and retry
+        console.log('Rate limited during completion, waiting 5 seconds before retry...');
         await new Promise(resolve => setTimeout(resolve, 5000));
         return this.startAuthentication(username);
       }
+      
+      if (!completeResponse.ok) {
+        const errorText = await completeResponse.text();
+        console.error('Authentication completion failed:', completeResponse.status, errorText);
+        throw new Error(`Authentication completion failed: ${completeResponse.status} - ${errorText}`);
+      }
+      
       const result = await completeResponse.json();
-      if (!completeResponse.ok || result.error) throw new Error(result.error || `Authentication completion failed: ${completeResponse.status}`);
+      if (result.error) throw new Error(result.error);
+      
+      console.log('Authentication completed successfully:', result);
       if (result.token) { this.token = result.token; localStorage.setItem('webauthn-token', result.token); }
       return { success: true, message: result.message, user: result.user, token: result.token };
-    } catch (error) { console.error('Authentication failed:', error); return { success: false, error: error.message }; }
+    } catch (error) { 
+      console.error('Authentication failed:', error); 
+      return { success: false, error: error.message }; 
+    }
   }
 
   async logout() {

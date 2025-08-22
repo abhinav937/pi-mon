@@ -111,10 +111,22 @@ class UnifiedClient {
       if (!this.apiKey) {
         await this.authenticate();
       }
+      
+      // Add delay between requests to avoid overwhelming the server
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
       const health = await this.checkHealth();
       try { if (health && health.__headers) this.backendHeaders = health.__headers; } catch (_) {}
+      
+      // Add delay between requests
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
       try { this.backendInfo = await this.getVersion(); } catch (_) {}
       this.setConnectionState(CONNECTION_STATES.CONNECTED);
+      
+      // Add delay before getting initial stats
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
       try { const initialStats = await this.getSystemStats(); this.emitDataUpdate({ type: 'initial_stats', data: initialStats }); } catch (_) {}
       this.startPolling();
     } catch (error) {

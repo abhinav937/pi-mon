@@ -143,6 +143,9 @@ function App({ onLogout, isWebAuthnAuthenticated }) {
   useEffect(() => {
     const loadFrontendVersion = async () => {
       try {
+        // Add delay to avoid overwhelming the server
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        
         const url = `${process.env.PUBLIC_URL || ''}/version.json`;
         const res = await fetch(url, { cache: 'no-store' });
         if (res.ok) {
@@ -160,6 +163,10 @@ function App({ onLogout, isWebAuthnAuthenticated }) {
   useEffect(() => {
     const fetchBackendInfo = async () => {
       if (!unifiedClient || connectionStatus !== 'connected') return;
+      
+      // Add delay to avoid overwhelming the server
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
       try {
         const info = await unifiedClient.getVersion();
         setBackendInfo(info);

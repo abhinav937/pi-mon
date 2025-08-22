@@ -24,7 +24,7 @@ class Config:
             print(f"Warning: Config file {self.config_file} not found, using defaults")
             return self._get_default_config()
         except json.JSONDecodeError as e:
-            print(f"Error: Invalid JSON in {config_file}: {e}")
+            print(f"Error: Invalid JSON in {self.config_file}: {e}")
             return self._get_default_config()
     
     def _get_default_config(self) -> Dict[str, Any]:

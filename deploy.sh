@@ -529,11 +529,51 @@ setup_cloudflare() {
         log info "- Tunnel Name: $CF_TUNNEL_NAME"
         log info "- Token: ${CF_TOKEN:0:10}...[redacted]"
         
+        # Clean up any existing tunnel configuration
+        log info "Cleaning up existing tunnel configuration..."
+        systemctl stop cloudflared >/dev/null 2>&1 || true
+        systemctl disable cloudflared >/dev/null 2>&1 || true
+        
+        # Remove old service files
+        if [ -f /etc/systemd/system/cloudflared.service ]; then
+            run_cmd rm -f /etc/systemd/system/cloudflared.service
+        fi
+        
+        # Clean up old config
+        if [ -d /etc/cloudflared ]; then
+            run_cmd rm -rf /etc/cloudflared
+        fi
+        
         # Validate token format (basic check for non-empty and reasonable length)
         if [ ${#CF_TOKEN} -lt 50 ]; then
             log error "Invalid Cloudflare token format (too short)."
             exit 1
         fi
+        
+        log info "Creating proper tunnel configuration..."
+        
+        # Create config directory
+        run_cmd mkdir -p /etc/cloudflared
+        
+        # Create tunnel config file with correct port mapping
+        cat > /etc/cloudflared/config.yml <<EOF
+tunnel: ${CF_TUNNEL_NAME}
+credentials-file: /etc/cloudflared/credentials.json
+
+ingress:
+  - hostname: ${CF_HOSTNAME}
+    service: http://localhost:${BACKEND_PORT}
+  - service: http_status:404
+EOF
+        
+        log info "Installing tunnel with token..."
+        # Install the tunnel using the token to create credentials
+        if ! cloudflared tunnel install --token "${CF_TOKEN}"; then
+            log error "Failed to install tunnel with token. Check if token is valid."
+            exit 1
+        fi
+        
+        log info "✓ Tunnel installed successfully with token"
         
         log info "Creating systemd service configuration..."
         cat > /etc/systemd/system/cloudflared.service <<EOF
@@ -544,7 +584,7 @@ Wants=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/cloudflared tunnel --no-autoupdate run --token ${CF_TOKEN}
+ExecStart=/usr/local/bin/cloudflared tunnel --no-autoupdate run --config /etc/cloudflared/config.yml
 Restart=always
 RestartSec=10
 StandardOutput=journal
@@ -565,12 +605,30 @@ EOF
         log info "Starting cloudflared service..."
         run_cmd systemctl start cloudflared
         
+        # Wait a moment for service to start
+        sleep 3
+        
         log info "Verifying service status..."
         if systemctl is-active --quiet cloudflared; then
             log info "✓ cloudflared service started successfully"
         else
             log error "cloudflared service failed to start. Check journalctl -u cloudflared."
+            log info "Checking service logs..."
+            run_cmd journalctl -u cloudflared -n 20 --no-pager || true
             exit 1
+        fi
+        
+        # Check for common tunnel errors
+        log info "Checking tunnel configuration..."
+        if journalctl -u cloudflared -n 10 --no-pager | grep -q "Unable to reach the origin service"; then
+            log warn "Tunnel configuration issue detected. Checking port mapping..."
+            log info "Expected: Tunnel should forward to localhost:${BACKEND_PORT}"
+            log info "Current backend status:"
+            if curl -fsS "http://localhost:${BACKEND_PORT}/health" >/dev/null 2>&1; then
+                log info "✓ Backend responding on port ${BACKEND_PORT}"
+            else
+                log error "❌ Backend not responding on port ${BACKEND_PORT}"
+            fi
         fi
         
         log info "Waiting for tunnel to establish connection to Cloudflare..."

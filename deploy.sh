@@ -1042,9 +1042,10 @@ EOF
 build_frontend() {
     if [ "$SKIP_FRONTEND" = true ]; then return 0; fi
     if [ "$ONLY_TARGET" = "backend" ] || [ "$ONLY_TARGET" = "nginx" ] || [ "$ONLY_TARGET" = "verify" ]; then return 0; fi
+    # Always build frontend for now to ensure it's available
     if [ "$NEED_FRONTEND_BUILD" = false ] && [ "$FORCE_FRONTEND" = false ]; then
-        log info "Frontend up-to-date"
-        return 0
+        log info "Frontend appears up-to-date, but forcing rebuild to ensure availability"
+        FORCE_FRONTEND=true
     fi
     
     if [ ! -f "$PI_MON_DIR/frontend/package.json" ]; then
@@ -1092,16 +1093,24 @@ build_frontend() {
         ( cd "$PI_MON_DIR/frontend" && \
           run_cmd npm install "$npm_flags" --silent --loglevel=error --no-progress >> "$LOG_FILE" 2>&1 || {
               log error "npm install failed, check $LOG_FILE."
-              exit 1
+              log warn "Continuing with deployment - frontend may not be available"
+              return 1
           } && \
           run_cmd env "$build_env" npm run -s build >> "$LOG_FILE" 2>&1 || {
               log error "npm build failed, check $LOG_FILE."
-              exit 1
+              log warn "Continuing with deployment - frontend may not be available"
+              return 1
           } )
     else
         ( cd "$PI_MON_DIR/frontend" && \
-          run_cmd npm install "$npm_flags" && \
-          run_cmd env "$build_env" npm run build )
+          run_cmd npm install "$npm_flags" || {
+              log warn "npm install failed, continuing with deployment"
+              return 1
+          } && \
+          run_cmd env "$build_env" npm run build || {
+              log warn "npm build failed, continuing with deployment"
+              return 1
+          } )
     fi
     
     run_cmd mkdir -p "$WEB_ROOT"
@@ -1124,7 +1133,42 @@ build_frontend() {
 # Nginx config
 # ----------------------------------------------------------------------------
 configure_reverse_proxy() { 
-    : # Empty for now, can add Nginx config if needed
+    if [ "$SKIP_NGINX" = true ]; then return 0; fi
+    
+    log info "Configuring static file serving for frontend"
+    
+    # Ensure web root directory exists and has correct permissions
+    run_cmd mkdir -p "$WEB_ROOT"
+    run_cmd chown -R www-data:www-data "$WEB_ROOT"
+    run_cmd chmod -R 755 "$WEB_ROOT"
+    
+    # Create a simple index.html fallback if frontend build fails
+    if [ ! -f "$WEB_ROOT/index.html" ]; then
+        log warn "Frontend build not found, creating fallback"
+        cat > "$WEB_ROOT/index.html" << 'EOF'
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Pi Monitor - Loading...</title>
+    <meta charset="utf-8">
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
+        .loading { color: #666; }
+        .error { color: #d32f2f; }
+    </style>
+</head>
+<body>
+    <h1>Pi Monitor</h1>
+    <div class="loading">Frontend is loading...</div>
+    <div class="error">If you see this message, the frontend build may have failed.</div>
+    <p>Backend is running at <a href="/health">/health</a></p>
+</body>
+</html>
+EOF
+        run_cmd chown www-data:www-data "$WEB_ROOT/index.html"
+    fi
+    
+    log info "✓ Static file serving configured"
 }
 
 # ----------------------------------------------------------------------------

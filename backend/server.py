@@ -206,6 +206,10 @@ class PiMonitorHandler(BaseHTTPRequestHandler):
             self._handle_metrics_interval(query_params)
         elif path == '/api/metrics/retention':
             self._handle_metrics_retention(query_params)
+        elif path == '/api/metrics':
+            self._handle_metrics_summary()
+        elif path == '/api/test':
+            self._handle_test_endpoint()
         elif path == '/api/refresh':
             self._handle_refresh()
         elif path == '/api/power':
@@ -213,7 +217,8 @@ class PiMonitorHandler(BaseHTTPRequestHandler):
         elif path.startswith('/api/service/'):
             self._handle_service_endpoints(path)
         else:
-            self._handle_404()
+            # Try to serve static files (frontend)
+            self._handle_static_files(path)
     
     def do_HEAD(self):
         """Handle HEAD requests (no response body)"""
@@ -528,6 +533,55 @@ class PiMonitorHandler(BaseHTTPRequestHandler):
         response = self.server_instance.database.get_database_stats()
         self.wfile.write(json.dumps(response).encode())
 
+    def _handle_metrics_summary(self):
+        """Handle metrics summary endpoint"""
+        try:
+            # Get current system metrics
+            current_metrics = self.server_instance.metrics_collector.get_current_metrics()
+            
+            # Get database stats
+            db_stats = self.server_instance.database.get_database_stats()
+            
+            response = {
+                "status": "ok",
+                "timestamp": time.strftime('%Y-%m-%d %H:%M:%S'),
+                "current_metrics": current_metrics,
+                "database_stats": db_stats,
+                "collection_interval": self.server_instance.metrics_collector.get_collection_interval(),
+                "uptime": time.time() - self.server_instance.start_time
+            }
+            
+            self.send_response(200)
+            self._set_common_headers()
+            self.wfile.write(json.dumps(response).encode())
+            
+        except Exception as e:
+            self._send_internal_error(f"Failed to get metrics summary: {str(e)}")
+
+    def _handle_test_endpoint(self):
+        """Handle test endpoint for debugging"""
+        try:
+            response = {
+                "status": "ok",
+                "message": "Test endpoint working!",
+                "timestamp": time.strftime('%Y-%m-%d %H:%M:%S'),
+                "backend_version": "2.0.0",
+                "endpoints_available": [
+                    "/health",
+                    "/api/version", 
+                    "/api/metrics",
+                    "/api/test",
+                    "/api/system/info"
+                ]
+            }
+            
+            self.send_response(200)
+            self._set_common_headers()
+            self.wfile.write(json.dumps(response).encode())
+            
+        except Exception as e:
+            self._send_internal_error(f"Test endpoint failed: {str(e)}")
+
     def _handle_metrics_export(self):
         """Export metrics as JSON"""
         if not self._check_auth():
@@ -826,6 +880,67 @@ class PiMonitorHandler(BaseHTTPRequestHandler):
             response = {"error": "Unknown service endpoint"}
         
         self.wfile.write(json.dumps(response).encode())
+    
+    def _handle_static_files(self, path):
+        """Handle static file serving for frontend"""
+        try:
+            # Define web root directory
+            web_root = "/var/www/pi-monitor"
+            
+            # If path is just "/", serve index.html
+            if path == "/":
+                file_path = os.path.join(web_root, "index.html")
+            else:
+                # Remove leading slash and construct file path
+                file_path = os.path.join(web_root, path.lstrip("/"))
+            
+            # Security check: ensure file is within web root
+            if not os.path.abspath(file_path).startswith(os.path.abspath(web_root)):
+                self._handle_404()
+                return
+            
+            # Check if file exists
+            if not os.path.exists(file_path):
+                # Try serving index.html for SPA routing
+                if os.path.exists(os.path.join(web_root, "index.html")):
+                    file_path = os.path.join(web_root, "index.html")
+                else:
+                    self._handle_404()
+                    return
+            
+            # Determine content type based on file extension
+            content_type = "text/plain"
+            if file_path.endswith('.html'):
+                content_type = "text/html"
+            elif file_path.endswith('.js'):
+                content_type = "application/javascript"
+            elif file_path.endswith('.css'):
+                content_type = "text/css"
+            elif file_path.endswith('.json'):
+                content_type = "application/json"
+            elif file_path.endswith('.ico'):
+                content_type = "image/x-icon"
+            elif file_path.endswith('.png'):
+                content_type = "image/png"
+            elif file_path.endswith('.jpg') or file_path.endswith('.jpeg'):
+                content_type = "image/jpeg"
+            elif file_path.endswith('.svg'):
+                content_type = "image/svg+xml"
+            
+            # Read and serve file
+            with open(file_path, 'rb') as f:
+                content = f.read()
+                
+            self.send_response(200)
+            self.send_header('Content-type', content_type)
+            self.send_header('Content-Length', str(len(content)))
+            self._set_cors_headers()
+            self.end_headers()
+            self.wfile.write(content)
+            
+        except Exception as e:
+            # Fall back to 404 if anything goes wrong
+            self._handle_404()
     
     def _handle_404(self):
         """Handle 404 errors"""

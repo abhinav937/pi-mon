@@ -603,18 +603,24 @@ setup_cloudflare() {
         
         log info "Setting up tunnel with token..."
         
-        # Try to use token-based authentication first
-        log info "Attempting token-based tunnel setup..."
+        # Check for existing tunnels and use them
+        log info "Checking for existing tunnels..."
+        EXISTING_TUNNEL=""
         
-        # Set the tunnel token for authentication
-        export TUNNEL_TOKEN="${CF_TOKEN}"
-        
-        # First, check if tunnel exists
-        if ! cloudflared tunnel list | grep -q "${CF_TUNNEL_NAME}"; then
-            log info "Tunnel '${CF_TUNNEL_NAME}' not found, creating new tunnel..."
+        # Look for existing tunnels (pi-mon, pi-monitor, etc.)
+        if cloudflared tunnel list | grep -q "pi-mon"; then
+            EXISTING_TUNNEL="pi-mon"
+            log info "✓ Found existing tunnel: pi-mon"
+        elif cloudflared tunnel list | grep -q "${CF_TUNNEL_NAME}"; then
+            EXISTING_TUNNEL="${CF_TUNNEL_NAME}"
+            log info "✓ Found existing tunnel: ${CF_TUNNEL_NAME}"
+        else
+            log info "No existing tunnel found, creating new one..."
             
             # Try token-based creation first
+            export TUNNEL_TOKEN="${CF_TOKEN}"
             if TUNNEL_TOKEN="${CF_TOKEN}" cloudflared tunnel create "${CF_TUNNEL_NAME}" 2>/dev/null; then
+                EXISTING_TUNNEL="${CF_TUNNEL_NAME}"
                 log info "✓ New tunnel '${CF_TUNNEL_NAME}' created with token"
             else
                 log info "Token-based creation failed, trying certificate authentication..."
@@ -631,19 +637,27 @@ setup_cloudflare() {
                     log error "Failed to create tunnel even after authentication"
                     exit 1
                 fi
+                EXISTING_TUNNEL="${CF_TUNNEL_NAME}"
             fi
+        fi
+        
+        # Use the existing/created tunnel
+        ACTUAL_TUNNEL_NAME="$EXISTING_TUNNEL"
+        log info "Using tunnel: $ACTUAL_TUNNEL_NAME"
+        
+        # Check if DNS routing already exists (skip if it does)
+        log info "Checking existing DNS routing..."
+        if cloudflared tunnel route ip show | grep -q "${CF_HOSTNAME}"; then
+            log info "✓ DNS routing already configured for ${CF_HOSTNAME}"
         else
-            log info "✓ Tunnel '${CF_TUNNEL_NAME}' already exists"
+            log info "Configuring tunnel routing to port ${BACKEND_PORT}..."
+            if ! cloudflared tunnel route dns "$ACTUAL_TUNNEL_NAME" "${CF_HOSTNAME}"; then
+                log warn "Failed to configure DNS routing (may already exist)"
+                log info "Continuing with existing configuration..."
+            else
+                log info "✓ Tunnel DNS routing configured"
+            fi
         fi
-        
-        # Configure the tunnel routing
-        log info "Configuring tunnel routing to port ${BACKEND_PORT}..."
-        if ! cloudflared tunnel route dns "${CF_TUNNEL_NAME}" "${CF_HOSTNAME}"; then
-            log error "Failed to configure DNS routing for tunnel"
-            exit 1
-        fi
-        
-        log info "✓ Tunnel DNS routing configured"
         
         # Now install the tunnel service
         log info "Installing tunnel service..."
@@ -661,7 +675,7 @@ Wants=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/cloudflared tunnel --no-autoupdate run --url http://localhost:${BACKEND_PORT}
+ExecStart=/usr/bin/cloudflared tunnel --no-autoupdate run --name "$ACTUAL_TUNNEL_NAME" --url http://localhost:${BACKEND_PORT}
 Restart=always
 RestartSec=10
 StandardOutput=journal

@@ -686,9 +686,16 @@ setup_backend_service() {
         log error "Backend service script ($PI_MON_DIR/backend/start_service.py) is missing."
         exit 1
     fi
-    if [ "$SERVICE_EXISTS" = false ]; then
-        log info "Creating systemd service"
-        cat > "$SERVICE_FILE" <<EOF
+    # Stop the service if it's running to update configuration
+    if systemctl is-active --quiet pi-monitor-backend.service; then
+        log info "Stopping backend service to update configuration..."
+        systemctl stop pi-monitor-backend.service
+        sleep 2
+    fi
+    
+    # Always update the service file to ensure correct configuration
+    log info "Updating systemd service configuration"
+    cat > "$SERVICE_FILE" <<EOF
 [Unit]
 Description=Pi Monitor Backend Service
 After=network.target
@@ -724,7 +731,16 @@ LimitNPROC=4096
 [Install]
 WantedBy=multi-user.target
 EOF
+
+    # Verify the service file was created correctly
+    if ! grep -q "ExecStart=${VENV_DIR}/bin/python ${PI_MON_DIR}/backend/start_service.py" "$SERVICE_FILE"; then
+        log error "Service file configuration is incorrect"
+        log error "Expected: ExecStart=${VENV_DIR}/bin/python ${PI_MON_DIR}/backend/start_service.py"
+        log error "Actual: $(grep 'ExecStart=' "$SERVICE_FILE")"
+        exit 1
     fi
+    
+    log info "✓ Service file configured correctly"
 
     log info "Configuring backend .env"
     cat > "$PI_MON_DIR/backend/.env" <<EOF

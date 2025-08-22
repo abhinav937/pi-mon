@@ -1,6 +1,53 @@
 #!/bin/bash
 set -euo pipefail
 
+# ----------------------------------------------------------------------------
+# Color and logging
+# ----------------------------------------------------------------------------
+if [ -t 1 ] && [ "${NO_COLOR:-false}" = false ]; then
+    RED='\033[0;31m'
+    GREEN='\033[0;32m'
+    YELLOW='\033[0;33m'
+    BLUE='\033[0;34m'
+    WHITE='\033[1;37m'
+    NC='\033[0m'
+else
+    RED=''; GREEN=''; YELLOW=''; BLUE=''; WHITE=''; NC=''
+fi
+
+_level_value() {
+    case "$1" in
+        debug) echo 10 ;;
+        info)  echo 20 ;;
+        warn)  echo 30 ;;
+        error) echo 40 ;;
+        *)     echo 20 ;;
+    esac
+}
+
+LOG_LEVEL_NUM=$(_level_value "${LOG_LEVEL:-info}")
+
+log() {
+    local level="$1"; shift
+    local level_num=$(_level_value "$level")
+    [ "$level_num" -lt "$LOG_LEVEL_NUM" ] && return 0
+    local ts
+    ts="$(date '+%Y-%m-%d %H:%M:%S')"
+    local tag=""; local color=""; local text="$WHITE"; local reset="$NC"
+    case "$level" in
+        debug) tag="DEBUG"; color="$BLUE" ;;
+        info)  tag="INFO";  color="$GREEN" ;;
+        warn)  tag="WARN";  color="$YELLOW" ;;
+        error) tag="ERROR"; color="$RED" ;;
+        *)     tag="INFO";  color="" ;;
+    esac
+    if [ "${NO_COLOR:-false}" = true ]; then color=""; text=""; reset=""; fi
+    printf "%b[%s] %-5s%b %b%s%b\n" "$color" "$ts" "$tag" "$reset" "$text" "$*" "$reset" >&2
+    if [ -w "${LOG_FILE:-}" ]; then
+        echo "[$ts] $tag $*" >> "$LOG_FILE" 2>/dev/null
+    fi
+}
+
 # Pi Monitor Deployment Script - Optimized for Raspberry Pi 5
 # ============================================================================
 
@@ -87,8 +134,8 @@ pre_flight_checks() {
 # Install jq if not present
 command -v jq >/dev/null || {
     log info "Installing jq for JSON processing"
-    run_cmd apt update
-    run_cmd apt install jq -y
+    apt update
+    apt install jq -y
 }
 
 # Load configurations from JSON
@@ -120,54 +167,9 @@ fi
 [ -n "$STATE_DIR" ] || STATE_DIR="$PI_MON_DIR/.deploy_state"
 
 LOG_FILE="$STATE_DIR/deploy.log"
-touch "$LOG_FILE" 2>/dev/null || log error "Cannot write to log file $LOG_FILE."
+touch "$LOG_FILE" 2>/dev/null || echo "Cannot write to log file $LOG_FILE." >&2
 
-# ----------------------------------------------------------------------------
-# Color and logging
-# ----------------------------------------------------------------------------
-if [ -t 1 ] && [ "${NO_COLOR}" = false ]; then
-    RED='\033[0;31m'
-    GREEN='\033[0;32m'
-    YELLOW='\033[0;33m'
-    BLUE='\033[0;34m'
-    WHITE='\033[1;37m'
-    NC='\033[0m'
-else
-    RED=''; GREEN=''; YELLOW=''; BLUE=''; WHITE=''; NC=''
-fi
 
-_level_value() {
-    case "$1" in
-        debug) echo 10 ;;
-        info)  echo 20 ;;
-        warn)  echo 30 ;;
-        error) echo 40 ;;
-        *)     echo 20 ;;
-    esac
-}
-
-LOG_LEVEL_NUM=$(_level_value "$LOG_LEVEL")
-
-log() {
-    local level="$1"; shift
-    local level_num=$(_level_value "$level")
-    [ "$level_num" -lt "$LOG_LEVEL_NUM" ] && return 0
-    local ts
-    ts="$(date '+%Y-%m-%d %H:%M:%S')"
-    local tag=""; local color=""; local text="$WHITE"; local reset="$NC"
-    case "$level" in
-        debug) tag="DEBUG"; color="$BLUE" ;;
-        info)  tag="INFO";  color="$GREEN" ;;
-        warn)  tag="WARN";  color="$YELLOW" ;;
-        error) tag="ERROR"; color="$RED" ;;
-        *)     tag="INFO";  color="" ;;
-    esac
-    if [ "$NO_COLOR" = true ]; then color=""; text=""; reset=""; fi
-    printf "%b[%s] %-5s%b %b%s%b\n" "$color" "$ts" "$tag" "$reset" "$text" "$*" "$reset" >&2
-    if [ -w "${LOG_FILE:-}" ]; then
-        echo "[$ts] $tag $*" >> "$LOG_FILE" 2>/dev/null
-    fi
-}
 
 run_cmd() {
     if [ "$DRY_RUN" = true ]; then

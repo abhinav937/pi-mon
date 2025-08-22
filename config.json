@@ -2,52 +2,11 @@
   "project": {
     "name": "Pi Monitor",
     "version": "2.0.0",
-    "description": "Simple Raspberry Pi monitoring system with Docker",
+    "description": "Simple Raspberry Pi monitoring system",
     "author": "Pi Monitor Team"
   },
-  "ports": {
-    "backend": 5001,
-    "frontend": 80,
-    "frontend_dev": 3000
-  },
-  "services": {
-    "backend": {
-      "name": "pi-monitor-backend",
-      "image": "pi-monitor-backend",
-      "restart": "unless-stopped",
-      "healthcheck": {
-        "test": ["CMD", "curl", "-f", "http://localhost:5001/health"],
-        "interval": "30s",
-        "timeout": "10s",
-        "retries": 3,
-        "start_period": "10s"
-      }
-    },
-    "frontend": {
-      "name": "pi-monitor-frontend",
-      "image": "pi-monitor-frontend",
-      "restart": "unless-stopped",
-      "healthcheck": {
-        "test": ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80/"],
-        "interval": "30s",
-        "timeout": "10s",
-        "retries": 3
-      }
-    }
-  },
-  "docker": {
-    "network": "pi-monitor-network",
-    "driver": "bridge",
-    "logging": {
-      "driver": "json-file",
-      "options": {
-        "max-size": "10m",
-        "max-file": "3"
-      }
-    }
-  },
   "backend": {
-    "python_version": "3.11-slim",
+    "python_version": "3.11",
     "dependencies": ["psutil==5.9.6"],
     "endpoints": {
       "root": "/",
@@ -76,36 +35,12 @@
   "frontend": {
     "framework": "React",
     "build_tool": "npm",
-    "dev_server_port": 3000,
     "production_port": 80
-  },
-  "deployment": {
-    "environments": {
-      "development": {
-        "compose_file": "docker-compose.dev.yml",
-        "ports": {
-          "backend": 5001,
-          "frontend": 3000
-        },
-        "volumes": {
-          "backend": "./backend:/app",
-          "frontend": "./frontend:/app"
-        }
-      },
-      "production": {
-        "compose_file": "docker-compose.prod.yml",
-        "ports": {
-          "backend": 5001,
-          "frontend": 80
-        },
-        "restart_policy": "always"
-      }
-    }
   },
   "monitoring": {
     "system_metrics": [
       "cpu_percent",
-      "memory_percent", 
+      "memory_percent",
       "disk_percent",
       "temperature",
       "uptime",
@@ -113,14 +48,14 @@
     ],
     "common_services": [
       "ssh",
-      "nginx", 
+      "nginx",
       "apache2",
       "mosquitto"
     ],
     "update_interval": "5.0",
     "configurable_intervals": [
       "2 seconds",
-      "5 seconds", 
+      "5 seconds",
       "10 seconds",
       "30 seconds",
       "1 minute"
@@ -129,7 +64,7 @@
     "max_history_points": 20000,
     "time_ranges": [
       "1 hour (30-min intervals)",
-      "6 hours (3-hour intervals)", 
+      "6 hours (3-hour intervals)",
       "12 hours (3-hour intervals)",
       "24 hours (6-hour intervals)"
     ]
@@ -147,20 +82,11 @@
       "headers": ["Content-Type", "Authorization"]
     }
   },
-  "scripts": {
-    "deploy": "backend/deploy_docker.sh",
-    "update": "update_backend_docker.sh",
-    "test": "test_api.sh"
-  },
   "urls": {
     "local": {
       "backend": "http://localhost:5001",
       "frontend": "http://localhost:80",
       "health": "http://localhost:5001/health"
-    },
-    "development": {
-      "backend": "http://localhost:5001",
-      "frontend": "http://localhost:3000"
     },
     "production": {
       "backend": "https://pi.cabhinav.com",
@@ -174,7 +100,6 @@
     "api_key": "pi-monitor-api-key-2024",
     "env": "production",
     "production_url": "https://pi.cabhinav.com",
-    "public_port": "80",
     "nginx_port": "80",
     "backend_port": "5001"
   },
@@ -182,11 +107,6 @@
     "enable": true,
     "hostname": "pi.cabhinav.com",
     "tunnel_name": "pi-monitor",
-    "token": "eyJhIjoiODM2NWU4YjQ5NDFmOWZiOWI2MDAxMTNkYmQ1ZDY5YmEiLCJ0IjoiNGM4ZGExYmEtYzAwZC00ODJkLThkODEtMmNmNDAzOWM3NGJkIiwicyI6Ik1UUmhORGRqWkdNdE1ERTNaQzAwTURWbUxXRXpNVGN0WkRVek1UQXhNemcwTm1WbSJ9",
-    "use_certificate": false,
-    "cert_path": "",
-    "use_uuid_config": false,
-    "tunnel_uuid": "",
-    "credentials_file": ""
+    "token": "eyJhIjoiODM2NWU4YjQ5NDFmOWZiOWI2MDAxMTNkYmQ1ZDY5YmEiLCJ0IjoiNGM4ZGExYmEtYzAwZC00ODJkLThkODEtMmNmNDAzOWM3NGJkIiwicyI6Ik1UUmhORGRqWkdNdE1ERTNaQzAwTURWbUxXRXpNVGN0WkRVek1UQXhNemcwTm1WbSJ9"
   }
 }

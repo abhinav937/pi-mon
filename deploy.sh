@@ -37,6 +37,7 @@ FORCE_BACKEND=false
 SILENT_OUTPUT=true
 SHOW_CONFIG=false
 NEED_FRONTEND_BUILD=false
+TEST_CHECKSUMS=false
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -46,10 +47,47 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 CONFIG_FILE="$PI_MON_DIR/config.json"
 
+# Pre-flight checks
+pre_flight_checks() {
+    log info "Running pre-flight checks..."
+    local arch
+    arch=$(uname -m)
+    if [ "$arch" != "aarch64" ] && [ "$arch" != "arm64" ]; then
+        log error "This script requires ARM64 architecture (Raspberry Pi 5)."
+        exit 1
+    fi
+    if ! grep -qi "debian\|ubuntu\|raspbian" /etc/os-release; then
+        log error "This script requires a Debian-based OS (e.g., Raspberry Pi OS)."
+        exit 1
+    fi
+    if ! ping -c 1 8.8.8.8 &>/dev/null; then
+        log error "No internet connectivity. Please check your network."
+        exit 1
+    fi
+    available_space=$(df -k "$PI_MON_DIR" | awk 'NR==2 {print $4}')
+    if [ "$available_space" -lt 1048576 ]; then # 1GB in KB
+        log error "Insufficient disk space (<1GB) in $PI_MON_DIR."
+        exit 1
+    fi
+    if ! id "$SYSTEM_USER" &>/dev/null; then
+        log error "Specified user '$SYSTEM_USER' does not exist."
+        exit 1
+    fi
+    if [ -f "$CONFIG_FILE" ] && ! jq . "$CONFIG_FILE" >/dev/null 2>&1; then
+        log error "Invalid JSON in $CONFIG_FILE."
+        exit 1
+    fi
+    if [ "$ENABLE_CLOUDFLARE" = true ] && [ -z "$CF_TOKEN" ] || [ -z "$CF_HOSTNAME" ]; then
+        log error "Cloudflare enabled but missing token or hostname."
+        exit 1
+    fi
+}
+
 # Install jq if not present
 command -v jq >/dev/null || {
-  echo "Installing jq for JSON processing"
-  sudo apt update && sudo apt install jq -y
+    log info "Installing jq for JSON processing"
+    run_cmd apt update
+    run_cmd apt install jq -y
 }
 
 # Load configurations from JSON
@@ -64,11 +102,6 @@ if [ -f "$CONFIG_FILE" ]; then
     CF_HOSTNAME=$(jq -r '.cloudflare.hostname // ""' "$CONFIG_FILE")
     CF_TUNNEL_NAME=$(jq -r '.cloudflare.tunnel_name // "pi-monitor"' "$CONFIG_FILE")
     CF_TOKEN=$(jq -r '.cloudflare.token // ""' "$CONFIG_FILE")
-    CF_USE_CERT=$(jq -r '.cloudflare.use_certificate // false' "$CONFIG_FILE")
-    CF_CERT_PATH=$(jq -r '.cloudflare.cert_path // ""' "$CONFIG_FILE")
-    CF_USE_UUID=$(jq -r '.cloudflare.use_uuid_config // false' "$CONFIG_FILE")
-    CF_TUNNEL_UUID=$(jq -r '.cloudflare.tunnel_uuid // ""' "$CONFIG_FILE")
-    CF_CREDENTIALS_FILE=$(jq -r '.cloudflare.credentials_file // ""' "$CONFIG_FILE")
 else
     # Fallback defaults
     DOMAIN=${DOMAIN:-"pi.cabhinav.com"}
@@ -86,7 +119,7 @@ fi
 [ -n "$STATE_DIR" ] || STATE_DIR="$PI_MON_DIR/.deploy_state"
 
 LOG_FILE="$STATE_DIR/deploy.log"
-[ -f "$LOG_FILE" ] || touch "$LOG_FILE" 2>/dev/null || true
+touch "$LOG_FILE" 2>/dev/null || log error "Cannot write to log file $LOG_FILE."
 
 # ----------------------------------------------------------------------------
 # Color and logging
@@ -129,9 +162,9 @@ log() {
         *)     tag="INFO";  color="" ;;
     esac
     if [ "$NO_COLOR" = true ]; then color=""; text=""; reset=""; fi
-    printf "%b[%s] %-5s%b %b%s%b\n" "$color" "$ts" "$tag" "$reset" "$text" "$*" "$reset"
-    if [ -n "${LOG_FILE:-}" ]; then
-        echo "[$ts] $tag $*" >> "$LOG_FILE" 2>/dev/null || true
+    printf "%b[%s] %-5s%b %b%s%b\n" "$color" "$ts" "$tag" "$reset" "$text" "$*" "$reset" >&2
+    if [ -w "${LOG_FILE:-}" ]; then
+        echo "[$ts] $tag $*" >> "$LOG_FILE" 2>/dev/null
     fi
 }
 
@@ -153,15 +186,11 @@ detect_system() {
     
     if [ "$arch" = "aarch64" ] || [ "$arch" = "arm64" ]; then
         log info "Detected ARM64 architecture (Raspberry Pi 5 compatible)"
-        # Check if running on actual Pi hardware
         if [ -f /proc/cpuinfo ] && grep -q "Raspberry Pi" /proc/cpuinfo; then
             local pi_model
             pi_model=$(grep "Model" /proc/cpuinfo | head -1 | cut -d: -f2 | xargs)
             log info "Hardware: $pi_model"
         fi
-    else
-        log warn "Non-ARM64 architecture detected: $arch"
-        log warn "This script is optimized for Raspberry Pi 5 (ARM64)"
     fi
 }
 
@@ -174,7 +203,16 @@ optimize_pi5_system() {
         available_govs=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_available_governors)
         if echo "$available_govs" | grep -q "performance"; then
             log info "Setting CPU governor to performance mode"
-            echo performance | tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor >/dev/null 2>&1 || true
+            echo performance | tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor >/dev/null 2>&1
+        fi
+    fi
+    
+    # Monitor CPU temperature
+    if [ -f /sys/class/thermal/thermal_zone0/temp ]; then
+        temp=$(cat /sys/class/thermal/thermal_zone0/temp)
+        temp=$((temp / 1000))
+        if [ "$temp" -gt 80 ]; then
+            log warn "High CPU temperature ($temp°C), risk of thermal throttling."
         fi
     fi
     
@@ -210,6 +248,13 @@ This script is specifically optimized for Raspberry Pi 5 (ARM64) with:
 - Enhanced Nginx configuration for Pi 5 performance
 - Optimized systemd service settings
 
+Assumptions:
+- Debian-based OS (e.g., Raspberry Pi OS)
+- ARM64 architecture
+- Internet connectivity
+- At least 1GB free disk space
+- Sudo privileges
+
 Flags:
   --domain VALUE               Domain (default: ${DOMAIN})
   --api-key VALUE              Backend API key (default: ${API_KEY})
@@ -229,6 +274,7 @@ Flags:
   --skip-nginx                 Skip nginx setup
   --force-frontend             Force frontend rebuild
   --force-backend              Force backend restart
+  --test-checksums             Test checksum generation and comparison
   --show-config                Print resolved configuration and exit
   -h, --help                   Show this help
 
@@ -263,6 +309,7 @@ parse_args() {
             --skip-nginx) SKIP_NGINX=true; shift 1 ;;
             --force-frontend) FORCE_FRONTEND=true; shift 1 ;;
             --force-backend) FORCE_BACKEND=true; shift 1 ;;
+            --test-checksums) TEST_CHECKSUMS=true; shift 1 ;;
             --show-config) SHOW_CONFIG=true; shift 1 ;;
             -h|--help) usage; exit 0 ;;
             *) log error "Unknown flag: $1"; usage; exit 2 ;;
@@ -302,12 +349,79 @@ if [[ "$EUID" -ne 0 ]]; then
 fi
 
 # ----------------------------------------------------------------------------
+# Checksum-based update detection
+# ----------------------------------------------------------------------------
+generate_checksum() {
+    local path="$1"
+    if [ -f "$path" ]; then
+        sha256sum "$path" | cut -d' ' -f1 || echo "0"
+    elif [ -d "$path" ]; then
+        find "$path" -type f -exec sha256sum {} \; | sort | sha256sum | cut -d' ' -f1 || echo "0"
+    else
+        echo "0"
+    fi
+}
+
+check_checksums() {
+    if [ "$TEST_CHECKSUMS" = true ]; then
+        log info "=== CHECKSUM TESTING ==="
+        
+        # Generate current checksums
+        local frontend_checksum=$(generate_checksum "$PI_MON_DIR/frontend")
+        local backend_checksum=$(generate_checksum "$PI_MON_DIR/backend")
+        local nginx_checksum=$(generate_checksum "$NGINX_SITES_AVAILABLE/pi-monitor")
+        
+        log info "Frontend checksum: $frontend_checksum"
+        log info "Backend checksum: $backend_checksum"
+        log info "Nginx checksum: $nginx_checksum"
+        
+        # Check stored checksums
+        local stored_frontend=""
+        local stored_backend=""
+        local stored_nginx=""
+        
+        if [ -f "$STATE_DIR/frontend.checksum" ]; then
+            stored_frontend=$(cat "$STATE_DIR/frontend.checksum")
+            log info "Stored frontend checksum: $stored_frontend"
+        fi
+        
+        if [ -f "$STATE_DIR/backend.checksum" ]; then
+            stored_backend=$(cat "$STATE_DIR/backend.checksum")
+            log info "Stored backend checksum: $stored_backend"
+        fi
+        
+        if [ -f "$STATE_DIR/nginx.checksum" ]; then
+            stored_nginx=$(cat "$STATE_DIR/nginx.checksum")
+            log info "Stored nginx checksum: $stored_nginx"
+        fi
+        
+        # Compare checksums
+        if [ "$frontend_checksum" != "$stored_frontend" ] && [ -n "$stored_frontend" ]; then
+            log info "Frontend changes detected - rebuild needed"
+            NEED_FRONTEND_BUILD=true
+        fi
+        
+        if [ "$backend_checksum" != "$stored_backend" ] && [ -n "$stored_backend" ]; then
+            log info "Backend changes detected - restart needed"
+            FORCE_BACKEND=true
+        fi
+        
+        if [ "$nginx_checksum" != "$stored_nginx" ] && [ -n "$stored_nginx" ]; then
+            log info "Nginx changes detected - reconfiguration needed"
+        fi
+        
+        log info "=== CHECKSUM TESTING COMPLETE ==="
+        exit 0
+    fi
+}
+
+# ----------------------------------------------------------------------------
 # Discovery and state
 # ----------------------------------------------------------------------------
 log info "Checking current state"
 log info "pi-mon deploy starting"
 
-mkdir -p "$STATE_DIR"
+mkdir -p "$STATE_DIR" || log error "Cannot create state directory $STATE_DIR."
 run_cmd chown "$SYSTEM_USER":"$SYSTEM_USER" "$STATE_DIR"
 
 USER_EXISTS=false
@@ -341,11 +455,18 @@ FRONTEND_BUILT=false
 # Determine if frontend needs building
 NEED_FRONTEND_BUILD=false
 if [ "$FRONTEND_BUILT" = false ] || [ "$FORCE_FRONTEND" = true ]; then
-        NEED_FRONTEND_BUILD=true
+    NEED_FRONTEND_BUILD=true
 fi
 
 BACKEND_ACCESSIBLE=false
-if curl -fsS "http://127.0.0.1:${BACKEND_PORT}/health" >/dev/null 2>&1; then BACKEND_ACCESSIBLE=true; fi
+for i in {1..3}; do
+    if curl -fsS "http://127.0.0.1:${BACKEND_PORT}/health" >/dev/null 2>&1; then
+        BACKEND_ACCESSIBLE=true
+        break
+    fi
+    log warn "Backend health check failed, retrying ($i/3)..."
+    sleep 5
+done
 
 log info "User exists: $USER_EXISTS | Project: $PI_MON_EXISTS | Venv: $VENV_EXISTS | Service: $SERVICE_RUNNING | Nginx: $NGINX_CONFIGURED | Frontend: $FRONTEND_BUILT"
 log info "paths: PI_MON_DIR=$PI_MON_DIR WEB_ROOT=$WEB_ROOT VENV_DIR=$VENV_DIR"
@@ -363,6 +484,27 @@ ensure_user() {
         run_cmd mkdir -p "$PI_MON_DIR"
         run_cmd chown "$SYSTEM_USER":"$SYSTEM_USER" "$PI_MON_DIR"
     fi
+    if [ ! -w "$PI_MON_DIR" ]; then
+        log error "Directory $PI_MON_DIR is not writable by $SYSTEM_USER."
+        exit 1
+    fi
+}
+
+# ----------------------------------------------------------------------------
+# Cloudflare tunnel setup
+# ----------------------------------------------------------------------------
+setup_cloudflare() {
+    if [ "$ENABLE_CLOUDFLARE" = true ]; then
+        log info "Setting up Cloudflare tunnel"
+        if ! command -v cloudflared >/dev/null 2>&1; then
+            log info "Installing cloudflared for Cloudflare tunnel"
+            run_cmd "wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm64 -O /usr/local/bin/cloudflared"
+            run_cmd chmod +x /usr/local/bin/cloudflared
+        fi
+        # Start cloudflared tunnel in the background
+        run_cmd "cloudflared tunnel --no-autoupdate run --token \"$CF_TOKEN\" &"
+        log info "Cloudflare tunnel started for $CF_HOSTNAME"
+    fi
 }
 
 # ----------------------------------------------------------------------------
@@ -375,37 +517,40 @@ ensure_venv() {
         if ! command -v python3 >/dev/null 2>&1; then
             log info "Installing Python 3 for Raspberry Pi 5"
             run_cmd apt-get update -y
-            # Install Python 3.11+ which is optimized for Pi 5
             run_cmd apt-get install -y python3 python3.11 python3.11-venv python3.11-dev python3-pip python3-setuptools
-            # Ensure python3 points to the latest version
             if command -v python3.11 >/dev/null 2>&1; then
                 run_cmd update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
             fi
         fi
         
-        # Create venv with optimized Python version
         local python_cmd="python3"
         if command -v python3.11 >/dev/null 2>&1; then
             python_cmd="python3.11"
             log info "Using Python 3.11 for optimal Pi 5 performance"
         fi
+        python_version=$("$python_cmd" -c "import sys; print(sys.version_info[:2] >= (3, 8))")
+        if [ "$python_version" != "True" ]; then
+            log error "Python 3.8 or higher is required."
+            exit 1
+        fi
         
         run_cmd sudo -u "$SYSTEM_USER" "$python_cmd" -m venv "$VENV_DIR"
         
-        # Upgrade pip with Pi 5 optimized flags
+        local pip_flags="--no-cache-dir --prefer-binary"
         if [ "$SILENT_OUTPUT" = true ]; then
-            run_cmd "\"$VENV_DIR/bin/pip\" install -q --upgrade pip --no-cache-dir >> \"$LOG_FILE\" 2>&1"
+            run_cmd "\"$VENV_DIR/bin/pip\" install -q --upgrade pip $pip_flags >> \"$LOG_FILE\" 2>&1" || log error "pip upgrade failed, check $LOG_FILE."
         else
-            run_cmd "$VENV_DIR/bin/pip" install --upgrade pip --no-cache-dir
+            run_cmd "$VENV_DIR/bin/pip" install --upgrade pip $pip_flags
         fi
     fi
     
-    if [ -f "$PI_MON_DIR/backend/requirements.txt" ]; then
+    if [ ! -f "$PI_MON_DIR/backend/requirements.txt" ]; then
+        log warn "requirements.txt missing, installing default dependencies."
+        run_cmd "\"$VENV_DIR/bin/pip\" install psutil==5.9.6 $pip_flags" || log error "Failed to install default dependencies, check $LOG_FILE."
+    else
         log info "Installing/updating backend dependencies (optimized for Pi 5)"
-        # Use Pi 5 optimized pip flags
-        local pip_flags="--no-cache-dir --prefer-binary"
         if [ "$SILENT_OUTPUT" = true ]; then
-            run_cmd "\"$VENV_DIR/bin/pip\" install -q -r \"$PI_MON_DIR/backend/requirements.txt\" --upgrade $pip_flags >> \"$LOG_FILE\" 2>&1"
+            run_cmd "\"$VENV_DIR/bin/pip\" install -q -r \"$PI_MON_DIR/backend/requirements.txt\" --upgrade $pip_flags >> \"$LOG_FILE\" 2>&1" || log error "pip install failed, check $LOG_FILE."
         else
             run_cmd "$VENV_DIR/bin/pip" install -r "$PI_MON_DIR/backend/requirements.txt" --upgrade $pip_flags
         fi
@@ -414,6 +559,10 @@ ensure_venv() {
 
 setup_backend_service() {
     if [ "$SKIP_BACKEND" = true ]; then return 0; fi
+    if [ ! -x "$PI_MON_DIR/backend/start_service.py" ]; then
+        log error "Backend service script ($PI_MON_DIR/backend/start_service.py) is missing or not executable."
+        exit 1
+    fi
     if [ "$SERVICE_EXISTS" = false ]; then
         log info "Creating systemd service"
         cat > "$SERVICE_FILE" <<EOF
@@ -460,20 +609,26 @@ PI_MONITOR_API_KEY=$API_KEY
 PI_MONITOR_ENV=$ENV
 EOF
     run_cmd chown "$SYSTEM_USER":"$SYSTEM_USER" "$PI_MON_DIR/backend/.env"
+    run_cmd chmod u+rw "$PI_MON_DIR/backend/.env"
 
     run_cmd systemctl daemon-reload
     run_cmd systemctl enable pi-monitor-backend.service
     if [ "$SERVICE_RUNNING" = false ]; then
         log info "Starting backend service"
         run_cmd systemctl start pi-monitor-backend.service
-        sleep 2
+        sleep 5
     fi
 
     if [ "$FORCE_BACKEND" = true ]; then
         log info "Restarting backend (force requested)"
         run_cmd systemctl restart pi-monitor-backend.service
-        sleep 2
+        sleep 5
     fi
+    
+    local backend_checksum
+    backend_checksum=$(generate_checksum "$PI_MON_DIR/backend")
+    echo "$backend_checksum" > "$STATE_DIR/backend.checksum"
+    log info "Backend checksum stored: $backend_checksum"
 }
 
 # ----------------------------------------------------------------------------
@@ -487,19 +642,35 @@ build_frontend() {
         return 0
     fi
     
+    if [ ! -f "$PI_MON_DIR/frontend/package.json" ]; then
+        log error "Frontend directory ($PI_MON_DIR/frontend) is missing or invalid."
+        exit 1
+    fi
+    
+    free_mem=$(free -m | awk '/Mem:/ {print $7}')
+    if [ "$free_mem" -lt 512 ]; then
+        log warn "Low memory ($free_mem MB available), frontend build may fail."
+    fi
+    
     log info "Building frontend"
     if ! command -v npm >/dev/null 2>&1; then
         log info "Installing Node.js for Raspberry Pi 5"
-        # Use NodeSource repository optimized for ARM64
-        if [ "$SILENT_OUTPUT" = true ]; then
-            run_cmd "curl -fsSL https://deb.nodesource.com/setup_20.x | bash - >> \"$LOG_FILE\" 2>&1"
-            run_cmd "apt-get install -y -qq nodejs >> \"$LOG_FILE\" 2>&1"
-        else
-            run_cmd curl -fsSL https://deb.nodesource.com/setup_20.x \| bash -
+        if ! curl -fsSL https://deb.nodesource.com/setup_20.x >/dev/null; then
+            log warn "NodeSource repository unavailable, falling back to default nodejs."
             run_cmd apt-get install -y nodejs
+        else
+            if [ "$SILENT_OUTPUT" = true ]; then
+                run_cmd "curl -fsSL https://deb.nodesource.com/setup_20.x | bash - >> \"$LOG_FILE\" 2>&1"
+                run_cmd "apt-get install -y -qq nodejs >> \"$LOG_FILE\" 2>&1"
+            else
+                run_cmd curl -fsSL https://deb.nodesource.com/setup_20.x \| bash -
+                run_cmd apt-get install -y nodejs
+            fi
         fi
-        
-        # Verify ARM64 compatibility
+        if ! command -v npm >/dev/null 2>&1; then
+            log error "Node.js installation failed, cannot build frontend."
+            exit 1
+        fi
         local node_arch
         node_arch=$(node -p "process.arch" 2>/dev/null || echo "unknown")
         if [ "$node_arch" = "arm64" ]; then
@@ -509,14 +680,13 @@ build_frontend() {
         fi
     fi
     
-    # Pi 5 optimized build flags
     local npm_flags="--no-audit --no-fund --no-optional"
     local build_env="DISABLE_ESLINT_PLUGIN=true BROWSERSLIST_IGNORE_OLD_DATA=1 NODE_OPTIONS=--max-old-space-size=512"
     
     if [ "$SILENT_OUTPUT" = true ]; then
         ( cd "$PI_MON_DIR/frontend" && \
-          run_cmd "npm install $npm_flags --silent --loglevel=error --no-progress >> \"$LOG_FILE\" 2>&1" && \
-          run_cmd "$build_env npm run -s build >> \"$LOG_FILE\" 2>&1" )
+          run_cmd "npm install $npm_flags --silent --loglevel=error --no-progress >> \"$LOG_FILE\" 2>&1" || log error "npm install failed, check $LOG_FILE." && \
+          run_cmd "$build_env npm run -s build >> \"$LOG_FILE\" 2>&1" || log error "npm build failed, check $LOG_FILE." )
     else
         ( cd "$PI_MON_DIR/frontend" && \
           run_cmd npm install $npm_flags && \
@@ -524,6 +694,7 @@ build_frontend() {
     fi
     
     run_cmd mkdir -p "$WEB_ROOT"
+    run_cmd chown www-data:www-data "$WEB_ROOT"
     if command -v rsync >/dev/null 2>&1; then
         run_cmd rsync -a --delete "$PI_MON_DIR/frontend/build/" "$WEB_ROOT/"
     else
@@ -531,6 +702,11 @@ build_frontend() {
         run_cmd cp -r "$PI_MON_DIR/frontend/build/"* "$WEB_ROOT/"
     fi
     run_cmd chown -R www-data:www-data "$WEB_ROOT"
+    
+    local frontend_checksum
+    frontend_checksum=$(generate_checksum "$PI_MON_DIR/frontend")
+    echo "$frontend_checksum" > "$STATE_DIR/frontend.checksum"
+    log info "Frontend checksum stored: $frontend_checksum"
 }
 
 # ----------------------------------------------------------------------------
@@ -540,83 +716,83 @@ configure_nginx() {
     if [ "$SKIP_NGINX" = true ]; then return 0; fi
     if [ "$ONLY_TARGET" = "backend" ] || [ "$ONLY_TARGET" = "frontend" ] || [ "$ONLY_TARGET" = "verify" ]; then return 0; fi
     
+    if [ ! -d "$WEB_ROOT" ]; then
+        log error "Web root directory ($WEB_ROOT) does not exist."
+        exit 1
+    fi
+    if ss -tuln | grep -q ":80 "; then
+        log error "Port 80 is already in use."
+        exit 1
+    fi
+    if ss -tuln | grep -q ":${BACKEND_PORT} "; then
+        log error "Backend port ${BACKEND_PORT} is already in use."
+        exit 1
+    fi
+    
     log info "Configuring Nginx for Raspberry Pi 5"
     if ! command -v nginx >/dev/null 2>&1; then
         run_cmd apt-get update -y
-        run_cmd apt-get install -y nginx nginx-extras
+        run_cmd apt-get install -y nginx nginx-extras || log error "Nginx installation failed."
+    fi
+    if ! command -v nginx >/dev/null 2>&1; then
+        log error "Nginx installation failed."
+        exit 1
     fi
     
-    # Pi 5 specific Nginx optimizations
     log info "Applying Pi 5 Nginx optimizations"
     cat > /etc/nginx/conf.d/pi-monitor-optimizations.conf <<EOF
-# Pi 5 specific Nginx optimizations
-worker_processes auto;
-worker_rlimit_nofile 65536;
+# Pi 5 specific Nginx optimizations for pi-monitor
+client_body_buffer_size 16k;
+client_header_buffer_size 1k;
+large_client_header_buffers 2 1k;
 
-events {
-    worker_connections 1024;
-    use epoll;
-    multi_accept on;
-}
+gzip on;
+gzip_vary on;
+gzip_min_length 1024;
+gzip_types text/plain text/css text/xml text/javascript application/javascript application/xml+rss application/json;
 
-http {
-    # Pi 5 memory optimizations
-    client_body_buffer_size 16k;
-    client_header_buffer_size 1k;
-    large_client_header_buffers 2 1k;
-    
-    # Gzip compression for Pi 5
-    gzip on;
-    gzip_vary on;
-    gzip_min_length 1024;
-    gzip_types text/plain text/css text/xml text/javascript application/javascript application/xml+rss application/json;
-    
-    # Pi 5 caching optimizations
-    open_file_cache max=1000 inactive=20s;
-    open_file_cache_valid 30s;
-    open_file_cache_min_uses 2;
-    open_file_cache_errors on;
-}
+open_file_cache max=1000 inactive=20s;
+open_file_cache_valid 30s;
+open_file_cache_min_uses 2;
+open_file_cache_errors on;
+
+keepalive_timeout 65;
+keepalive_requests 100;
+client_max_body_size 10m;
 EOF
 
-    # Simple Nginx configuration for Cloudflare tunnel (HTTP only)
     cat > "$NGINX_SITES_AVAILABLE/pi-monitor" <<EOF
-# HTTP server - Cloudflare tunnel handles SSL termination
 server {
     listen 80;
     server_name localhost;
 
-  root ${WEB_ROOT};
-  index index.html;
+    root ${WEB_ROOT};
+    index index.html;
 
-    # Handle static files
-  location / {
-    try_files \$uri /index.html;
-  }
+    location / {
+        try_files \$uri /index.html;
+    }
 
-    # API endpoints - proxy to backend
-  location /api/ {
-    proxy_pass http://127.0.0.1:${BACKEND_PORT}/api/;
-    proxy_http_version 1.1;
-    proxy_set_header Host \$host;
-    proxy_set_header X-Real-IP \$remote_addr;
-    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto \$scheme;
-    proxy_set_header Upgrade \$http_upgrade;
-    proxy_set_header Connection "upgrade";
-  }
+    location /api/ {
+        proxy_pass http://127.0.0.1:${BACKEND_PORT}/api/;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
 
-    # Health endpoint
-  location /health {
-    proxy_pass http://127.0.0.1:${BACKEND_PORT}/health;
-    proxy_http_version 1.1;
-    proxy_set_header Host \$host;
-    proxy_set_header X-Real-IP \$remote_addr;
-    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto \$scheme;
-  }
+    location /health {
+        proxy_pass http://127.0.0.1:${BACKEND_PORT}/health;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
 
-  # Security headers
     add_header X-Frame-Options "SAMEORIGIN" always;
     add_header X-Content-Type-Options "nosniff" always;
     add_header X-XSS-Protection "1; mode=block" always;
@@ -624,14 +800,19 @@ server {
 EOF
 
     run_cmd ln -sf "$NGINX_SITES_AVAILABLE/pi-monitor" "$NGINX_SITES_ENABLED/pi-monitor"
-        if [ -L "$NGINX_SITES_ENABLED/default" ]; then run_cmd rm "$NGINX_SITES_ENABLED/default"; fi
+    if [ -L "$NGINX_SITES_ENABLED/default" ]; then run_cmd rm "$NGINX_SITES_ENABLED/default"; fi
     
-        if [ "$SILENT_OUTPUT" = true ]; then
-            run_cmd "nginx -t >/dev/null 2>&1 || nginx -t"
-        else
-            run_cmd nginx -t
-        fi
-        run_cmd systemctl restart nginx
+    if [ "$SILENT_OUTPUT" = true ]; then
+        run_cmd "nginx -t >/dev/null 2>&1" || { nginx -t; log error "Nginx configuration test failed."; exit 1; }
+    else
+        run_cmd nginx -t || log error "Nginx configuration test failed."
+    fi
+    run_cmd systemctl restart nginx
+    
+    local nginx_checksum
+    nginx_checksum=$(generate_checksum "$NGINX_SITES_AVAILABLE/pi-monitor")
+    echo "$nginx_checksum" > "$STATE_DIR/nginx.checksum"
+    log info "Nginx checksum stored: $nginx_checksum"
 }
 
 # ----------------------------------------------------------------------------
@@ -642,10 +823,7 @@ verify_stack() {
     
     log info "Verifying services and Pi 5 optimizations"
     
-    # Pi 5 specific verification
     log info "=== Pi 5 System Verification ==="
-    
-    # Check CPU governor
     if [ -f /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor ]; then
         local current_gov
         current_gov=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor)
@@ -657,19 +835,16 @@ verify_stack() {
         fi
     fi
     
-    # Check memory usage
     local mem_info
     mem_info=$(free -h 2>/dev/null | grep "Mem:" || echo "Memory info unavailable")
     log info "Memory Status: $mem_info"
     
-    # Check system limits
     if id "$SYSTEM_USER" &>/dev/null; then
         local user_limits
         user_limits=$(ulimit -n 2>/dev/null || echo "unknown")
         log info "User file descriptor limit: $user_limits"
     fi
     
-    # Check Pi 5 specific optimizations
     if [ -f /etc/security/limits.d/pi-monitor.conf ]; then
         log info "[OK] Pi 5 system limits configured"
     else
@@ -682,8 +857,8 @@ verify_stack() {
         exit 1
     fi
     
-    if ! curl -fsS "http://127.0.0.1:${BACKEND_PORT}/health" >/dev/null 2>&1; then
-        log error "Backend health check failed"
+    if [ "$BACKEND_ACCESSIBLE" = false ]; then
+        log error "Backend health check failed after retries"
         exit 1
     fi
     
@@ -693,10 +868,26 @@ verify_stack() {
         exit 1
     fi
     
-    # Check HTTP endpoints (Cloudflare tunnel handles HTTPS)
-    if ! curl -fsS "http://localhost/" >/dev/null 2>&1; then
-        log warn "Frontend HTTP root check failed"
+    if [ ! -f "$WEB_ROOT/index.html" ]; then
+        log error "Frontend build output ($WEB_ROOT/index.html) is missing."
+        exit 1
     fi
+    
+    for i in {1..3}; do
+        if curl -fsS "http://localhost/" >/dev/null 2>&1; then
+            break
+        fi
+        log warn "Frontend HTTP root check failed, retrying ($i/3)..."
+        sleep 5
+    done
+    
+    for i in {1..3}; do
+        if curl -fsS "http://localhost/health" >/dev/null 2>&1; then
+            break
+        fi
+        log warn "Nginx HTTP proxy to /health failed, retrying ($i/3)..."
+        sleep 5
+    done
     
     if ! curl -fsS "http://localhost/health" >/dev/null 2>&1; then
         log error "Nginx HTTP proxy to /health failed"
@@ -709,9 +900,12 @@ verify_stack() {
 # ----------------------------------------------------------------------------
 # Main execution
 # ----------------------------------------------------------------------------
+pre_flight_checks
 detect_system
 optimize_pi5_system
 ensure_user
+check_checksums
+setup_cloudflare
 ensure_venv
 setup_backend_service
 build_frontend

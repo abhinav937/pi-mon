@@ -80,6 +80,13 @@ class UnifiedClient {
             this.setConnectionState(CONNECTION_STATES.ERROR);
             this.onError(authError);
           }
+        } else if (error.response?.status === 429) {
+          // Rate limited - increase polling interval temporarily
+          logDebug('Rate limited (429), increasing polling interval', { status: error.response.status });
+          this.frontendPollMs = Math.max(this.frontendPollMs * 2, 30000); // Double the interval, max 30 seconds
+          this.schedulePolling();
+          // Don't throw error, just log it
+          return Promise.resolve({ data: null, status: 429 });
         }
         return Promise.reject(error);
       }
@@ -145,7 +152,7 @@ class UnifiedClient {
   startPolling() { this.schedulePolling(); }
   schedulePolling() {
     if (this.pollingInterval) clearInterval(this.pollingInterval);
-    const intervalMs = Math.max(1000, Number(this.frontendPollMs) || 5000);
+    const intervalMs = Math.max(1000, Number(this.frontendPollMs) || 15000); // Increased from 5000ms to 15000ms
     this.pollingInterval = setInterval(async () => {
       try {
         if (this.connectionState === CONNECTION_STATES.CONNECTED) {
@@ -157,7 +164,7 @@ class UnifiedClient {
   }
 
   setFrontendPollingInterval(intervalMs) {
-    try { this.frontendPollMs = Math.max(1000, Number(intervalMs) || 5000); this.schedulePolling(); return true; } catch { return false; }
+    try { this.frontendPollMs = Math.max(5000, Number(intervalMs) || 15000); this.schedulePolling(); return true; } catch { return false; }
   }
 
   async getSystemStats() { const r = await this.httpClient.get('/api/system', { params: { _ts: Date.now() } }); return r.data; }

@@ -134,7 +134,7 @@ function App({ onLogout, isWebAuthnAuthenticated }) {
         root.style.setProperty('--accent-900', p[9]);
       };
       applyAccent();
-      const interval = setInterval(applyAccent, 1000);
+      const interval = setInterval(applyAccent, 10000); // Reduced from 1000ms to 10000ms
       return () => clearInterval(interval);
     } catch (_) {}
   }, []);

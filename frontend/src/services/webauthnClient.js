@@ -72,6 +72,11 @@ class WebAuthnClient {
   async getAuthStatus() {
     try {
       const response = await fetch(`${this.baseURL}/api/auth/status`);
+      if (response.status === 429) {
+        // Rate limited - wait and retry
+        await new Promise(resolve => setTimeout(resolve, 5000));
+        return this.getAuthStatus();
+      }
       const data = await response.json();
       return data;
     } catch (error) {
@@ -87,6 +92,11 @@ class WebAuthnClient {
   async startRegistration(username = 'admin', deviceName = null) {
     try {
       const response = await fetch(`${this.baseURL}/api/auth/webauthn/register/begin`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username }) });
+      if (response.status === 429) {
+        // Rate limited - wait and retry
+        await new Promise(resolve => setTimeout(resolve, 5000));
+        return this.startRegistration(username, deviceName);
+      }
       const data = await response.json();
       if (!response.ok || data.error) throw new Error(data.error || `Registration failed: ${response.status}`);
       const { options, user_id } = data;
@@ -95,6 +105,11 @@ class WebAuthnClient {
       if (!credential) throw new Error('Failed to create credential');
       const credentialJson = { id: credential.id, rawId: this.bufferToBase64url(credential.rawId), response: { attestationObject: this.bufferToBase64url(credential.response.attestationObject), clientDataJSON: this.bufferToBase64url(credential.response.clientDataJSON) }, type: credential.type };
       const completeResponse = await fetch(`${this.baseURL}/api/auth/webauthn/register/complete`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user_id, credential: credentialJson, device_name: deviceName || this.getDeviceName() }) });
+      if (completeResponse.status === 429) {
+        // Rate limited - wait and retry
+        await new Promise(resolve => setTimeout(resolve, 5000));
+        return this.startRegistration(username, deviceName);
+      }
       const result = await completeResponse.json();
       if (!completeResponse.ok || result.error) throw new Error(result.error || `Registration completion failed: ${completeResponse.status}`);
       return { success: true, message: result.message, credential_id: result.credential_id };
@@ -104,6 +119,11 @@ class WebAuthnClient {
   async startAuthentication(username = null) {
     try {
       const response = await fetch(`${this.baseURL}/api/auth/webauthn/authenticate/begin`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username }) });
+      if (response.status === 429) {
+        // Rate limited - wait and retry
+        await new Promise(resolve => setTimeout(resolve, 5000));
+        return this.startAuthentication(username);
+      }
       const data = await response.json();
       if (!response.ok || data.error) throw new Error(data.error || `Authentication failed: ${response.status}`);
       const { options, challenge_key } = data;
@@ -112,6 +132,11 @@ class WebAuthnClient {
       if (!credential) throw new Error('Failed to get credential');
       const credentialJson = { id: credential.id, rawId: this.bufferToBase64url(credential.rawId), response: { authenticatorData: this.bufferToBase64url(credential.response.authenticatorData), clientDataJSON: this.bufferToBase64url(credential.response.clientDataJSON), signature: this.bufferToBase64url(credential.response.signature) }, type: credential.type };
       const completeResponse = await fetch(`${this.baseURL}/api/auth/webauthn/authenticate/complete`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ credential: credentialJson, challenge_key }) });
+      if (completeResponse.status === 429) {
+        // Rate limited - wait and retry
+        await new Promise(resolve => setTimeout(resolve, 5000));
+        return this.startAuthentication(username);
+      }
       const result = await completeResponse.json();
       if (!completeResponse.ok || result.error) throw new Error(result.error || `Authentication completion failed: ${completeResponse.status}`);
       if (result.token) { this.token = result.token; localStorage.setItem('webauthn-token', result.token); }

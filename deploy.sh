@@ -339,9 +339,9 @@ fi
 generate_checksum() {
     local path="$1"
     if [ -f "$path" ]; then
-        sha256sum "$path" | cut -d' ' -f1 || echo "0"
+        sha256sum "$path" | cut -d' ' -f1 | cut -c1-8 || echo "0"
     elif [ -d "$path" ]; then
-        find "$path" -type f -exec sha256sum {} \; | sort | sha256sum | cut -d' ' -f1 || echo "0"
+        find "$path" -type f -exec sha256sum {} \; | sort | sha256sum | cut -d' ' -f1 | cut -c1-8 || echo "0"
     else
         echo "0"
     fi
@@ -382,6 +382,47 @@ check_checksums() {
         log info "=== CHECKSUM TESTING COMPLETE ==="
         exit 0
     fi
+    
+    # Regular checksum checking for deployment
+    log info "=== CHECKING FOR CHANGES ==="
+    
+    local frontend_checksum=$(generate_checksum "$PI_MON_DIR/frontend")
+    local backend_checksum=$(generate_checksum "$PI_MON_DIR/backend")
+    
+    local stored_frontend=""
+    local stored_backend=""
+    
+    if [ -f "$STATE_DIR/frontend.checksum" ]; then
+        stored_frontend=$(cat "$STATE_DIR/frontend.checksum")
+        log info "Frontend: stored=$stored_frontend, current=$frontend_checksum"
+        
+        if [ "$frontend_checksum" != "$stored_frontend" ]; then
+            log info "✓ Frontend changes detected - rebuild needed"
+            NEED_FRONTEND_BUILD=true
+        else
+            log info "✓ Frontend unchanged - no rebuild needed"
+        fi
+    else
+        log info "Frontend: no stored checksum, will build"
+        NEED_FRONTEND_BUILD=true
+    fi
+    
+    if [ -f "$STATE_DIR/backend.checksum" ]; then
+        stored_backend=$(cat "$STATE_DIR/backend.checksum")
+        log info "Backend: stored=$stored_backend, current=$backend_checksum"
+        
+        if [ "$backend_checksum" != "$stored_backend" ]; then
+            log info "✓ Backend changes detected - restart needed"
+            FORCE_BACKEND=true
+        else
+            log info "✓ Backend unchanged - no restart needed"
+        fi
+    else
+        log info "Backend: no stored checksum, will restart"
+        FORCE_BACKEND=true
+    fi
+    
+    log info "=== CHANGE DETECTION COMPLETE ==="
 }
 
 # ----------------------------------------------------------------------------
@@ -900,9 +941,9 @@ setup_backend_service() {
         log error "Backend service script ($PI_MON_DIR/backend/start_service.py) is missing."
         exit 1
     fi
-    # Stop the service if it's running to update configuration
-    if systemctl is-active --quiet pi-monitor-backend.service; then
-        log info "Stopping backend service to update configuration..."
+    # Only stop service if changes detected or forced
+    if [ "$FORCE_BACKEND" = true ] && systemctl is-active --quiet pi-monitor-backend.service; then
+        log info "Backend changes detected - stopping service for update..."
         systemctl stop pi-monitor-backend.service
         sleep 2
     fi
@@ -923,8 +964,13 @@ setup_backend_service() {
         exec_start="/usr/bin/authbind --deep ${VENV_DIR}/bin/python ${PI_MON_DIR}/backend/start_service.py"
     fi
     
-    # Always update the service file to ensure correct configuration
-    log info "Updating systemd service configuration"
+    # Update service file if changes detected or forced
+    if [ "$FORCE_BACKEND" = true ]; then
+        log info "Backend changes detected - updating systemd service configuration"
+    else
+        log info "Backend unchanged - skipping service configuration update"
+        return 0
+    fi
     cat > "$SERVICE_FILE" <<EOF
 [Unit]
 Description=Pi Monitor Backend Service
@@ -972,41 +1018,47 @@ EOF
     
     log info "✓ Service file configured correctly"
 
-    log info "Configuring backend .env"
-    cat > "$PI_MON_DIR/backend/.env" <<EOF
+    # Only update .env if changes detected
+    if [ "$FORCE_BACKEND" = true ]; then
+        log info "Configuring backend .env"
+        cat > "$PI_MON_DIR/backend/.env" <<EOF
 PI_MONITOR_API_KEY=$API_KEY
 PI_MONITOR_ENV=$ENV
 EOF
-    run_cmd chown "$SYSTEM_USER":"$SYSTEM_USER" "$PI_MON_DIR/backend/.env"
-    run_cmd chmod u+rw "$PI_MON_DIR/backend/.env"
+        run_cmd chown "$SYSTEM_USER":"$SYSTEM_USER" "$PI_MON_DIR/backend/.env"
+        run_cmd chmod u+rw "$PI_MON_DIR/backend/.env"
+    fi
 
-    run_cmd systemctl daemon-reload
-    run_cmd systemctl enable pi-monitor-backend.service
-    
-    # Handle port conflicts by stopping existing service first
-            log info "Ensuring port 80 is free for backend service..."
-    if systemctl is-active --quiet pi-monitor-backend.service; then
-        log info "Stopping existing backend service to free port 80..."
-        run_cmd systemctl stop pi-monitor-backend.service || true
-        sleep 2  # Wait for port to be released
+    if [ "$FORCE_BACKEND" = true ]; then
+        run_cmd systemctl daemon-reload
+        run_cmd systemctl enable pi-monitor-backend.service
     fi
     
-    # Check if port 80 is still in use by other processes
-    if command -v netstat >/dev/null 2>&1; then
-        if netstat -tln 2>/dev/null | grep -q ":80 "; then
-            log warn "Port 80 still in use by another process, waiting..."
-            sleep 3
+    # Handle port conflicts only if changes detected
+    if [ "$FORCE_BACKEND" = true ]; then
+        log info "Ensuring port 80 is free for backend service..."
+        if systemctl is-active --quiet pi-monitor-backend.service; then
+            log info "Stopping existing backend service to free port 80..."
+            run_cmd systemctl stop pi-monitor-backend.service || true
+            sleep 2  # Wait for port to be released
+        fi
+        
+        # Check if port 80 is still in use by other processes
+        if command -v netstat >/dev/null 2>&1; then
+            if netstat -tln 2>/dev/null | grep -q ":80 "; then
+                log warn "Port 80 still in use by another process, waiting..."
+                sleep 3
+            fi
         fi
     fi
     
+    # Start service if not running or if changes detected
     if [ "$SERVICE_RUNNING" = false ]; then
         log info "Starting backend service"
         run_cmd systemctl start pi-monitor-backend.service
         sleep 5
-    fi
-
-    if [ "$FORCE_BACKEND" = true ]; then
-        log info "Restarting backend (force requested)"
+    elif [ "$FORCE_BACKEND" = true ]; then
+        log info "Restarting backend (changes detected)"
         run_cmd systemctl restart pi-monitor-backend.service
         sleep 5
     fi
@@ -1030,10 +1082,13 @@ EOF
         fi
     fi
     
-    local backend_checksum
-    backend_checksum=$(generate_checksum "$PI_MON_DIR/backend")
-    echo "$backend_checksum" > "$STATE_DIR/backend.checksum"
-    log info "Backend checksum stored: $backend_checksum"
+    # Store checksum only if changes were processed
+    if [ "$FORCE_BACKEND" = true ]; then
+        local backend_checksum
+        backend_checksum=$(generate_checksum "$PI_MON_DIR/backend")
+        echo "$backend_checksum" > "$STATE_DIR/backend.checksum"
+        log info "Backend checksum stored: $backend_checksum"
+    fi
 }
 
 # ----------------------------------------------------------------------------
@@ -1042,10 +1097,10 @@ EOF
 build_frontend() {
     if [ "$SKIP_FRONTEND" = true ]; then return 0; fi
     if [ "$ONLY_TARGET" = "backend" ] || [ "$ONLY_TARGET" = "nginx" ] || [ "$ONLY_TARGET" = "verify" ]; then return 0; fi
-    # Always build frontend for now to ensure it's available
+    # Only build if changes detected or forced
     if [ "$NEED_FRONTEND_BUILD" = false ] && [ "$FORCE_FRONTEND" = false ]; then
-        log info "Frontend appears up-to-date, but forcing rebuild to ensure availability"
-        FORCE_FRONTEND=true
+        log info "Frontend unchanged - skipping build"
+        return 0
     fi
     
     if [ ! -f "$PI_MON_DIR/frontend/package.json" ]; then

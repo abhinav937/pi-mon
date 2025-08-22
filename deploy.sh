@@ -197,6 +197,19 @@ EOF
 # CLI args
 # ----------------------------------------------------------------------------
 usage() {
+    # Load config for help display if available
+    local help_domain="pi.cabhinav.com"
+    local help_api_key="pi-monitor-api-key-2024"
+    local help_env="production"
+    local help_backend_port="5001"
+    
+    if [ -f "$CONFIG_FILE" ]; then
+        help_domain=$(jq -r '.deployment_defaults.domain // "pi.cabhinav.com"' "$CONFIG_FILE" 2>/dev/null || echo "pi.cabhinav.com")
+        help_api_key=$(jq -r '.deployment_defaults.api_key // "pi-monitor-api-key-2024"' "$CONFIG_FILE" 2>/dev/null || echo "pi-monitor-api-key-2024")
+        help_env=$(jq -r '.deployment_defaults.env // "production"' "$CONFIG_FILE" 2>/dev/null || echo "production")
+        help_backend_port=$(jq -r '.deployment_defaults.backend_port // "5001"' "$CONFIG_FILE" 2>/dev/null || echo "5001")
+    fi
+    
     cat <<USAGE
 Usage: sudo ./deploy.sh [flags]
 
@@ -204,10 +217,10 @@ Pi Monitor Deployment Script - Optimized for Raspberry Pi 5
 ================================================================
 
 Flags:
-  --domain VALUE               Domain (default: ${DOMAIN})
-  --api-key VALUE              Backend API key (default: ${API_KEY})
-  --env VALUE                  Backend environment (default: ${ENV})
-  --backend-port N             Backend port (default: ${BACKEND_PORT})
+  --domain VALUE               Domain (default: $help_domain)
+  --api-key VALUE              Backend API key (default: $help_api_key)
+  --env VALUE                  Backend environment (default: $help_env)
+  --backend-port N             Backend port (default: $help_backend_port)
   --pi-mon-dir PATH            Project root (default: ${PI_MON_DIR})
   --venv-dir PATH              Python venv dir (default: <pi-mon-dir>/.venv)
   --user NAME                  System user (default: ${SYSTEM_USER})

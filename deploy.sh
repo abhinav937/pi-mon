@@ -1,36 +1,7 @@
-﻿#!/usr/bin/env bash
+#!/bin/bash
 set -euo pipefail
 
 # Pi Monitor Deployment Script - Optimized for Raspberry Pi 5
-# ============================================================================
-
-# Detect system architecture and Pi model
-detect_system() {
-    local arch
-    arch=$(uname -m)
-    
-    if [ "$arch" = "aarch64" ] || [ "$arch" = "arm64" ]; then
-        log info "Detected ARM64 architecture (Raspberry Pi 5 compatible)"
-        # Check if running on actual Pi hardware
-        if [ -f /proc/cpuinfo ] && grep -q "Raspberry Pi" /proc/cpuinfo; then
-            local pi_model
-            pi_model=$(grep "Model" /proc/cpuinfo | head -1 | cut -d: -f2 | xargs)
-            log info "Hardware: $pi_model"
-        fi
-    else
-        log warn "Non-ARM64 architecture detected: $arch"
-        log warn "This script is optimized for Raspberry Pi 5 (ARM64)"
-    fi
-}
-
-# Install jq if not present
-command -v jq >/dev/null || {
-  echo "Installing jq for JSON processing"
-  sudo apt update && sudo apt install jq -y
-}
-
-# ============================================================================
-# Pi Monitor Deployment - Simplified Cloudflare Tunnel Version
 # ============================================================================
 
 # Defaults
@@ -74,14 +45,21 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [ -n "$SYSTEM_USER" ] || SYSTEM_USER="${SUDO_USER:-$(id -un)}"
 
 CONFIG_FILE="$PI_MON_DIR/config.json"
-# Load configurations from JSON
-DOMAIN=${DOMAIN:-$(jq -r '.deployment_defaults.domain // "pi.cabhinav.com"' "$CONFIG_FILE")}
-API_KEY=${API_KEY:-$(jq -r '.deployment_defaults.api_key // "pi-monitor-api-key-2024"' "$CONFIG_FILE")}
-ENV=${ENV:-$(jq -r '.deployment_defaults.env // "production"' "$CONFIG_FILE")}
-BACKEND_PORT=${BACKEND_PORT:-$(jq -r '.deployment_defaults.backend_port // "5001"' "$CONFIG_FILE")}
 
-# Load Cloudflare settings
+# Install jq if not present
+command -v jq >/dev/null || {
+  echo "Installing jq for JSON processing"
+  sudo apt update && sudo apt install jq -y
+}
+
+# Load configurations from JSON
 if [ -f "$CONFIG_FILE" ]; then
+    DOMAIN=${DOMAIN:-$(jq -r '.deployment_defaults.domain // "pi.cabhinav.com"' "$CONFIG_FILE")}
+    API_KEY=${API_KEY:-$(jq -r '.deployment_defaults.api_key // "pi-monitor-api-key-2024"' "$CONFIG_FILE")}
+    ENV=${ENV:-$(jq -r '.deployment_defaults.env // "production"' "$CONFIG_FILE")}
+    BACKEND_PORT=${BACKEND_PORT:-$(jq -r '.deployment_defaults.backend_port // "5001"' "$CONFIG_FILE")}
+    
+    # Load Cloudflare settings
     ENABLE_CLOUDFLARE=$(jq -r '.cloudflare.enable // false' "$CONFIG_FILE")
     CF_HOSTNAME=$(jq -r '.cloudflare.hostname // ""' "$CONFIG_FILE")
     CF_TUNNEL_NAME=$(jq -r '.cloudflare.tunnel_name // "pi-monitor"' "$CONFIG_FILE")
@@ -91,6 +69,12 @@ if [ -f "$CONFIG_FILE" ]; then
     CF_USE_UUID=$(jq -r '.cloudflare.use_uuid_config // false' "$CONFIG_FILE")
     CF_TUNNEL_UUID=$(jq -r '.cloudflare.tunnel_uuid // ""' "$CONFIG_FILE")
     CF_CREDENTIALS_FILE=$(jq -r '.cloudflare.credentials_file // ""' "$CONFIG_FILE")
+else
+    # Fallback defaults
+    DOMAIN=${DOMAIN:-"pi.cabhinav.com"}
+    API_KEY=${API_KEY:-"pi-monitor-api-key-2024"}
+    ENV=${ENV:-"production"}
+    BACKEND_PORT=${BACKEND_PORT:-"5001"}
 fi
 
 # If CF hostname exists, use it as DOMAIN
@@ -160,36 +144,54 @@ run_cmd() {
     fi
 }
 
-on_error() {
-    local ec=$?; local ln=${BASH_LINENO[0]}
-    log error "Failed at line $ln with exit code $ec"
+# ----------------------------------------------------------------------------
+# Pi 5 System Detection and Optimization
+# ----------------------------------------------------------------------------
+detect_system() {
+    local arch
+    arch=$(uname -m)
     
-    # Pi 5 specific error recovery
-    if [ "$ec" -ne 0 ]; then
-        log error "Attempting Pi 5 specific error recovery..."
-        
-        # Check if it's a memory issue
-        if [ "$ec" -eq 137 ] || [ "$ec" -eq 139 ]; then
-            log error "Detected memory-related error (OOM or segmentation fault)"
-            log info "This may be due to Pi 5 memory constraints"
-            log info "Consider reducing memory usage or increasing swap"
+    if [ "$arch" = "aarch64" ] || [ "$arch" = "arm64" ]; then
+        log info "Detected ARM64 architecture (Raspberry Pi 5 compatible)"
+        # Check if running on actual Pi hardware
+        if [ -f /proc/cpuinfo ] && grep -q "Raspberry Pi" /proc/cpuinfo; then
+            local pi_model
+            pi_model=$(grep "Model" /proc/cpuinfo | head -1 | cut -d: -f2 | xargs)
+            log info "Hardware: $pi_model"
         fi
-        
-        # Check if it's a Python/venv issue
-        if [ "$ec" -eq 127 ] || [ "$ec" -eq 126 ]; then
-            log error "Detected command not found or permission denied error"
-            log info "This may be due to Pi 5 architecture compatibility issues"
-            log info "Consider reinstalling dependencies with ARM64 versions"
-        fi
-        
-        # Show system status for debugging
-        log info "Pi 5 system status for debugging:"
-        free -h 2>/dev/null || true
-        df -h 2>/dev/null || true
-        uname -a 2>/dev/null || true
+    else
+        log warn "Non-ARM64 architecture detected: $arch"
+        log warn "This script is optimized for Raspberry Pi 5 (ARM64)"
     fi
 }
-trap on_error ERR
+
+optimize_pi5_system() {
+    log info "Applying Raspberry Pi 5 system optimizations"
+    
+    # Enable performance governor for Pi 5
+    if [ -f /sys/devices/system/cpu/cpu0/cpufreq/scaling_available_governors ]; then
+        local available_govs
+        available_govs=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_available_governors)
+        if echo "$available_govs" | grep -q "performance"; then
+            log info "Setting CPU governor to performance mode"
+            echo performance | tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor >/dev/null 2>&1 || true
+        fi
+    fi
+    
+    # Set Pi 5 specific ulimits
+    log info "Setting Pi 5 specific system limits"
+    cat > /etc/security/limits.d/pi-monitor.conf <<EOF
+# Pi 5 specific limits for pi-monitor
+${SYSTEM_USER} soft nofile 65536
+${SYSTEM_USER} hard nofile 65536
+${SYSTEM_USER} soft nproc 4096
+${SYSTEM_USER} hard nproc 4096
+www-data soft nofile 65536
+www-data hard nofile 65536
+EOF
+    
+    log info "Pi 5 system optimizations applied"
+}
 
 # ----------------------------------------------------------------------------
 # CLI args
@@ -197,6 +199,16 @@ trap on_error ERR
 usage() {
     cat <<USAGE
 Usage: sudo ./deploy.sh [flags]
+
+Pi Monitor Deployment Script - Optimized for Raspberry Pi 5
+================================================================
+
+This script is specifically optimized for Raspberry Pi 5 (ARM64) with:
+- ARM64-optimized Python 3.11+ installation
+- Node.js 20.x ARM64 compatibility
+- Pi 5 specific system optimizations (CPU governor, memory limits)
+- Enhanced Nginx configuration for Pi 5 performance
+- Optimized systemd service settings
 
 Flags:
   --domain VALUE               Domain (default: ${DOMAIN})
@@ -219,6 +231,14 @@ Flags:
   --force-backend              Force backend restart
   --show-config                Print resolved configuration and exit
   -h, --help                   Show this help
+
+Pi 5 Optimizations Applied:
+  ✓ CPU performance governor
+  ✓ Memory and file descriptor limits
+  ✓ ARM64-optimized package installation
+  ✓ Enhanced Nginx configuration
+  ✓ Optimized systemd service settings
+
 USAGE
 }
 
@@ -272,11 +292,6 @@ force_backend:     $FORCE_BACKEND
 enable_cloudflare: $ENABLE_CLOUDFLARE
 cf_hostname:       ${CF_HOSTNAME:-}
 cf_tunnel_name:    ${CF_TUNNEL_NAME:-}
-cf_use_cert:       ${CF_USE_CERT:-}
-cf_cert_path:      ${CF_CERT_PATH:-}
-cf_use_uuid:       ${CF_USE_UUID:-}
-cf_tunnel_uuid:    ${CF_TUNNEL_UUID:-}
-cf_credentials:    ${CF_CREDENTIALS_FILE:-}
 CFG
     exit 0
 fi
@@ -285,48 +300,6 @@ if [[ "$EUID" -ne 0 ]]; then
     log error "This script must be run with sudo"
     exit 1
 fi
-
-# ----------------------------------------------------------------------------
-# Pi 5 System Optimizations
-# ----------------------------------------------------------------------------
-optimize_pi5_system() {
-    log info "Applying Raspberry Pi 5 system optimizations"
-    
-    # Enable performance governor for Pi 5
-    if [ -f /sys/devices/system/cpu/cpu0/cpufreq/scaling_available_governors ]; then
-        local available_govs
-        available_govs=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_available_governors)
-        if echo "$available_govs" | grep -q "performance"; then
-            log info "Setting CPU governor to performance mode"
-            echo performance | tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor >/dev/null 2>&1 || true
-        fi
-    fi
-    
-    # Optimize swap for Pi 5 (disable if not needed)
-    if [ -f /proc/swaps ] && grep -q "/var/swap" /proc/swaps; then
-        log info "Disabling swap for better Pi 5 performance"
-        swapoff /var/swap 2>/dev/null || true
-    fi
-    
-    # Set Pi 5 specific ulimits
-    log info "Setting Pi 5 specific system limits"
-    cat > /etc/security/limits.d/pi-monitor.conf <<EOF
-# Pi 5 specific limits for pi-monitor
-${SYSTEM_USER} soft nofile 65536
-${SYSTEM_USER} hard nofile 65536
-${SYSTEM_USER} soft nproc 4096
-${SYSTEM_USER} hard nproc 4096
-www-data soft nofile 65536
-www-data hard nofile 65536
-EOF
-    
-    # Enable Pi 5 specific kernel modules
-    log info "Loading Pi 5 performance modules"
-    modprobe uio 2>/dev/null || true
-    modprobe uio_pci_generic 2>/dev/null || true
-    
-    log info "Pi 5 system optimizations applied"
-}
 
 # ----------------------------------------------------------------------------
 # Discovery and state
@@ -662,477 +635,6 @@ EOF
 }
 
 # ----------------------------------------------------------------------------
-# Cloudflare Tunnel
-# ----------------------------------------------------------------------------
-install_cloudflared() {
-    if command -v cloudflared >/dev/null 2>&1; then
-        log info "cloudflared present"
-        return 0
-    fi
-    
-    log info "Installing cloudflared"
-    if command -v apt-get >/dev/null 2>&1; then
-        # Check if Cloudflare repository is already configured
-        if [ -f /usr/share/keyrings/cloudflare-main.gpg ] && [ -f /etc/apt/sources.list.d/cloudflared.list ]; then
-            log info "Cloudflare repository already configured, updating package lists..."
-            if [ "$SILENT_OUTPUT" = true ]; then
-                run_cmd "apt-get update -y -qq >> \"$LOG_FILE\" 2>&1"
-                run_cmd "apt-get install -y -qq cloudflared >> \"$LOG_FILE\" 2>&1" || true
-            else
-                run_cmd apt-get update -y
-                run_cmd apt-get install -y cloudflared || true
-            fi
-        else
-            # Create keyrings directory with proper permissions
-            if [ ! -d /usr/share/keyrings ]; then
-                run_cmd mkdir -p --mode=0755 /usr/share/keyrings
-            fi
-            
-            # Add Cloudflare GPG key
-        if [ ! -f /usr/share/keyrings/cloudflare-main.gpg ]; then
-                log info "Adding Cloudflare GPG key..."
-            if [ "$SILENT_OUTPUT" = true ]; then
-                    run_cmd "curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null" || true
-                else
-                    run_cmd curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg \| tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null || true
-                fi
-            fi
-            
-            # Add Cloudflare repository (using 'any' instead of specific codename for better compatibility)
-            log info "Adding Cloudflare repository..."
-            echo "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared any main" | tee /etc/apt/sources.list.d/cloudflared.list >/dev/null
-            
-            # Update package lists and install cloudflared
-            log info "Installing cloudflared package..."
-        if [ "$SILENT_OUTPUT" = true ]; then
-            run_cmd "apt-get update -y -qq >> \"$LOG_FILE\" 2>&1"
-            run_cmd "apt-get install -y -qq cloudflared >> \"$LOG_FILE\" 2>&1" || true
-        else
-            run_cmd apt-get update -y
-            run_cmd apt-get install -y cloudflared || true
-        fi
-    fi
-    fi
-    
-    if ! command -v cloudflared >/dev/null 2>&1; then
-        log error "cloudflared installation failed"; exit 2
-    fi
-}
-
-configure_cloudflare_tunnel() {
-    if [ "$ENABLE_CLOUDFLARE" != true ]; then return 0; fi
-    if [ -z "$DOMAIN" ] || [ "$DOMAIN" = "_" ]; then
-        log error "Cloudflare mode requires a valid domain"; exit 2
-    fi
-
-    log info "=== CLOUDFLARE TUNNEL SETUP ==="
-    log info "Step 1: Installing cloudflared..."
-    install_cloudflared
-
-    # Check authentication method
-    if [ -n "$CF_TOKEN" ]; then
-        log info "Step 2: Configuring cloudflared service (token-based)"
-        log info "  - Domain: $DOMAIN"
-        log info "  - Tunnel Name: $CF_TUNNEL_NAME"
-        log info "  - Token: ${CF_TOKEN:0:8}...${CF_TOKEN: -4}"
-        
-        # Enhanced service configuration with better logging
-        log info "Step 3: Creating systemd service configuration..."
-        cat > /etc/systemd/system/cloudflared.service <<EOF
-[Unit]
-Description=Cloudflare Tunnel
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-User=root
-ExecStart=/usr/bin/env cloudflared --no-autoupdate tunnel run --token ${CF_TOKEN}
-Restart=always
-RestartSec=5
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=cloudflared
-
-# Environment variables for better debugging
-Environment=CLOUDFLARE_TUNNEL_DOMAIN=${DOMAIN}
-Environment=CLOUDFLARE_TUNNEL_NAME=${CF_TUNNEL_NAME}
-
-[Install]
-WantedBy=multi-user.target
-EOF
-        
-        log info "Step 4: Reloading systemd and enabling service..."
-        run_cmd systemctl daemon-reload
-        run_cmd systemctl enable cloudflared
-        
-        # Stop existing service if running
-        if systemctl is-active --quiet cloudflared; then
-            log info "Step 5: Stopping existing cloudflared service..."
-            run_cmd systemctl stop cloudflared
-            sleep 3
-        else
-            log info "Step 5: No existing service to stop"
-        fi
-        
-        # Start fresh service
-        log info "Step 6: Starting cloudflared service..."
-        run_cmd systemctl start cloudflared
-        sleep 5
-        
-        # Verify service is running
-        log info "Step 7: Verifying service status..."
-        if ! systemctl is-active --quiet cloudflared; then
-            log error "cloudflared service failed to start. Check journalctl -u cloudflared"
-            log error "Service status:"
-            systemctl status cloudflared --no-pager -l || true
-            exit 2
-        fi
-        
-        log info "[OK] cloudflared service started successfully"
-        
-        # Wait for tunnel to establish connection
-        log info "Step 8: Waiting for tunnel to establish connection to Cloudflare..."
-        log info "  This may take a few minutes as the tunnel connects to Cloudflare's edge network"
-        
-        local tunnel_ready=false
-        local attempts=0
-        local max_attempts=60  # Increased to 10 minutes total
-        
-        while [ "$tunnel_ready" = false ] && [ $attempts -lt $max_attempts ]; do
-            attempts=$((attempts + 1))
-            log info "  Connection attempt $attempts/$max_attempts..."
-            
-            # First, just wait for the tunnel to start locally (this happens quickly)
-            if curl -fsS --max-time 5 "http://localhost/health" >/dev/null 2>&1; then
-                log info "  [OK] Local tunnel endpoint responding"
-                
-                # Now wait for Cloudflare to update their routing (this takes time)
-                log info "  Waiting for Cloudflare to update routing tables..."
-                log info "  This typically takes 2-5 minutes for new connections"
-                
-                # Give Cloudflare time to establish the tunnel connection
-                sleep 30
-                
-                # Check if tunnel is now connected to Cloudflare edge
-                local dns_check
-                dns_check=$(dig +short "$DOMAIN" 2>/dev/null | head -1 || echo "")
-                
-                if echo "$dns_check" | grep -q "104.21\|104.16\|104.32\|104.48\|104.64\|104.80\|104.96"; then
-                    log info "  [OK] DNS routing to Cloudflare edge detected"
-                    log info "  [OK] Current DNS: $dns_check"
-                    tunnel_ready=true
-                    break
-                else
-                    log info "  Still waiting for Cloudflare routing update... (current: $dns_check)"
-                    log info "  Attempt $attempts: Tunnel connected locally, waiting for edge routing..."
-                    sleep 30  # Wait longer between checks
-                fi
-            else
-                log info "  Waiting for tunnel to start locally..."
-                sleep 10
-            fi
-        done
-        
-        if [ "$tunnel_ready" = true ]; then
-            log info "[OK] Cloudflare tunnel fully connected to edge network"
-        else
-            log warn "Tunnel connected locally but still waiting for Cloudflare routing"
-            log warn "This is normal - routing can take up to 10 minutes for new connections"
-            log warn "Will verify in final check"
-        fi
-        
-        log info "=== TUNNEL SETUP COMPLETE ==="
-        return 0
-        
-    elif [ "$CF_USE_CERT" = true ] && [ -n "$CF_CERT_PATH" ]; then
-        log info "Step 2: Configuring cloudflared service (certificate-based)"
-        log info "  - Domain: $DOMAIN"
-        log info "  - Tunnel Name: $CF_TUNNEL_NAME"
-        log info "  - Certificate: $CF_CERT_PATH"
-        
-        # Check if certificate exists
-        if [ ! -f "$CF_CERT_PATH" ]; then
-            log error "Certificate file not found: $CF_CERT_PATH"
-            log error "Please download cert.pem from Cloudflare Dashboard and place it at this path"
-            exit 2
-        fi
-        
-        # Create .cloudflared directory and copy certificate
-        local cf_dir="/home/$(id -un)/.cloudflared"
-        run_cmd mkdir -p "$cf_dir"
-        run_cmd cp "$CF_CERT_PATH" "$cf_dir/cert.pem"
-        run_cmd chown -R "$(id -un):$(id -un)" "$cf_dir"
-        
-        # Enhanced service configuration for certificate-based auth
-        log info "Step 3: Creating systemd service configuration..."
-        cat > /etc/systemd/system/cloudflared.service <<EOF
-[Unit]
-Description=Cloudflare Tunnel
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-User=root
-ExecStart=/usr/bin/env cloudflared --no-autoupdate tunnel run ${CF_TUNNEL_NAME}
-Restart=always
-RestartSec=5
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=cloudflared
-
-# Environment variables for better debugging
-Environment=CLOUDFLARE_TUNNEL_DOMAIN=${DOMAIN}
-Environment=CLOUDFLARE_TUNNEL_NAME=${CF_TUNNEL_NAME}
-Environment=CLOUDFLARE_TUNNEL_CERT_PATH=${cf_dir}/cert.pem
-
-[Install]
-WantedBy=multi-user.target
-EOF
-        
-        log info "Step 4: Reloading systemd and enabling service..."
-        run_cmd systemctl daemon-reload
-        run_cmd systemctl enable cloudflared
-        
-        # Stop existing service if running
-        if systemctl is-active --quiet cloudflared; then
-            log info "Step 5: Stopping existing cloudflared service..."
-            run_cmd systemctl stop cloudflared
-            sleep 3
-        else
-            log info "Step 5: No existing service to stop"
-        fi
-        
-        # Start fresh service
-        log info "Step 6: Starting cloudflared service..."
-        run_cmd systemctl start cloudflared
-        sleep 5
-        
-        # Verify service is running
-        log info "Step 7: Verifying service status..."
-        if ! systemctl is-active --quiet cloudflared; then
-            log error "cloudflared service failed to start. Check journalctl -u cloudflared"
-            log error "Service status:"
-            systemctl status cloudflared --no-pager -l || true
-            exit 2
-        fi
-        
-        log info "[OK] cloudflared service started successfully"
-        
-        # Wait for tunnel to establish connection
-        log info "Step 8: Waiting for tunnel to establish connection to Cloudflare..."
-        log info "  This may take a few minutes as the tunnel connects to Cloudflare's edge network"
-        
-        local tunnel_ready=false
-        local attempts=0
-        local max_attempts=60  # Increased to 10 minutes total
-        
-        while [ "$tunnel_ready" = false ] && [ $attempts -lt $max_attempts ]; do
-            attempts=$((attempts + 1))
-            log info "  Connection attempt $attempts/$max_attempts..."
-            
-            # First, just wait for the tunnel to start locally (this happens quickly)
-            if curl -fsS --max-time 5 "http://localhost/health" >/dev/null 2>&1; then
-                log info "  [OK] Local tunnel endpoint responding"
-                
-                # Now wait for Cloudflare to update their routing (this takes time)
-                log info "  Waiting for Cloudflare to update routing tables..."
-                log info "  This typically takes 2-5 minutes for new connections"
-                
-                # Give Cloudflare time to establish the tunnel connection
-                sleep 30
-                
-                # Check if tunnel is now connected to Cloudflare edge
-                local dns_check
-                dns_check=$(dig +short "$DOMAIN" 2>/dev/null | head -1 || echo "")
-                
-                if echo "$dns_check" | grep -q "104.21\|104.16\|104.32\|104.48\|104.64\|104.80\|104.96"; then
-                    log info "  [OK] DNS routing to Cloudflare edge detected"
-                    log info "  [OK] Current DNS: $dns_check"
-                    tunnel_ready=true
-                    break
-                else
-                    log info "  Still waiting for Cloudflare routing update... (current: $dns_check)"
-                    log info "  Attempt $attempts: Tunnel connected locally, waiting for edge routing..."
-                    sleep 30  # Wait longer between checks
-                fi
-            else
-                log info "  Waiting for tunnel to start locally..."
-                sleep 10
-            fi
-        done
-        
-        if [ "$tunnel_ready" = true ]; then
-            log info "[OK] Cloudflare tunnel fully connected to edge network"
-        else
-            log warn "Tunnel connected locally but still waiting for Cloudflare routing"
-            log warn "This is normal - routing can take up to 10 minutes for new connections"
-            log warn "Will verify in final check"
-        fi
-        
-        log info "=== TUNNEL SETUP COMPLETE ==="
-        return 0
-        
-    elif [ "$CF_USE_UUID" = true ] && [ -n "$CF_TUNNEL_UUID" ] && [ -n "$CF_CREDENTIALS_FILE" ]; then
-        log info "Step 2: Configuring cloudflared service (UUID-based with credentials file)"
-        log info "  - Domain: $DOMAIN"
-        log info "  - Tunnel Name: $CF_TUNNEL_NAME"
-        log info "  - Tunnel UUID: $CF_TUNNEL_UUID"
-        log info "  - Credentials File: $CF_CREDENTIALS_FILE"
-        
-        # Check if credentials file exists
-        if [ ! -f "$CF_CREDENTIALS_FILE" ]; then
-            log error "Credentials file not found: $CF_CREDENTIALS_FILE"
-            log error "Please download the credentials JSON file from Cloudflare Dashboard"
-            exit 2
-        fi
-        
-        # Create .cloudflared directory and copy credentials
-        local cf_dir="/home/$(id -un)/.cloudflared"
-        run_cmd mkdir -p "$cf_dir"
-        run_cmd cp "$CF_CREDENTIALS_FILE" "$cf_dir/${CF_TUNNEL_UUID}.json"
-        run_cmd chown -R "$(id -un):$(id -un)" "$cf_dir"
-        
-        # Create config.yml file for UUID-based tunnel
-        log info "Step 3: Creating config.yml configuration..."
-        cat > "$cf_dir/config.yml" <<EOF
-tunnel: ${CF_TUNNEL_UUID}
-credentials-file: ${cf_dir}/${CF_TUNNEL_UUID}.json
-ingress:
-  - hostname: ${DOMAIN}
-    service: http://localhost:80
-  - service: http_status:404
-EOF
-        
-        # Enhanced service configuration for UUID-based auth
-        log info "Step 4: Creating systemd service configuration..."
-        cat > /etc/systemd/system/cloudflared.service <<EOF
-[Unit]
-Description=Cloudflare Tunnel
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-User=root
-ExecStart=/usr/bin/env cloudflared --no-autoupdate tunnel run --config ${cf_dir}/config.yml
-Restart=always
-RestartSec=5
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=cloudflared
-
-# Environment variables for better debugging
-Environment=CLOUDFLARE_TUNNEL_DOMAIN=${DOMAIN}
-Environment=CLOUDFLARE_TUNNEL_NAME=${CF_TUNNEL_NAME}
-Environment=CLOUDFLARE_TUNNEL_UUID=${CF_TUNNEL_UUID}
-Environment=CLOUDFLARE_CONFIG_PATH=${cf_dir}/config.yml
-
-[Install]
-WantedBy=multi-user.target
-EOF
-        
-        log info "Step 5: Reloading systemd and enabling service..."
-        run_cmd systemctl daemon-reload
-        run_cmd systemctl enable cloudflared
-        
-        # Stop existing service if running
-        if systemctl is-active --quiet cloudflared; then
-            log info "Step 6: Stopping existing cloudflared service..."
-            run_cmd systemctl stop cloudflared
-            sleep 3
-        else
-            log info "Step 6: No existing service to stop"
-        fi
-        
-        # Start fresh service
-        log info "Step 7: Starting cloudflared service..."
-        run_cmd systemctl start cloudflared
-        sleep 5
-        
-        # Verify service is running
-        log info "Step 8: Verifying service status..."
-    if ! systemctl is-active --quiet cloudflared; then
-            log error "cloudflared service failed to start. Check journalctl -u cloudflared"
-            log error "Service status:"
-            systemctl status cloudflared --no-pager -l || true
-            exit 2
-        fi
-        
-        log info "[OK] cloudflared service started successfully"
-        
-        # Wait for tunnel to establish connection
-        log info "Step 9: Waiting for tunnel to establish connection to Cloudflare..."
-        log info "  This may take a few minutes as the tunnel connects to Cloudflare's edge network"
-        
-        local tunnel_ready=false
-        local attempts=0
-        local max_attempts=60  # Increased to 10 minutes total
-        
-        while [ "$tunnel_ready" = false ] && [ $attempts -lt $max_attempts ]; do
-            attempts=$((attempts + 1))
-            log info "  Connection attempt $attempts/$max_attempts..."
-            
-            # First, just wait for the tunnel to start locally (this happens quickly)
-            if curl -fsS --max-time 5 "http://localhost/health" >/dev/null 2>&1; then
-                log info "  [OK] Local tunnel endpoint responding"
-                
-                # Now wait for Cloudflare to update their routing (this takes time)
-                log info "  Waiting for Cloudflare to update routing tables..."
-                log info "  This typically takes 2-5 minutes for new connections"
-                
-                # Give Cloudflare time to establish the tunnel connection
-                sleep 30
-                
-                # Check if tunnel is now connected to Cloudflare edge
-                local dns_check
-                dns_check=$(dig +short "$DOMAIN" 2>/dev/null | head -1 || echo "")
-                
-                if echo "$dns_check" | grep -q "104.21\|104.16\|104.32\|104.48\|104.64\|104.80\|104.96"; then
-                    log info "  [OK] DNS routing to Cloudflare edge detected"
-                    log info "  [OK] Current DNS: $dns_check"
-                    tunnel_ready=true
-                    break
-                else
-                    log info "  Still waiting for Cloudflare routing update... (current: $dns_check)"
-                    log info "  Attempt $attempts: Tunnel connected locally, waiting for edge routing..."
-                    sleep 30  # Wait longer between checks
-                fi
-            else
-                log info "  Waiting for tunnel to start locally..."
-                sleep 10
-            fi
-        done
-        
-        if [ "$tunnel_ready" = true ]; then
-            log info "[OK] Cloudflare tunnel fully connected to edge network"
-        else
-            log warn "Tunnel connected locally but still waiting for Cloudflare routing"
-            log warn "This is normal - routing can take up to 10 minutes for new connections"
-            log warn "Will verify in final check"
-        fi
-        
-        log info "=== TUNNEL SETUP COMPLETE ==="
-        return 0
-        
-    else
-        log error "No Cloudflare authentication method provided."
-        log error "Choose one of these methods in config.json:"
-        log error ""
-        log error "1. Token-based (recommended):"
-        log error "   \"token\": \"your-tunnel-token\""
-        log error ""
-        log error "2. Certificate-based:"
-        log error "   \"use_certificate\": true"
-        log error "   \"cert_path\": \"/path/to/cert.pem\""
-        log error ""
-        log error "3. UUID-based with credentials file:"
-        log error "   \"use_uuid_config\": true"
-        log error "   \"tunnel_uuid\": \"your-tunnel-uuid\""
-        log error "   \"credentials_file\": \"/path/to/credentials.json\""
-        exit 2
-    fi
-}
-
-# ----------------------------------------------------------------------------
 # Verification
 # ----------------------------------------------------------------------------
 verify_stack() {
@@ -1201,117 +703,7 @@ verify_stack() {
         exit 1
     fi
     
-    if [ "$ENABLE_CLOUDFLARE" = true ]; then
-        log info "=== CLOUDFLARE TUNNEL VERIFICATION ==="
-        
-        # Step 1: Check tunnel service status
-        log info "Step 1: Checking cloudflared service status..."
-        if systemctl is-active --quiet cloudflared; then
-            log info "[OK] cloudflared service: active"
-            
-            # Step 2: Check tunnel connectivity and DNS
-            local host="${CF_HOSTNAME:-$DOMAIN}"
-            log info "Step 2: Checking tunnel status for $host"
-            
-            # Get DNS records first to see current routing
-            log info "Step 3: Checking DNS routing configuration..."
-            local dns_records
-            dns_records=$(dig +short "$host" 2>/dev/null | tr '\n' ' ' || echo "DNS lookup failed")
-            log info "  Current DNS A records: $dns_records"
-            
-            # Check if DNS points to Cloudflare edge IPs
-            if echo "$dns_records" | grep -q "104.21\|104.16\|104.32\|104.48\|104.64\|104.80\|104.96"; then
-                     log info "[OK] DNS routing to Cloudflare edge detected"
-                     
-                     # Step 4: Check if tunnel is serving HTTPS traffic
-                     log info "Step 4: Testing HTTPS tunnel connectivity..."
-                     if curl -fsS --max-time 8 "https://$host/health" >/dev/null 2>&1; then
-                         log info "[OK] Tunnel HTTPS health check passed"
-                         
-                         # Step 5: Check for Cloudflare headers
-                         log info "Step 5: Verifying Cloudflare headers..."
-                         local cf_headers
-                         cf_headers=$(curl -fsS --max-time 8 -I "https://$host/health" 2>/dev/null || echo "")
-                         
-                         if echo "$cf_headers" | grep -q "CF-Ray"; then
-                             log info "[OK] Cloudflare CF-Ray header present"
-                         else
-                             log warn "[WARN] CF-Ray header missing - tunnel may not be fully connected"
-                         fi
-                         
-                         if echo "$cf_headers" | grep -q "Server: cloudflare"; then
-                             log info "[OK] Cloudflare server header present"
-                         else
-                             log warn "[WARN] Cloudflare server header missing"
-                         fi
-                         
-                         log info "[OK] Domain serving OK: https://$host/health"
-                         log info "[OK] Cloudflare tunnel fully operational"
-                         
-                     else
-                         log error "✗ Tunnel HTTPS health check failed - tunnel not serving traffic"
-                         log info "Attempting tunnel restart to fix issue..."
-                         run_cmd systemctl restart cloudflared
-                         sleep 5
-                         
-                         # Retry health check
-                         if curl -fsS --max-time 8 "https://$host/health" >/dev/null 2>&1; then
-                             log info "[OK] Tunnel restored after restart"
-                         else
-                             log error "✗ Tunnel still not working after restart"
-                         fi
-                     fi
-                     
-                 else
-                     log warn "[WARN] DNS not pointing to Cloudflare edge IPs: $dns_records"
-                     log warn "This is normal for new tunnel connections - routing takes 2-10 minutes"
-                     log warn "The tunnel is working locally, just waiting for Cloudflare to update routing"
-                     
-                     # Check if tunnel is at least running locally
-                     log info "Step 4: Checking local tunnel endpoint..."
-                     if curl -fsS --max-time 8 "http://localhost/health" >/dev/null 2>&1; then
-                         log info "[OK] Local tunnel endpoint working"
-                         log info "[OK] Tunnel is connected to Cloudflare locally accessible"
-                         log info "[OK] Waiting for Cloudflare to update their routing tables..."
-                         log info "[OK] This is normal and can take 2-10 minutes for new connections"
-                     else
-                         log error "✗ Local tunnel endpoint failing - this indicates a real problem"
-                     fi
-                     
-                     # Don't restart the tunnel - it's working, just waiting for routing
-                     log info "Step 5: Tunnel is working correctly - no restart needed"
-                     log info "  The tunnel will automatically route traffic once Cloudflare updates routing"
-                     log info "  This typically happens within 2-10 minutes for new connections"
-                 fi
-            
-        else
-            log error "✗ cloudflared service: inactive"
-            log info "Starting cloudflared service..."
-            run_cmd systemctl start cloudflared
-            sleep 5
-            
-            if systemctl is-active --quiet cloudflared; then
-                log info "[OK] cloudflared service started"
-            else
-                log error "✗ Failed to start cloudflared service"
-            fi
-        fi
-        
-        # Final verification
-        log info "=== FINAL TUNNEL VERIFICATION ==="
-        if curl -fsS --max-time 8 "https://$host/health" >/dev/null 2>&1; then
-            log info "[OK] Cloudflare tunnel fully operational"
-            log info "[OK] Domain accessible via HTTPS"
-            log info "[OK] Traffic routing through Cloudflare edge"
-            log info "[OK] Dashboard should show active tunnel not --"
-        else
-            log error "✗ Cloudflare tunnel verification failed"
-            log error "Check tunnel configuration and Cloudflare dashboard"
-            log error "Dashboard may still show -- until tunnel fully connects"
-        fi
-        
-        log info "=== VERIFICATION COMPLETE ==="
-    fi
+    log info "=== VERIFICATION COMPLETE ==="
 }
 
 # ----------------------------------------------------------------------------
@@ -1324,7 +716,6 @@ ensure_venv
 setup_backend_service
 build_frontend
 configure_nginx
-configure_cloudflare_tunnel
 verify_stack
 
 log info "deploy complete"

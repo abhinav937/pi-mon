@@ -598,7 +598,7 @@ setup_cloudflare() {
             run_cmd rm -f /etc/systemd/system/cloudflared.service
         fi
         
-        # Clean up old config
+        # Clean up old config (no longer needed for token-based auth)
         if [ -d /etc/cloudflared ]; then
             run_cmd rm -rf /etc/cloudflared
         fi
@@ -610,9 +610,6 @@ setup_cloudflare() {
         fi
         
         log info "Creating proper tunnel configuration..."
-        
-        # Create config directory
-        run_cmd mkdir -p /etc/cloudflared
         
         log info "Setting up tunnel with token..."
         
@@ -681,25 +678,9 @@ setup_cloudflare() {
         fi
         log info "✓ Found tunnel ID: $TUNNEL_ID"
         
-        # Since we can't easily update existing tunnel ingress rules, create a config file
-        log info "Creating tunnel configuration file for port ${BACKEND_PORT}..."
-        mkdir -p /etc/cloudflared
-        cat > /etc/cloudflared/config.yml <<EOF
-tunnel: $ACTUAL_TUNNEL_NAME
-credentials-file: ~/.cloudflared/$TUNNEL_ID.json
-
-ingress:
-  - hostname: ${CF_HOSTNAME}
-    service: http://localhost:${BACKEND_PORT}
-  - service: http_status:404
-EOF
-        
-        # Set proper permissions
-        chmod 644 /etc/cloudflared/config.yml
-        chown root:root /etc/cloudflared/config.yml
-        
-        log info "✓ Tunnel config created at /etc/cloudflared/config.yml"
-        log info "✓ Configures forwarding from ${CF_HOSTNAME} to localhost:${BACKEND_PORT}"
+        # For token-based authentication, we use the token directly
+        log info "Using token-based authentication with direct tunnel execution..."
+        log info "✓ Will create forwarding from ${CF_HOSTNAME} to localhost:${BACKEND_PORT}"
         
         # Skip cloudflared service install since we're creating our own systemd service
         log info "Skipping cloudflared service install (using custom systemd service)..."
@@ -708,8 +689,8 @@ EOF
         log info "Creating systemd service configuration..."
         # Tunnel ID already obtained above
         
-        # Since we're using an existing tunnel, let's use the simple approach
-        log info "Using existing tunnel with direct forwarding..."
+        # Since we're using token-based authentication, we'll create a simple forwarding tunnel
+        log info "Using token-based authentication with simple forwarding..."
         log info "✓ Tunnel: $ACTUAL_TUNNEL_NAME (ID: $TUNNEL_ID)"
         log info "✓ Hostname: ${CF_HOSTNAME}"
         log info "✓ Service: http://localhost:${BACKEND_PORT}"
@@ -727,7 +708,7 @@ Wants=network.target
 [Service]
 Type=simple
 Environment=TUNNEL_TOKEN=${CF_TOKEN}
-ExecStart=/usr/bin/cloudflared tunnel --no-autoupdate run --config /etc/cloudflared/config.yml
+ExecStart=/usr/bin/cloudflared tunnel --no-autoupdate run --token ${CF_TOKEN} --url http://localhost:${BACKEND_PORT}
 Restart=always
 RestartSec=10
 StandardOutput=journal

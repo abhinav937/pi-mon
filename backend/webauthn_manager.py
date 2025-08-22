@@ -43,11 +43,12 @@ class WebAuthnManager:
             raise ImportError("WebAuthn dependencies not installed. Run: pip install webauthn cbor2")
         
         self.rp_id = rp_id or self._get_rp_id()
-        self.rp_name = rp_name
+        self.rp_name = str(rp_name)  # Ensure it's a string
         self.origin = origin or self._get_origin()
         
         logger.info(f"WebAuthn Manager initialization - RP ID: {self.rp_id} (type: {type(self.rp_id)})")
         logger.info(f"WebAuthn Manager initialization - Origin: {self.origin} (type: {type(self.origin)})")
+        logger.info(f"WebAuthn Manager initialization - RP Name: {self.rp_name} (type: {type(self.rp_name)})")
         
         self.db = AuthDatabase()
         self.jwt_secret = self._get_jwt_secret()
@@ -240,11 +241,11 @@ class WebAuthnManager:
             logger.info(f"About to call generate_registration_options with rp_name: {self.rp_name}")
             
             options = generate_registration_options(
-                rp_id=self.rp_id,
-                rp_name=self.rp_name,
-                user_id=user_id.encode('utf-8'),
-                user_name=username,
-                user_display_name=username,
+                rp_id=str(self.rp_id),  # Ensure it's a string
+                rp_name=str(self.rp_name),  # Ensure it's a string
+                user_id=str(user_id).encode('utf-8'),  # Ensure user_id is string before encoding
+                user_name=str(username),  # Ensure it's a string
+                user_display_name=str(username),  # Ensure it's a string
                 exclude_credentials=exclude_credentials,
                 authenticator_selection=AuthenticatorSelectionCriteria(
                     user_verification=UserVerificationRequirement.PREFERRED,
@@ -324,8 +325,8 @@ class WebAuthnManager:
             verification = verify_registration_response(
                 credential=reg_credential,
                 expected_challenge=expected_challenge,
-                expected_origin=self.origin,
-                expected_rp_id=self.rp_id,
+                expected_origin=str(self.origin),  # Ensure it's a string
+                expected_rp_id=str(self.rp_id),  # Ensure it's a string
             )
             
             if verification.verified:
@@ -393,7 +394,7 @@ class WebAuthnManager:
                         )
             
             options = generate_authentication_options(
-                rp_id=self.rp_id,
+                rp_id=str(self.rp_id),  # Ensure it's a string
                 allow_credentials=allow_credentials if allow_credentials else None,
                 user_verification=UserVerificationRequirement.PREFERRED,
             )
@@ -466,8 +467,8 @@ class WebAuthnManager:
             verification = verify_authentication_response(
                 credential=auth_credential,
                 expected_challenge=expected_challenge,
-                expected_origin=self.origin,
-                expected_rp_id=self.rp_id,
+                expected_origin=str(self.origin),  # Ensure it's a string
+                expected_rp_id=str(self.rp_id),  # Ensure it's a string
                 credential_public_key=base64.b64decode(stored_cred['public_key']),
                 credential_current_sign_count=stored_cred['sign_count'],
             )

@@ -140,7 +140,7 @@ wait_for_space_to_skip() {
 }
 
 # ----------------------------------------------------------------------------
-# Pi 5 System Detection and Optimization
+# System Detection and Optimization
 # ----------------------------------------------------------------------------
 detect_system() {
     local arch
@@ -154,11 +154,15 @@ detect_system() {
         else
             log info "ARM64 architecture detected"
         fi
+    elif [ "$arch" = "x86_64" ] || [ "$arch" = "amd64" ]; then
+        log info "x86_64 architecture detected"
+    else
+        log info "Architecture detected: $arch"
     fi
 }
 
-optimize_pi5_system() {
-    log info "Applying Raspberry Pi 5 system optimizations"
+optimize_system() {
+    log info "Applying system optimizations"
     
     # Enable performance governor for Pi 5
     if [ -f /sys/devices/system/cpu/cpu0/cpufreq/scaling_available_governors ]; then
@@ -190,7 +194,7 @@ www-data soft nofile 65536
 www-data hard nofile 65536
 EOF
     
-    log info "Pi 5 optimizations applied"
+    log info "System optimizations applied"
 }
 
 # ----------------------------------------------------------------------------
@@ -213,7 +217,7 @@ usage() {
     cat <<USAGE
 Usage: sudo ./deploy.sh [flags]
 
-Pi Monitor Deployment Script - Optimized for Raspberry Pi 5
+Pi Monitor Deployment Script - Multi-Platform
 ================================================================
 
 Flags:
@@ -610,13 +614,27 @@ pre_flight_checks() {
     log info "Running pre-flight checks..."
     local arch
     arch=$(uname -m)
-    if [ "$arch" != "aarch64" ] && [ "$arch" != "arm64" ]; then
-        log error "This script requires ARM64 architecture (Raspberry Pi 5)."
-        exit 1
+    
+    # Log detected architecture for debugging
+    log info "Detected architecture: $arch"
+    
+    # Check if we're on a supported architecture
+    if [ "$arch" = "aarch64" ] || [ "$arch" = "arm64" ]; then
+        log info "Running on ARM64 architecture (Raspberry Pi compatible)"
+    elif [ "$arch" = "x86_64" ] || [ "$arch" = "amd64" ]; then
+        log info "Running on x86_64 architecture (PC/Server compatible)"
+    else
+        log warn "Running on unsupported architecture: $arch"
+        log warn "This script is primarily tested on ARM64 and x86_64"
+        log warn "Proceeding with caution..."
     fi
-    if ! grep -qi "debian\|ubuntu\|raspbian" /etc/os-release; then
-        log error "This script requires a Debian-based OS (e.g., Raspberry Pi OS)."
-        exit 1
+    
+    # Check OS compatibility - be more flexible
+    if grep -qi "debian\|ubuntu\|raspbian\|linux" /etc/os-release; then
+        log info "Running on supported Linux distribution"
+    else
+        log warn "OS not recognized as Debian-based, but proceeding..."
+        log warn "Some features may not work as expected"
     fi
     if ! ping -c 1 8.8.8.8 &>/dev/null; then
         log error "No internet connectivity. Please check your network."
@@ -945,7 +963,7 @@ ensure_venv() {
     if [ "$VENV_EXISTS" = false ]; then
         log info "Setting up Python venv at $VENV_DIR"
         if ! command -v python3 >/dev/null 2>&1; then
-            log info "Installing Python 3 for Raspberry Pi 5"
+            log info "Installing Python 3"
             run_cmd apt-get update -y
             run_cmd apt-get install -y python3 python3.11 python3.11-venv python3.11-dev python3-pip python3-setuptools
             if command -v python3.11 >/dev/null 2>&1; then
@@ -956,7 +974,7 @@ ensure_venv() {
         local python_cmd="python3"
         if command -v python3.11 >/dev/null 2>&1; then
             python_cmd="python3.11"
-            log info "Using Python 3.11 for optimal Pi 5 performance"
+            log info "Using Python 3.11 for optimal performance"
         fi
         python_version=$("$python_cmd" -c "import sys; print(sys.version_info[:2] >= (3, 8))")
         if [ "$python_version" != "True" ]; then
@@ -992,7 +1010,7 @@ ensure_venv() {
             run_cmd "$VENV_DIR/bin/pip" install psutil>=5.9.0,<6.0.0 "$PIP_FLAGS"
         fi
     else
-        log info "Installing/updating backend dependencies (optimized for Pi 5)"
+        log info "Installing/updating backend dependencies"
         log debug "requirements.txt contents:"
         log debug "$(cat "$PI_MON_DIR/backend/requirements.txt")"
         if [ "$SILENT_OUTPUT" = true ]; then
@@ -1189,7 +1207,7 @@ build_frontend() {
     
     log info "Building frontend"
     if ! command -v npm >/dev/null 2>&1; then
-        log info "Installing Node.js for Raspberry Pi 5"
+        log info "Installing Node.js"
         if ! curl -fsSL https://deb.nodesource.com/setup_20.x >/dev/null; then
             log warn "NodeSource repository unavailable, falling back to default nodejs."
             run_cmd apt-get install -y nodejs
@@ -1208,10 +1226,10 @@ build_frontend() {
         fi
         local node_arch
         node_arch=$(node -p "process.arch" 2>/dev/null || echo "unknown")
-        if [ "$node_arch" = "arm64" ]; then
-            log info "Node.js ARM64 version installed successfully"
+        if [ "$node_arch" = "arm64" ] || [ "$node_arch" = "x64" ]; then
+            log info "Node.js $node_arch version installed successfully"
         else
-            log warn "Node.js architecture: $node_arch (expected arm64)"
+            log info "Node.js architecture: $node_arch"
         fi
     fi
     
@@ -1482,7 +1500,7 @@ fi
 
 pre_flight_checks
 detect_system
-optimize_pi5_system
+    optimize_system
 ensure_user
 check_checksums
 ensure_venv

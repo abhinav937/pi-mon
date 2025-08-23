@@ -1,0 +1,101 @@
+{
+  "test_environment": {
+    "name": "Local WebAuthn Testing",
+    "description": "Configuration for testing WebAuthn functionality locally on x86 machines",
+    "rp_id": "localhost",
+    "origin": "http://localhost",
+    "secure_context": false
+  },
+  "webauthn": {
+    "rp_name": "Pi Monitor Test",
+    "user_verification": "preferred",
+    "timeout": 60000,
+    "supported_algorithms": [
+      -7,
+      -257
+    ],
+    "transports": [
+      "usb",
+      "nfc",
+      "ble",
+      "internal",
+      "hybrid"
+    ]
+  },
+  "test_users": [
+    {
+      "username": "testadmin",
+      "display_name": "Test Administrator",
+      "email": "testadmin@localhost"
+    },
+    {
+      "username": "testuser",
+      "display_name": "Test User",
+      "email": "testuser@localhost"
+    }
+  ],
+  "test_scenarios": [
+    {
+      "name": "Basic Registration",
+      "description": "Register a new passkey for a user",
+      "username": "testadmin",
+      "device_name": "Test Device"
+    },
+    {
+      "name": "Basic Authentication",
+      "description": "Authenticate with an existing passkey",
+      "username": "testadmin"
+    },
+    {
+      "name": "Multiple Credentials",
+      "description": "Register multiple passkeys for the same user",
+      "username": "testadmin",
+      "device_names": ["Desktop", "Mobile", "Tablet"]
+    },
+    {
+      "name": "Error Handling",
+      "description": "Test various error conditions",
+      "scenarios": [
+        "Invalid challenge",
+        "Missing credential",
+        "Expired token",
+        "Invalid signature"
+      ]
+    }
+  ],
+  "browser_tests": {
+    "supported_browsers": [
+      "Chrome 67+",
+      "Firefox 60+",
+      "Safari 14+",
+      "Edge 18+"
+    ],
+    "test_urls": [
+      "http://localhost:3000",
+      "http://localhost:80"
+    ],
+    "console_checks": [
+      "WebAuthn API availability",
+      "Secure context status",
+      "Platform authenticator availability",
+      "Conditional mediation support"
+    ]
+  },
+  "server_tests": {
+    "ports": [80, 3000],
+    "endpoints": [
+      "/api/auth/webauthn/register/begin",
+      "/api/auth/webauthn/register/complete",
+      "/api/auth/webauthn/authenticate/begin",
+      "/api/auth/webauthn/authenticate/complete",
+      "/api/auth/logout",
+      "/api/auth/user"
+    ],
+    "database_checks": [
+      "User creation",
+      "Credential storage",
+      "Challenge management",
+      "Session handling"
+    ]
+  }
+}

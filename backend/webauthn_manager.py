@@ -49,8 +49,9 @@ class WebAuthnManager:
         self.db = AuthDatabase()
         self.jwt_secret = self._get_jwt_secret()
         
-        # Cleanup expired sessions on startup
+        # Cleanup expired sessions and challenges on startup
         self.db.cleanup_expired_sessions()
+        self.db.cleanup_expired_challenges()
         
         logger.info(f"WebAuthn Manager initialized - RP ID: {self.rp_id}, Origin: {self.origin}")
     
@@ -251,7 +252,7 @@ class WebAuthnManager:
             
             # Store challenge for verification
             challenge_key = f"reg_challenge_{user_id}"
-            self._store_challenge(challenge_key, options.challenge)
+            self._store_challenge(challenge_key, options.challenge, user_id, 'registration')
             
             return {
                 'success': True,
@@ -394,7 +395,7 @@ class WebAuthnManager:
             
             # Store challenge
             challenge_key = f"auth_challenge_{self._base64_to_base64url(options.challenge)[:16]}"
-            self._store_challenge(challenge_key, options.challenge)
+            self._store_challenge(challenge_key, options.challenge, None, 'authentication')
             
             return {
                 'success': True,
@@ -532,36 +533,62 @@ class WebAuthnManager:
                 }
         return None
     
-    def _store_challenge(self, key: str, challenge: bytes):
-        """Store challenge temporarily (in-memory for now)"""
-        # For production, consider using Redis or database
-        if not hasattr(self, '_challenges'):
-            self._challenges = {}
-        
-        self._challenges[key] = {
-            'challenge': challenge,
-            'expires': datetime.utcnow() + timedelta(minutes=10)
-        }
+    def _store_challenge(self, key: str, challenge: bytes, user_id: str = None, challenge_type: str = 'authentication'):
+        """Store challenge in database for multi-process support"""
+        try:
+            # Convert bytes to base64 for storage
+            challenge_b64 = base64.b64encode(challenge).decode('utf-8')
+            
+            # Store in database with 10-minute expiration
+            success = self.db.store_challenge(
+                challenge=challenge_b64,
+                user_id=user_id,
+                challenge_type=challenge_type,
+                expires_in=600  # 10 minutes
+            )
+            
+            if not success:
+                logger.error(f"Failed to store challenge in database")
+                return False
+                
+            return True
+        except Exception as e:
+            logger.error(f"Error storing challenge: {e}")
+            return False
     
     def _get_challenge(self, key: str) -> Optional[bytes]:
-        """Get stored challenge"""
-        if not hasattr(self, '_challenges'):
+        """Get stored challenge from database"""
+        try:
+            challenge_data = self.db.get_challenge(key)
+            if challenge_data:
+                # Convert base64 back to bytes
+                challenge_bytes = base64.b64decode(challenge_data['challenge'])
+                return challenge_bytes
             return None
-        
-        if key in self._challenges:
-            data = self._challenges[key]
-            if datetime.utcnow() < data['expires']:
-                return data['challenge']
-            else:
-                del self._challenges[key]
-        
-        return None
+        except Exception as e:
+            logger.error(f"Error retrieving challenge: {e}")
+            return None
     
     def _remove_challenge(self, key: str):
-        """Remove challenge"""
-        if hasattr(self, '_challenges') and key in self._challenges:
-            del self._challenges[key]
+        """Remove challenge from database"""
+        try:
+            self.db.delete_challenge(key)
+        except Exception as e:
+            logger.error(f"Error removing challenge: {e}")
     
     def get_stats(self) -> Dict[str, Any]:
         """Get authentication statistics"""
-        return self.db.get_auth_stats()
+        stats = self.db.get_auth_stats()
+        
+        # Add challenge statistics
+        try:
+            with self.db._connect() as conn:
+                cursor = conn.cursor()
+                cursor.execute('SELECT COUNT(*) FROM webauthn_challenges WHERE expires_at > CURRENT_TIMESTAMP')
+                active_challenges = cursor.fetchone()[0]
+                stats['active_challenges'] = active_challenges
+        except Exception as e:
+            logger.error(f"Failed to get challenge stats: {e}")
+            stats['active_challenges'] = 0
+        
+        return stats

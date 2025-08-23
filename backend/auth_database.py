@@ -89,6 +89,20 @@ class AuthDatabase:
                     )
                 ''')
                 
+                # WebAuthn challenges table (for multi-process support)
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS webauthn_challenges (
+                        id TEXT PRIMARY KEY,
+                        challenge TEXT UNIQUE NOT NULL,
+                        user_id TEXT,
+                        challenge_type TEXT NOT NULL, -- 'registration' or 'authentication'
+                        expires_at TIMESTAMP NOT NULL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        metadata TEXT, -- JSON for additional data
+                        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+                    )
+                ''')
+                
                 # Create indexes for better performance
                 cursor.execute('CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)')
                 cursor.execute('CREATE INDEX IF NOT EXISTS idx_credentials_user_id ON webauthn_credentials(user_id)')
@@ -96,6 +110,8 @@ class AuthDatabase:
                 cursor.execute('CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON user_sessions(user_id)')
                 cursor.execute('CREATE INDEX IF NOT EXISTS idx_sessions_token_hash ON user_sessions(token_hash)')
                 cursor.execute('CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON user_sessions(expires_at)')
+                cursor.execute('CREATE INDEX IF NOT EXISTS idx_challenges_challenge ON webauthn_challenges(challenge)')
+                cursor.execute('CREATE INDEX IF NOT EXISTS idx_challenges_expires_at ON webauthn_challenges(expires_at)')
                 
                 conn.commit()
                 logger.info("Authentication database tables initialized successfully")
@@ -349,3 +365,74 @@ class AuthDatabase:
         except Exception as e:
             logger.error(f"Failed to get auth stats: {e}")
             return {}
+    
+    # WebAuthn challenge management methods
+    def store_challenge(self, challenge: str, user_id: str = None, challenge_type: str = 'authentication', 
+                       metadata: dict = None, expires_in: int = 600) -> bool:
+        """Store a WebAuthn challenge in the database"""
+        try:
+            with self._connect() as conn:
+                cursor = conn.cursor()
+                expires_at = datetime.now() + timedelta(seconds=expires_in)
+                metadata_json = json.dumps(metadata) if metadata else None
+                
+                cursor.execute('''
+                    INSERT OR REPLACE INTO webauthn_challenges 
+                    (id, challenge, user_id, challenge_type, expires_at, metadata)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                ''', (str(uuid.uuid4()), challenge, user_id, challenge_type, expires_at, metadata_json))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Failed to store challenge: {e}")
+            return False
+    
+    def get_challenge(self, challenge: str) -> Optional[Dict[str, Any]]:
+        """Retrieve a WebAuthn challenge from the database"""
+        try:
+            with self._connect() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT * FROM webauthn_challenges 
+                    WHERE challenge = ? AND expires_at > CURRENT_TIMESTAMP
+                ''', (challenge,))
+                row = cursor.fetchone()
+                if row:
+                    result = dict(row)
+                    if result.get('metadata'):
+                        try:
+                            result['metadata'] = json.loads(result['metadata'])
+                        except json.JSONDecodeError:
+                            result['metadata'] = {}
+                    return result
+                return None
+        except Exception as e:
+            logger.error(f"Failed to get challenge: {e}")
+            return None
+    
+    def delete_challenge(self, challenge: str) -> bool:
+        """Delete a WebAuthn challenge from the database"""
+        try:
+            with self._connect() as conn:
+                cursor = conn.cursor()
+                cursor.execute('DELETE FROM webauthn_challenges WHERE challenge = ?', (challenge,))
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Failed to delete challenge: {e}")
+            return False
+    
+    def cleanup_expired_challenges(self) -> int:
+        """Remove expired challenges"""
+        try:
+            with self._connect() as conn:
+                cursor = conn.cursor()
+                cursor.execute('DELETE FROM webauthn_challenges WHERE expires_at < CURRENT_TIMESTAMP')
+                deleted_count = cursor.rowcount
+                conn.commit()
+                if deleted_count > 0:
+                    logger.info(f"Cleaned up {deleted_count} expired challenges")
+                return deleted_count
+        except Exception as e:
+            logger.error(f"Failed to cleanup expired challenges: {e}")
+            return 0

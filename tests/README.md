@@ -4,12 +4,6 @@ This directory contains comprehensive tests for the WebAuthn (passkey) implement
 
 ## 🚀 Quick Start
 
-### Windows
-```cmd
-cd tests
-quick_test.bat
-```
-
 ### Linux/macOS
 ```bash
 cd tests
@@ -29,9 +23,6 @@ chmod +x *.sh
 
 ### 1. Setup Environment (First Time)
 ```bash
-# Windows
-setup_venv.bat
-
 # Linux/macOS
 ./setup_venv.sh
 ```
@@ -39,8 +30,7 @@ setup_venv.bat
 ### 2. Run Simple Tests
 ```bash
 # Activate virtual environment first
-..\backend\venv\Scripts\activate.bat  # Windows
-source ../backend/venv/bin/activate    # Linux/macOS
+source ../backend/venv/bin/activate
 
 # Run tests
 python test_webauthn_simple.py
@@ -98,11 +88,10 @@ python run_webauthn_tests.py --browser
 ### Virtual Environment Issues
 ```bash
 # Remove and recreate
-rmdir /s /q ..\backend\venv  # Windows
-rm -rf ../backend/venv        # Linux/macOS
+rm -rf ../backend/venv
 
 # Then run setup again
-setup_venv.bat  # or setup_venv.sh
+./setup_venv.sh
 ```
 
 ### Dependency Issues

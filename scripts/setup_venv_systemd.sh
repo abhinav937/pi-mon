@@ -67,7 +67,28 @@ if [[ "$EUID" -ne 0 ]]; then
 fi
 
 command -v python3 >/dev/null 2>&1 || { echo "python3 not found" >&2; exit 1; }
-command -v npm >/dev/null 2>&1 || { echo "npm not found (install Node 18+)" >&2; exit 1; }
+
+# Install Node.js if not present
+if ! command -v npm >/dev/null 2>&1; then
+    if [[ "$QUIET" != "1" ]]; then echo "==> Node.js not found. Installing Node.js 18+..."; fi
+    
+    # Add NodeSource repository for Node.js 18+
+    if [[ "$QUIET" = "1" ]]; then
+        curl -fsSL https://deb.nodesource.com/setup_18.x | bash - >/dev/null 2>&1
+        apt-get install -y -qq nodejs >/dev/null 2>&1
+    else
+        curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
+        apt-get install -y -qq nodejs
+    fi
+    
+    # Verify installation
+    if ! command -v npm >/dev/null 2>&1; then
+        echo "ERROR: Failed to install Node.js/npm" >&2
+        exit 1
+    fi
+    
+    if [[ "$QUIET" != "1" ]]; then echo "==> Node.js $(node --version) and npm $(npm --version) installed successfully"; fi
+fi
 
 # Check if setup is already complete (unless --force is used)
 SETUP_MARKER="$APP_DIR/.setup_complete"

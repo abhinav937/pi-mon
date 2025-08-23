@@ -40,10 +40,17 @@ fi
 PYTHON_VERSION=$(python3 --version 2>&1 | grep -oP '\d+\.\d+' | head -1)
 print_status "Python version: $PYTHON_VERSION"
 
-if [ "$(echo "$PYTHON_VERSION >= 3.8" | bc -l)" -eq 0 ]; then
+# Extract major and minor version numbers
+MAJOR_VERSION=$(echo $PYTHON_VERSION | cut -d. -f1)
+MINOR_VERSION=$(echo $PYTHON_VERSION | cut -d. -f2)
+
+# Check if Python version is 3.8 or higher
+if [ "$MAJOR_VERSION" -lt 3 ] || ([ "$MAJOR_VERSION" -eq 3 ] && [ "$MINOR_VERSION" -lt 8 ]); then
     print_error "Python 3.8+ is required. Found: $PYTHON_VERSION"
     exit 1
 fi
+
+print_success "Python version $PYTHON_VERSION is compatible"
 
 # Check if virtual environment already exists
 if [ -d "../backend/venv" ]; then

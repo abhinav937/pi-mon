@@ -45,6 +45,15 @@ def install_dependencies():
     print("📦 Installing dependencies...")
     
     try:
+        # Check if we're in a virtual environment
+        if hasattr(sys, 'real_prefix') or (hasattr(sys, 'base_prefix') and sys.base_prefix != sys.prefix):
+            print("✅ Virtual environment detected")
+        else:
+            print("⚠️  No virtual environment detected")
+            print("   Please activate your virtual environment first:")
+            print("   source backend/venv/bin/activate  # or wherever your venv is")
+            return False
+        
         subprocess.run([
             sys.executable, "-m", "pip", "install", 
             "webauthn>=1.11.0", "cbor2>=5.4.6", "pyjwt>=2.8.0"
